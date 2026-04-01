@@ -79,8 +79,8 @@ jobs:
           # Fix: Move Release contents to correct location
           # The tarball has Release/lib and Release/JavaScriptCore, but we need them in WebKitBuild/
           if [ -d "vendor/WebKit/WebKitBuild/Release" ]; then
-            mv vendor/WebKit/WebKitBuild/Release/* vendor/WebKit/WebKitBuild/
-            rmdir vendor/WebKit/WebKitBuild/Release
+            cp -r vendor/WebKit/WebKitBuild/Release/* vendor/WebKit/WebKitBuild/
+            rm -rf vendor/WebKit/WebKitBuild/Release
           fi
 
           # Check what we have
