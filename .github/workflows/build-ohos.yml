@@ -67,6 +67,15 @@ jobs:
           mkdir -p cmake/sources
           bun run glob-sources
 
+      - name: Clone WebKit (required for OHOS local build)
+        run: |
+          # OHOS has no prebuilt WebKit, must build from source
+          # vendor/WebKit is a separate repo not tracked in bun's git
+          WEBKIT_VERSION="fc9f2fa7272fec64905df6a9c78e15d7912f14ca"
+          git clone --depth 1 --branch autobuild-${WEBKIT_VERSION} \
+            https://github.com/oven-sh/WebKit.git vendor/WebKit
+          cd vendor/WebKit && git checkout ${WEBKIT_VERSION}
+
       - name: Configure build
         run: |
           cmake -B build/ohos-release -G Ninja \
