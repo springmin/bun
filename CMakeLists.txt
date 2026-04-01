@@ -38,6 +38,14 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 include(Options)
 include(CompilerFlags)
 
+# For OHOS cross-compilation, add the toolchain compilers to CMAKE_ARGS
+# This must happen after project() because toolchain is loaded during project()
+if(OHOS_BUILD)
+    message(STATUS "Adding OHOS compilers to CMAKE_ARGS for dependency builds")
+    list(APPEND CMAKE_ARGS -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER})
+    list(APPEND CMAKE_ARGS -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER})
+endif()
+
 # --- Tools ---
 
 include(SetupGit)

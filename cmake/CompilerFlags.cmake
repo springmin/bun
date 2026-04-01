@@ -114,20 +114,21 @@ elseif(APPLE)
 endif()
 
 if(UNIX)
-  # Nix LLVM doesn't support zstd compression, use zlib instead
-  if(DEFINED ENV{NIX_CC})
-    register_compiler_flags(
-      DESCRIPTION "Enable debug symbols (zlib-compressed for Nix)"
-      -g3 -gz=zlib ${DEBUG}
-      -g1 ${RELEASE}
-    )
-  else()
-    register_compiler_flags(
-      DESCRIPTION "Enable debug symbols (zstd-compressed)"
-      -g3 -gz=zstd ${DEBUG}
-      -g1 ${RELEASE}
-    )
-  endif()
+# Nix LLVM doesn't support zstd compression, use zlib instead
+# OHOS SDK LLVM 15 doesn't support zstd compression either
+if(DEFINED ENV{NIX_CC} OR OHOS_BUILD)
+register_compiler_flags(
+DESCRIPTION "Enable debug symbols (zlib-compressed for Nix/OHOS)"
+-g3 -gz=zlib ${DEBUG}
+-g1 ${RELEASE}
+)
+else()
+register_compiler_flags(
+DESCRIPTION "Enable debug symbols (zstd-compressed)"
+-g3 -gz=zstd ${DEBUG}
+-g1 ${RELEASE}
+)
+endif()
 
   register_compiler_flags(
     DESCRIPTION "Optimize debug symbols for LLDB"
@@ -180,13 +181,21 @@ if(UNIX)
     -fno-asynchronous-unwind-tables
   )
 
-  # needed for libuv stubs because they use
-  # C23 feature which lets you define parameter without
-  # name
-  register_compiler_flags(
-    DESCRIPTION "Allow C23 extensions"
-    -Wno-c23-extensions
-  )
+# needed for libuv stubs because they use
+# C23 feature which lets you define parameter without
+# name
+# OHOS SDK Clang 15 uses -Wno-c2x-extensions instead of -Wno-c23-extensions
+if(OHOS_BUILD)
+register_compiler_flags(
+DESCRIPTION "Allow C23 extensions (OHOS compatible)"
+-Wno-c2x-extensions
+)
+else()
+register_compiler_flags(
+DESCRIPTION "Allow C23 extensions"
+-Wno-c23-extensions
+)
+endif()
 endif()
 
 register_compiler_flags(

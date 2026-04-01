@@ -680,6 +680,22 @@ fn getTranslateC(b: *Build, initial_target: std.Build.ResolvedTarget, optimize: 
 
     translate_c.addIncludePath(b.path("vendor/zstd/lib"));
 
+    // For OHOS cross-compilation, add sysroot include paths
+    if (target.result.os.tag == .linux and target.result.abi == .ohos) {
+        // Check for OHOS SDK path from environment
+        if (b.graph.env_map.get("OHOS_SDK_NATIVE")) |ohos_sdk| {
+            const sysroot = b.pathJoin(&.{ ohos_sdk, "sysroot" });
+            translate_c.addSystemIncludePath(.{ .cwd_relative = b.pathJoin(&.{ sysroot, "usr", "include" }) });
+            translate_c.addSystemIncludePath(.{ .cwd_relative = b.pathJoin(&.{ sysroot, "usr", "include", "aarch64-linux-ohos" }) });
+        } else if (b.graph.env_map.get("HOME")) |home| {
+            // Default OHOS SDK path
+            const default_sdk = b.pathJoin(&.{ home, "hmos-tools", "sdk", "default", "openharmony", "native" });
+            const sysroot = b.pathJoin(&.{ default_sdk, "sysroot" });
+            translate_c.addSystemIncludePath(.{ .cwd_relative = b.pathJoin(&.{ sysroot, "usr", "include" }) });
+            translate_c.addSystemIncludePath(.{ .cwd_relative = b.pathJoin(&.{ sysroot, "usr", "include", "aarch64-linux-ohos" }) });
+        }
+    }
+
     if (target.result.os.tag == .windows) {
         // translate-c is unable to translate the unsuffixed windows functions
         // like `SetCurrentDirectory` since they are defined with an odd macro

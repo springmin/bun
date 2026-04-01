@@ -712,7 +712,9 @@ pub fn GlobWalker_(
                 var iterator = Accessor.DirIter.iterate(fd);
                 if (comptime isWindows) {
                     if (@hasDecl(Accessor.DirIter, "setNameFilter")) {
-                        iterator.setNameFilter(this.computeNtFilter(component_idx));
+                        // Get the first active component index for NT filter
+                        const idx: u32 = @intCast(active.findFirstSet().?);
+                        iterator.setNameFilter(this.computeNtFilter(idx));
                     }
                 }
                 this.iter_state.directory.iter = iterator;

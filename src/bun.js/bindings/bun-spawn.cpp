@@ -64,12 +64,11 @@ static inline void closeRangeLoop(int start, int end, bool cloexec_only)
 // Platform-specific close range implementation
 static inline void closeRangeOrLoop(int start, int end, bool cloexec_only)
 {
-#if OS(LINUX)
+#if OS(LINUX) && !defined(__OHOS__)
     unsigned int flags = cloexec_only ? CLOSE_RANGE_CLOEXEC : 0;
     if (bun_close_range(start, end, flags) == 0) {
         return;
     }
-    // Fallback for older kernels or when close_range fails
 #endif
     closeRangeLoop(start, end, cloexec_only);
 }
@@ -114,14 +113,17 @@ static inline void rawExit(int status)
 }
 
 extern "C" ssize_t posix_spawn_bun(
-    int* pid,
-    const char* path,
-    const bun_spawn_request_t* request,
-    char* const argv[],
-    char* const envp[])
+int* pid,
+const char* path,
+const bun_spawn_request_t* request,
+char* const argv[],
+char* const envp[])
 {
-    sigset_t blockall, oldmask;
-    int res = 0, cs = 0;
+sigset_t blockall, oldmask;
+int res = 0;
+#if !defined(__OHOS__)
+int cs = 0;
+#endif
 
 #if OS(DARWIN)
     // On macOS, we use fork() which requires a self-pipe trick to detect exec failures.
@@ -136,9 +138,12 @@ extern "C" ssize_t posix_spawn_bun(
     fcntl(errpipe[1], F_SETFD, FD_CLOEXEC);
 #endif
 
-    sigfillset(&blockall);
-    sigprocmask(SIG_SETMASK, &blockall, &oldmask);
-    pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &cs);
+sigfillset(&blockall);
+sigprocmask(SIG_SETMASK, &blockall, &oldmask);
+// pthread_setcancelstate is a glibc extension, not available in musl/OHOS
+#if !defined(__OHOS__)
+pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &cs);
+#endif
 
 #if OS(LINUX)
     // On Linux, use vfork() for performance. The parent is suspended until
@@ -365,8 +370,10 @@ extern "C" ssize_t posix_spawn_bun(
     }
 #endif
 
-    sigprocmask(SIG_SETMASK, &oldmask, 0);
-    pthread_setcancelstate(cs, 0);
+sigprocmask(SIG_SETMASK, &oldmask, 0);
+#if !defined(__OHOS__)
+pthread_setcancelstate(cs, 0);
+#endif
 
     return res;
 }

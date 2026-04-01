@@ -12,6 +12,11 @@
 #include "BufferEncodingType.h"
 #include "JavaScriptCore/JSCJSValue.h"
 
+#if defined(__OHOS__)
+// OHOS SDK requires explicit template instantiation declaration
+extern template class JSC::JSGenericTypedArrayView<JSC::Uint8Adaptor>;
+#endif
+
 #include "JSBuffer.h"
 
 #include "JavaScriptCore/ArgList.h"

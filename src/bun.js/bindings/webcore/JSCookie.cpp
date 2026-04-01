@@ -617,15 +617,15 @@ JSC_DEFINE_HOST_FUNCTION(jsCookieStaticFunctionSerialize, (JSGlobalObject * lexi
 
     // Process each cookie argument
     for (unsigned i = 0; i < callFrame->argumentCount(); i++) {
-        auto* cookieImpl = toCookieWrapped(lexicalGlobalObject, throwScope, callFrame->uncheckedArgument(i));
-        RETURN_IF_EXCEPTION(throwScope, {});
+auto* cookieImpl = toCookieWrapped(lexicalGlobalObject, throwScope, callFrame->uncheckedArgument(i));
+RETURN_IF_EXCEPTION(throwScope, {});
 
-        if (cookieImpl)
-            cookies.append(*cookieImpl);
-    }
+if (cookieImpl)
+cookies.append(*cookieImpl);
+}
 
-    // Let the C++ Cookie::serialize handle the work
-    String result = Cookie::serialize(vm, cookies);
+// Let the C++ Cookie::serialize handle the work
+String result = Cookie::serialize(vm, cookies.span());
 
     return JSValue::encode(jsString(vm, result));
 }

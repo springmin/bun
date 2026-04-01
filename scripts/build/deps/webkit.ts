@@ -53,6 +53,7 @@ import { type Dependency, type NestedCmakeBuild, type Source, depBuildDir, depSo
 function prebuiltSuffix(cfg: Config): string {
   let s = "";
   if (cfg.linux && cfg.abi === "musl") s += "-musl";
+  // OHOS doesn't have prebuilt WebKit, must build locally
   // Baseline WebKit artifacts (-march=nehalem, /arch:SSE2 ICU) exist for
   // Linux amd64 (glibc + musl) and Windows amd64. No baseline variant for
   // arm64 or macOS. Suffix order matches the release asset names:
@@ -71,6 +72,19 @@ function prebuiltUrl(cfg: Config): string {
   const version = cfg.webkitVersion;
   const tag = version.startsWith("autobuild-") ? version : `autobuild-${version}`;
   return `https://github.com/oven-sh/WebKit/releases/download/${tag}/${name}.tar.gz`;
+}
+
+/**
+ * Check if this is an OHOS build (no prebuilt available)
+ */
+export function isOhosBuild(cfg: Config): boolean {
+  return (
+    cfg.linux &&
+    cfg.abi === "musl" &&
+    (process.env.OHOS_BUILD === "true" ||
+      process.env.OHOS_SDK_NATIVE !== undefined ||
+      process.env.HOME?.includes("hmos-tools"))
+  );
 }
 
 /**
@@ -151,6 +165,11 @@ export const webkit: Dependency = {
   versionMacro: "WEBKIT",
 
   source: cfg => {
+    // OHOS requires local WebKit build (no prebuilt available)
+    if (isOhosBuild(cfg)) {
+      return { kind: "local" };
+    }
+
     if (cfg.webkit === "prebuilt") {
       const src: Source = {
         kind: "prebuilt",

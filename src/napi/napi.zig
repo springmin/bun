@@ -1999,11 +1999,17 @@ const V8API = if (!bun.Environment.isWindows) struct {
 };
 
 /// V8 API functions whose mangled name differs between Linux and macOS
+/// macOS uses libc++ (NSt3__1), glibc Linux uses libstdc++ (St),
+/// and musl/OHOS also uses libc++ but with different namespace (NSt4__n1)
 const posix_platform_specific_v8_apis = switch (bun.Environment.os) {
     .mac => struct {
         pub extern fn _ZN2v85Array3NewENS_5LocalINS_7ContextEEEmNSt3__18functionIFNS_10MaybeLocalINS_5ValueEEEvEEE() *anyopaque;
     },
-    .linux => struct {
+    .linux => if (bun.Environment.isMusl) struct {
+        // OHOS uses libc++ with NSt4__n1 namespace (not the usual NSt3__1)
+        pub extern fn _ZN2v85Array3NewENS_5LocalINS_7ContextEEEmNSt4__n18functionIFNS_10MaybeLocalINS_5ValueEEEvEEE() *anyopaque;
+    } else struct {
+        // glibc uses libstdc++ with St prefix
         pub extern fn _ZN2v85Array3NewENS_5LocalINS_7ContextEEEmSt8functionIFNS_10MaybeLocalINS_5ValueEEEvEE() *anyopaque;
     },
     .windows => struct {},

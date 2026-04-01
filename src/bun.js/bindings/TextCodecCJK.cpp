@@ -848,27 +848,27 @@ static const std::array<std::pair<uint32_t, char32_t>, 207>& gb18030Ranges()
 // https://encoding.spec.whatwg.org/#index-gb18030-ranges-code-point
 static std::optional<char32_t> gb18030RangesCodePoint(uint32_t pointer)
 {
-    if ((pointer > 39419 && pointer < 189000) || pointer > 1237575)
-        return std::nullopt;
-    if (pointer == 7457)
-        return 0xE7C7;
-    auto& ranges = gb18030Ranges();
-    auto upperBound = std::ranges::upper_bound(ranges, makeFirstAdapter(pointer), CompareFirst {});
-    ASSERT(upperBound != ranges.begin());
-    auto [offset, codePointOffset] = ranges[upperBound - ranges.begin() - 1];
-    return codePointOffset + pointer - offset;
+if ((pointer > 39419 && pointer < 189000) || pointer > 1237575)
+return std::nullopt;
+if (pointer == 7457)
+return 0xE7C7;
+auto& ranges = gb18030Ranges();
+auto upperBound = std::upper_bound(ranges.begin(), ranges.end(), makeFirstAdapter(pointer), CompareFirst {});
+ASSERT(upperBound != ranges.begin());
+auto [offset, codePointOffset] = ranges[upperBound - ranges.begin() - 1];
+return codePointOffset + pointer - offset;
 }
 
 // https://encoding.spec.whatwg.org/#index-gb18030-ranges-pointer
 static uint32_t gb18030RangesPointer(char32_t codePoint)
 {
-    if (codePoint == 0xE7C7)
-        return 7457;
-    auto& ranges = gb18030Ranges();
-    auto upperBound = std::ranges::upper_bound(ranges, makeSecondAdapter(codePoint), CompareSecond {});
-    ASSERT(upperBound != ranges.begin());
-    auto [pointerOffset, offset] = ranges[upperBound - ranges.begin() - 1];
-    return pointerOffset + codePoint - offset;
+if (codePoint == 0xE7C7)
+return 7457;
+auto& ranges = gb18030Ranges();
+auto upperBound = std::upper_bound(ranges.begin(), ranges.end(), makeSecondAdapter(codePoint), CompareSecond {});
+ASSERT(upperBound != ranges.begin());
+auto [pointerOffset, offset] = ranges[upperBound - ranges.begin() - 1];
+return pointerOffset + codePoint - offset;
 }
 
 using GB18030EncodeIndex = std::array<std::pair<char16_t, uint16_t>, 23940>;

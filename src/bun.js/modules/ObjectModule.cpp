@@ -15,13 +15,14 @@ generateObjectModuleSourceCode(JSC::JSGlobalObject* globalObject,
         GlobalObject* globalObject = defaultGlobalObject(lexicalGlobalObject);
         JSC::EnsureStillAliveScope stillAlive(object);
 
-        PropertyNameArrayBuilder properties(vm, PropertyNameMode::Strings,
-            PrivateSymbolMode::Exclude);
-        object->methodTable()->getOwnPropertyNames(object, globalObject, properties, DontEnumPropertiesMode::Exclude);
-        RETURN_IF_EXCEPTION(throwScope, void());
-        gcUnprotectNullTolerant(object);
+PropertyNameArrayBuilder properties(vm, PropertyNameMode::Strings,
+PrivateSymbolMode::Exclude);
+object->methodTable()->getOwnPropertyNames(object, globalObject, properties, DontEnumPropertiesMode::Exclude);
+RETURN_IF_EXCEPTION(throwScope, void());
+gcUnprotectNullTolerant(object);
 
-        for (auto& entry : properties.releaseData()->propertyNameVector()) {
+auto propertyData = properties.releaseData();
+for (auto& entry : propertyData->propertyNameVector()) {
             exportNames.append(entry);
 
             auto scope = DECLARE_TOP_EXCEPTION_SCOPE(vm);
@@ -51,14 +52,15 @@ generateObjectModuleSourceCodeForJSON(JSC::JSGlobalObject* globalObject,
 
         PropertyNameArrayBuilder properties(vm, PropertyNameMode::Strings,
             PrivateSymbolMode::Exclude);
-        object->getPropertyNames(globalObject, properties, DontEnumPropertiesMode::Exclude);
-        RETURN_IF_EXCEPTION(scope, {});
-        gcUnprotectNullTolerant(object);
+object->getPropertyNames(globalObject, properties, DontEnumPropertiesMode::Exclude);
+RETURN_IF_EXCEPTION(scope, {});
+gcUnprotectNullTolerant(object);
 
-        exportNames.append(vm.propertyNames->defaultKeyword);
-        exportValues.append(object);
+exportNames.append(vm.propertyNames->defaultKeyword);
+exportValues.append(object);
 
-        for (auto& entry : properties.releaseData()->propertyNameVector()) {
+auto propertyData = properties.releaseData();
+for (auto& entry : propertyData->propertyNameVector()) {
             if (entry == vm.propertyNames->defaultKeyword) {
                 continue;
             }

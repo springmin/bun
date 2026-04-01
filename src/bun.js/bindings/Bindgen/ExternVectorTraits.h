@@ -47,7 +47,7 @@ template<typename T, typename OverflowHandler, std::size_t minCapacity>
 struct ExternTraits<WTF::Vector<T, 0, OverflowHandler, minCapacity, MimallocMalloc>> {
 private:
     using CPPType = WTF::Vector<T, 0, OverflowHandler, minCapacity, MimallocMalloc>;
-    using ExternElement = ExternTraits<T>::ExternType;
+    using ExternElement = typename ExternTraits<T>::ExternType;
 
 public:
     using ExternType = ExternVector<ExternElement>;

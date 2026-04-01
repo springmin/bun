@@ -13,10 +13,12 @@ namespace Bun {
 using namespace JSC;
 using namespace WebCore;
 
-typedef struct {
-    /// The result of call to dlopen to load the module
-    void* dlopenHandle;
-} NapiModuleMeta;
+struct NapiModuleMeta {
+/// The result of call to dlopen to load the module
+void* dlopenHandle;
+
+NapiModuleMeta(void* handle) : dlopenHandle(handle) { }
+};
 
 class NapiExternal : public JSC::JSDestructibleObject {
     using Base = JSC::JSDestructibleObject;

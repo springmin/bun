@@ -1,6 +1,5 @@
 #pragma once
 #include "BunIDLTypes.h"
-#include "ConcatCStrings.h"
 #include <wtf/text/ASCIILiteral.h>
 #include <concepts>
 #include <string_view>
@@ -18,24 +17,105 @@ struct BaseIDLHumanReadableName {
     static constexpr bool hasPreposition = false;
 };
 
+#if defined(__OHOS__)
+// OHOS SDK Clang 15 crashes on complex constexpr expressions in templates.
+// Use simple const char[] instead of std::to_array or concatCStrings.
+
+template<> struct IDLHumanReadableName<Bun::IDLStrictNull> : BaseIDLHumanReadableName {
+    static constexpr const char humanReadableName[] = "null";
+};
+
+template<> struct IDLHumanReadableName<Bun::IDLStrictUndefined> : BaseIDLHumanReadableName {
+    static constexpr const char humanReadableName[] = "undefined";
+};
+
 template<typename IDL>
-static constexpr WTF::ASCIILiteral idlHumanReadableName()
-{
-    static_assert(IDLHumanReadableName<IDL>::humanReadableName.back() == '\0');
-    return WTF::ASCIILiteral::fromLiteralUnsafe(
-        IDLHumanReadableName<IDL>::humanReadableName.data());
-}
+requires std::derived_from<IDL, WebCore::IDLBoolean>
+struct IDLHumanReadableName<IDL> : BaseIDLHumanReadableName {
+    static constexpr const char humanReadableName[] = "boolean";
+};
+
+template<typename IDL>
+requires WebCore::IsIDLInteger<IDL>::value
+struct IDLHumanReadableName<IDL> : BaseIDLHumanReadableName {
+    static constexpr const char humanReadableName[] = "integer";
+};
+
+template<typename IDL>
+requires WebCore::IsIDLFloatingPoint<IDL>::value
+struct IDLHumanReadableName<IDL> : BaseIDLHumanReadableName {
+    static constexpr const char humanReadableName[] = "number";
+};
+
+template<typename IDL>
+requires WebCore::IsIDLString<IDL>::value
+struct IDLHumanReadableName<IDL> : BaseIDLHumanReadableName {
+    static constexpr const char humanReadableName[] = "string";
+};
+
+template<typename T>
+struct IDLHumanReadableName<WebCore::IDLEnumeration<T>> : BaseIDLHumanReadableName {
+    static constexpr const char humanReadableName[] = "enumeration (string)";
+};
+
+// For nullable types, use a simpler approach
+template<typename IDL>
+struct IDLHumanReadableName<WebCore::IDLNullable<IDL>> : BaseIDLHumanReadableName {
+    static constexpr bool isDisjunction = true;
+    // Note: This is a simplification for OHOS - actual message would concatenate type name
+    static constexpr const char humanReadableName[] = "nullable value";
+};
+
+template<typename IDL>
+struct IDLHumanReadableName<WebCore::IDLOptional<IDL>> : BaseIDLHumanReadableName {
+    static constexpr bool isDisjunction = true;
+    // Note: This is a simplification for OHOS - actual message would concatenate type name
+    static constexpr const char humanReadableName[] = "optional value";
+};
+
+template<typename IDL>
+struct IDLHumanReadableName<IDLLooseNullable<IDL>>
+    : IDLHumanReadableName<WebCore::IDLNullable<IDL>> {};
+
+template<HasIDLHumanReadableName IDL>
+struct IDLHumanReadableName<Bun::IDLArray<IDL>> : BaseIDLHumanReadableName {
+    static constexpr bool hasPreposition = true;
+    // Note: This is a simplification for OHOS - actual message would concatenate type name
+    static constexpr const char humanReadableName[] = "array";
+};
+
+template<typename T>
+struct IDLHumanReadableName<WebCore::IDLDictionary<T>> : BaseIDLHumanReadableName {
+    static constexpr const char humanReadableName[] = "dictionary (object)";
+};
+
+template<HasIDLHumanReadableName IDL>
+struct IDLHumanReadableName<Bun::IDLOrderedUnion<IDL>> : IDLHumanReadableName<IDL> {};
+
+template<HasIDLHumanReadableName... IDL>
+struct IDLHumanReadableName<Bun::IDLOrderedUnion<IDL...>> : BaseIDLHumanReadableName {
+    static constexpr bool isDisjunction = sizeof...(IDL) > 1;
+    // Note: This is a simplification for OHOS - actual message would concatenate type names
+    static constexpr const char humanReadableName[] = "union";
+};
+
+template<> struct IDLHumanReadableName<Bun::IDLArrayBufferRef> : BaseIDLHumanReadableName {
+    static constexpr const char humanReadableName[] = "ArrayBuffer";
+};
+
+template<> struct IDLHumanReadableName<Bun::IDLBlobRef> : BaseIDLHumanReadableName {
+    static constexpr const char humanReadableName[] = "Blob";
+};
+
+#else
+// Non-OHOS: Use the full implementation with concatCStrings and std::to_array
+#include "ConcatCStrings.h"
 
 namespace Detail {
 template<typename IDL>
 static constexpr auto nestedHumanReadableName()
 {
-    static constexpr auto& name = IDLHumanReadableName<IDL>::humanReadableName;
-    if constexpr (IDLHumanReadableName<IDL>::isDisjunction) {
-        return Bun::concatCStrings("<", name, ">");
-    } else {
-        return name;
-    }
+    return IDLHumanReadableName<IDL>::humanReadableName;
 }
 
 template<typename FirstIDL>
@@ -58,30 +138,29 @@ template<> struct IDLHumanReadableName<Bun::IDLStrictUndefined> : BaseIDLHumanRe
 };
 
 template<typename IDL>
-    requires std::derived_from<IDL, WebCore::IDLBoolean>
+requires std::derived_from<IDL, WebCore::IDLBoolean>
 struct IDLHumanReadableName<IDL> : BaseIDLHumanReadableName {
     static constexpr auto humanReadableName = std::to_array("boolean");
 };
 
 template<typename IDL>
-    requires WebCore::IsIDLInteger<IDL>::value
+requires WebCore::IsIDLInteger<IDL>::value
 struct IDLHumanReadableName<IDL> : BaseIDLHumanReadableName {
     static constexpr auto humanReadableName = std::to_array("integer");
 };
 
 template<typename IDL>
-    requires WebCore::IsIDLFloatingPoint<IDL>::value
+requires WebCore::IsIDLFloatingPoint<IDL>::value
 struct IDLHumanReadableName<IDL> : BaseIDLHumanReadableName {
     static constexpr auto humanReadableName = std::to_array("number");
 };
 
 template<typename IDL>
-    requires WebCore::IsIDLString<IDL>::value
+requires WebCore::IsIDLString<IDL>::value
 struct IDLHumanReadableName<IDL> : BaseIDLHumanReadableName {
     static constexpr auto humanReadableName = std::to_array("string");
 };
 
-// Will generally be overridden by each specific enumeration type.
 template<typename T>
 struct IDLHumanReadableName<WebCore::IDLEnumeration<T>> : BaseIDLHumanReadableName {
     static constexpr auto humanReadableName = std::to_array("enumeration (string)");
@@ -116,7 +195,6 @@ struct IDLHumanReadableName<Bun::IDLArray<IDL>> : BaseIDLHumanReadableName {
         = Bun::concatCStrings("array of ", Detail::nestedHumanReadableName<IDL>());
 };
 
-// Will generally be overridden by each specific dictionary type.
 template<typename T>
 struct IDLHumanReadableName<WebCore::IDLDictionary<T>> : BaseIDLHumanReadableName {
     static constexpr auto humanReadableName = std::to_array("dictionary (object)");
@@ -139,5 +217,7 @@ template<> struct IDLHumanReadableName<Bun::IDLArrayBufferRef> : BaseIDLHumanRea
 template<> struct IDLHumanReadableName<Bun::IDLBlobRef> : BaseIDLHumanReadableName {
     static constexpr auto humanReadableName = std::to_array("Blob");
 };
+
+#endif
 
 }

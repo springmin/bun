@@ -123,9 +123,9 @@ NodeVMSourceTextModule* NodeVMSourceTextModule::create(VM& vm, JSGlobalObject* g
     }
 
     ptr->m_cachedExecutable.set(vm, ptr, executable);
-    LexicallyScopedFeatures lexicallyScopedFeatures = globalObject->globalScopeExtension() ? TaintedByWithScopeLexicallyScopedFeature : NoLexicallyScopedFeatures;
-    SourceCodeKey key(ptr->sourceCode(), {}, SourceCodeType::ProgramType, lexicallyScopedFeatures, JSParserScriptMode::Classic, DerivedContextType::None, EvalContextType::None, false, {}, std::nullopt);
-    Ref<CachedBytecode> cachedBytecode = CachedBytecode::create(std::span(cachedData), nullptr, {});
+LexicallyScopedFeatures lexicallyScopedFeatures = globalObject->globalScopeExtension() ? TaintedByWithScopeLexicallyScopedFeature : NoLexicallyScopedFeatures;
+SourceCodeKey key(ptr->sourceCode(), {}, SourceCodeType::ProgramType, lexicallyScopedFeatures, JSParserScriptMode::Classic, DerivedContextType::None, EvalContextType::None, false, {}, std::nullopt);
+Ref<CachedBytecode> cachedBytecode = CachedBytecode::create(cachedData.mutableSpan(), nullptr, {});
     RETURN_IF_EXCEPTION(scope, nullptr);
     UnlinkedModuleProgramCodeBlock* unlinkedBlock = decodeCodeBlock<UnlinkedModuleProgramCodeBlock>(vm, key, WTF::move(cachedBytecode));
     RETURN_IF_EXCEPTION(scope, nullptr);
@@ -245,36 +245,34 @@ JSValue NodeVMSourceTextModule::createModuleRecord(JSGlobalObject* globalObject)
 
         WTF::String attributesTypeString = "unknown"_str;
 
-        WTF::HashMap<WTF::String, WTF::String> attributeMap;
-        JSObject* attributesObject = constructEmptyObject(globalObject);
+WTF::HashMap<WTF::String, WTF::String> attributeMap;
+JSObject* attributesObject = constructEmptyObject(globalObject);
 
-        if (request.m_attributes) {
-            JSValue attributesType {};
-            switch (request.m_attributes->type()) {
-                using AttributeType = decltype(request.m_attributes->type());
-                using enum AttributeType;
-            case None:
-                attributesTypeString = "none"_str;
-                attributesType = JSC::jsString(vm, attributesTypeString);
-                break;
-            case JavaScript:
-                attributesTypeString = "javascript"_str;
-                attributesType = JSC::jsString(vm, attributesTypeString);
-                break;
-            case WebAssembly:
-                attributesTypeString = "webassembly"_str;
-                attributesType = JSC::jsString(vm, attributesTypeString);
-                break;
-            case JSON:
-                attributesTypeString = "json"_str;
-                attributesType = JSC::jsString(vm, attributesTypeString);
-                break;
-            default:
-                attributesType = JSC::jsNumber(static_cast<uint8_t>(request.m_attributes->type()));
-                break;
-            }
+if (request.m_attributes) {
+JSValue attributesType {};
+switch (request.m_attributes->type()) {
+case JSC::ScriptFetchParameters::Type::None:
+attributesTypeString = "none"_str;
+attributesType = JSC::jsString(vm, attributesTypeString);
+break;
+case JSC::ScriptFetchParameters::Type::JavaScript:
+attributesTypeString = "javascript"_str;
+attributesType = JSC::jsString(vm, attributesTypeString);
+break;
+case JSC::ScriptFetchParameters::Type::WebAssembly:
+attributesTypeString = "webassembly"_str;
+attributesType = JSC::jsString(vm, attributesTypeString);
+break;
+case JSC::ScriptFetchParameters::Type::JSON:
+attributesTypeString = "json"_str;
+attributesType = JSC::jsString(vm, attributesTypeString);
+break;
+default:
+attributesType = JSC::jsNumber(static_cast<uint8_t>(request.m_attributes->type()));
+break;
+}
 
-            attributeMap.set("type"_s, WTF::move(attributesTypeString));
+attributeMap.set("type"_s, WTF::move(attributesTypeString));
             attributesObject->putDirect(vm, JSC::Identifier::fromString(vm, "type"_s), attributesType);
 
             if (const String& hostDefinedImportType = request.m_attributes->hostDefinedImportType(); !hostDefinedImportType.isEmpty()) {

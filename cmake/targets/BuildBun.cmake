@@ -1,5 +1,10 @@
 include(PathUtils)
 
+# OHOS-specific compile definitions (must be set before target is created)
+if(OHOS_BUILD)
+    add_compile_definitions(__OHOS__)
+endif()
+
 if(DEBUG)
   set(bun bun-debug)
 elseif(ENABLE_ASAN AND ENABLE_VALGRIND)
@@ -866,15 +871,16 @@ set_target_properties(${bun} PROPERTIES
 )
 
 if (NOT WIN32)
-  # Enable precompiled headers
-  # Only enable in these scenarios:
-  # 1. NOT in CI, OR
-  # 2. In CI AND BUN_CPP_ONLY is enabled
-  if(NOT CI OR (CI AND BUN_CPP_ONLY))
-    target_precompile_headers(${bun} PRIVATE
-      "$<$<COMPILE_LANGUAGE:CXX>:${CWD}/src/bun.js/bindings/root.h>"
-    )
-  endif()
+# Enable precompiled headers
+# Only enable in these scenarios:
+# 1. NOT in CI, OR
+# 2. In CI AND BUN_CPP_ONLY is enabled
+# OHOS SDK Clang 15 has issues with PCH, disable for OHOS
+if(NOT OHOS_BUILD AND (NOT CI OR (CI AND BUN_CPP_ONLY)))
+target_precompile_headers(${bun} PRIVATE
+"$<$<COMPILE_LANGUAGE:CXX>:${CWD}/src/bun.js/bindings/root.h>"
+)
+endif()
 endif()
 
 # --- C/C++ Includes ---
@@ -964,6 +970,10 @@ target_compile_definitions(${bun} PRIVATE
   REPORTED_NODEJS_ABI_VERSION=${NODEJS_ABI_VERSION}
 )
 
+if(OHOS_BUILD)
+target_compile_definitions(${bun} PRIVATE __OHOS__)
+endif()
+
 if(DEBUG AND NOT CI)
   target_compile_definitions(${bun} PRIVATE
     BUN_DYNAMIC_JS_LOAD_PATH=\"${BUILD_PATH}/js\"
@@ -1013,34 +1023,46 @@ if(NOT WIN32)
       -Werror=conditional-uninitialized
       -Werror=suspicious-memaccess
       -Werror=int-conversion
-      -Werror=nonnull
-      -Werror=move
-      -Werror=sometimes-uninitialized
-      -Werror=unused
-      -Wno-unused-function
-      -Wno-c++23-lambda-attributes
-      -Wno-nullability-completeness
-      -Wno-character-conversion
-      -Werror
-    )
-  else()
-    # Leave -Werror=unused off in release builds so we avoid errors from being used in ASSERT
-    target_compile_options(${bun} PUBLIC ${LTO_FLAG}
-      -Werror=return-type
-      -Werror=return-stack-address
-      -Werror=implicit-function-declaration
-      -Werror=uninitialized
-      -Werror=conditional-uninitialized
-      -Werror=suspicious-memaccess
-      -Werror=int-conversion
-      -Werror=nonnull
-      -Werror=move
-      -Werror=sometimes-uninitialized
-      -Wno-c++23-lambda-attributes
-      -Wno-nullability-completeness
-      -Wno-character-conversion
-      -Werror
-    )
+-Werror=nonnull
+-Werror=move
+-Werror=sometimes-uninitialized
+-Werror=unused
+-Wno-unused-function
+)
+if(NOT OHOS_BUILD)
+target_compile_options(${bun} PUBLIC
+-Wno-c++23-lambda-attributes
+-Wno-character-conversion
+)
+endif()
+target_compile_options(${bun} PUBLIC
+-Wno-nullability-completeness
+-Werror
+)
+else()
+# Leave -Werror=unused off in release builds so we avoid errors from being used in ASSERT
+target_compile_options(${bun} PUBLIC ${LTO_FLAG}
+-Werror=return-type
+-Werror=return-stack-address
+-Werror=implicit-function-declaration
+-Werror=uninitialized
+-Werror=conditional-uninitialized
+-Werror=suspicious-memaccess
+-Werror=int-conversion
+-Werror=nonnull
+-Werror=move
+-Werror=sometimes-uninitialized
+)
+if(NOT OHOS_BUILD)
+target_compile_options(${bun} PUBLIC
+-Wno-c++23-lambda-attributes
+-Wno-character-conversion
+)
+endif()
+target_compile_options(${bun} PUBLIC
+-Wno-nullability-completeness
+-Werror
+)
 
     if(ENABLE_ASAN)
       target_compile_options(${bun} PUBLIC
@@ -1062,13 +1084,17 @@ if(NOT WIN32)
     endif()
   endif()
 else()
-  target_compile_options(${bun} PUBLIC
-    -Wno-nullability-completeness
-    -Wno-inconsistent-dllimport
-    -Wno-incompatible-pointer-types
-    -Wno-deprecated-declarations
-    -Wno-character-conversion
-  )
+target_compile_options(${bun} PUBLIC
+-Wno-nullability-completeness
+-Wno-inconsistent-dllimport
+-Wno-incompatible-pointer-types
+-Wno-deprecated-declarations
+)
+if(NOT OHOS_BUILD)
+target_compile_options(${bun} PUBLIC
+-Wno-character-conversion
+)
+endif()
 endif()
 
 # --- Linker options ---
@@ -1154,17 +1180,22 @@ if(LINUX)
   endif()
   endif()
 
-  if(NOT ABI STREQUAL "musl")
-    target_link_options(${bun} PUBLIC
-      -static-libstdc++
-      -static-libgcc
-    )
-  else()
-    target_link_options(${bun} PUBLIC
-      -lstdc++
-      -lgcc
-    )
-  endif()
+if(NOT ABI STREQUAL "musl")
+target_link_options(${bun} PUBLIC
+    -static-libstdc++
+    -static-libgcc
+)
+elseif(OHOS_BUILD)
+# OHOS uses LLVM libc++ and clang_rt.builtins instead of libstdc++ and libgcc
+target_link_options(${bun} PUBLIC
+    -lstdc++
+)
+else()
+target_link_options(${bun} PUBLIC
+    -lstdc++
+    -lgcc
+)
+endif()
 
   if (ENABLE_LTO)
     # We are optimizing for size at a slight debug-ability cost
@@ -1337,18 +1368,33 @@ else()
 endif()
 
 if(LINUX)
-  target_link_libraries(${bun} PRIVATE c pthread dl)
+target_link_libraries(${bun} PRIVATE c pthread dl)
 
-  if(USE_STATIC_LIBATOMIC)
+if(NOT OHOS_BUILD)
+if(USE_STATIC_LIBATOMIC)
     target_link_libraries(${bun} PRIVATE libatomic.a)
-  else()
+else()
     target_link_libraries(${bun} PUBLIC libatomic.so)
-  endif()
+endif()
+endif()
 
-  if(WEBKIT_LOCAL)
-    find_package(ICU REQUIRED COMPONENTS data i18n uc)
-    target_link_libraries(${bun} PRIVATE ICU::data ICU::i18n ICU::uc)
-  else()
+if(WEBKIT_LOCAL)
+    if(OHOS_BUILD)
+        # Use OHOS-specific ICU build
+        set(ICU_ROOT "${CMAKE_SOURCE_DIR}/vendor/icu-ohos")
+        set(ICU_INCLUDE_DIR "${ICU_ROOT}/include")
+        set(ICU_LIBRARY_DIR "${ICU_ROOT}/lib")
+        target_include_directories(${bun} PRIVATE ${ICU_INCLUDE_DIR})
+        target_link_libraries(${bun} PRIVATE 
+            ${ICU_LIBRARY_DIR}/libicuuc.a
+            ${ICU_LIBRARY_DIR}/libicui18n.a
+            ${ICU_LIBRARY_DIR}/libicudata.a
+        )
+    else()
+        find_package(ICU REQUIRED COMPONENTS data i18n uc)
+        target_link_libraries(${bun} PRIVATE ICU::data ICU::i18n ICU::uc)
+    endif()
+else()
     target_link_libraries(${bun} PRIVATE ${WEBKIT_LIB_PATH}/libicudata.a)
     target_link_libraries(${bun} PRIVATE ${WEBKIT_LIB_PATH}/libicui18n.a)
     target_link_libraries(${bun} PRIVATE ${WEBKIT_LIB_PATH}/libicuuc.a)

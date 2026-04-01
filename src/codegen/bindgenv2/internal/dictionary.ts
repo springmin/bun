@@ -172,12 +172,21 @@ export function dictionary(
         };
         }
 
-        template<>
-        struct IDLHumanReadableName<::WebCore::IDLDictionary<Bindgen::Generated::${name}>>
-          : BaseIDLHumanReadableName {
-          static constexpr auto humanReadableName
-            = ::std::to_array(${toQuotedLiteral(userFacingName)});
-        };
+#if defined(__OHOS__)
+// OHOS SDK Clang 15 crashes on std::to_array in template specializations
+template<>
+struct IDLHumanReadableName<::WebCore::IDLDictionary<Bindgen::Generated::${name}>>
+: BaseIDLHumanReadableName {
+static constexpr const char humanReadableName[] = ${toQuotedLiteral(userFacingName)};
+};
+#else
+template<>
+struct IDLHumanReadableName<::WebCore::IDLDictionary<Bindgen::Generated::${name}>>
+: BaseIDLHumanReadableName {
+static constexpr auto humanReadableName
+= ::std::to_array(${toQuotedLiteral(userFacingName)});
+};
+#endif
         }
 
         template<> Bun::Bindgen::Generated::${name}
@@ -216,9 +225,9 @@ export function dictionary(
           ::JSC::VM& vm = globalObject.vm();
           auto throwScope = DECLARE_THROW_SCOPE(vm);
           auto ctx = Bun::Bindgen::LiteralConversionContext { ${toASCIILiteral(userFacingName)} };
-          auto* object = value.getObject();
-          if (!object) [[unlikely]] {
-            ctx.throwNotObject(globalObject, throwScope);
+  auto* object = value.getObject();
+  if (!object) {
+    ctx.throwNotObject(globalObject, throwScope);
             return {};
           }
           ::Bun::Bindgen::Generated::${name} result;

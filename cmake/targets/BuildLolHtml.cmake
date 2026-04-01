@@ -28,8 +28,16 @@ endif()
 
 # Explicitly tell cargo to target ARM64 on Windows ARM64
 if(WIN32 AND CMAKE_SYSTEM_PROCESSOR MATCHES "ARM64|aarch64|AARCH64")
-  list(APPEND LOLHTML_BUILD_ARGS --target aarch64-pc-windows-msvc)
-  set(LOLHTML_LIBRARY ${LOLHTML_BUILD_PATH}/aarch64-pc-windows-msvc/${LOLHTML_BUILD_TYPE}/${CMAKE_STATIC_LIBRARY_PREFIX}lolhtml${CMAKE_STATIC_LIBRARY_SUFFIX})
+    list(APPEND LOLHTML_BUILD_ARGS --target aarch64-pc-windows-msvc)
+    set(LOLHTML_LIBRARY ${LOLHTML_BUILD_PATH}/aarch64-pc-windows-msvc/${LOLHTML_BUILD_TYPE}/${CMAKE_STATIC_LIBRARY_PREFIX}lolhtml${CMAKE_STATIC_LIBRARY_SUFFIX})
+endif()
+
+# OHOS: Use aarch64-unknown-linux-ohos target
+if(OHOS_BUILD)
+    set(LOLHTML_TARGET aarch64-unknown-linux-ohos)
+    list(APPEND LOLHTML_BUILD_ARGS --target ${LOLHTML_TARGET})
+    set(LOLHTML_LIBRARY ${LOLHTML_BUILD_PATH}/${LOLHTML_TARGET}/${LOLHTML_BUILD_TYPE}/${CMAKE_STATIC_LIBRARY_PREFIX}lolhtml${CMAKE_STATIC_LIBRARY_SUFFIX})
+    message(STATUS "lolhtml: Building for OHOS target: ${LOLHTML_TARGET}")
 endif()
 
 # Windows requires unwind tables, apparently.

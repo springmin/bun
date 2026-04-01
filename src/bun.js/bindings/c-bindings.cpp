@@ -210,9 +210,17 @@ extern "C" void windows_enable_stdio_inheritance()
 #endif
 
 // close_range is glibc > 2.33, which is very new
+// OHOS note: close_range syscall exists but may not work correctly on OHOS kernel
 extern "C" ssize_t bun_close_range(unsigned int start, unsigned int end, unsigned int flags)
 {
+#ifdef __OHOS__
+    // On OHOS, always return error to force fallback to loop-based close
+    // This avoids potential system call compatibility issues
+    errno = ENOSYS;
+    return -1;
+#else
     return syscall(__NR_close_range, start, end, flags);
+#endif
 }
 
 static void unset_cloexec(int fd)
@@ -225,6 +233,16 @@ static void unset_cloexec(int fd)
     fcntl(fd, F_SETFD, flags);
 }
 
+// Helper function for closing file descriptors via loop (OHOS-safe)
+static void close_range_fallback(unsigned int start, unsigned int end)
+{
+    int maxfd = (end == ~0U) ? sysconf(_SC_OPEN_MAX) : (int)end;
+    if (maxfd < 0 || maxfd > 65536) maxfd = 1024;
+    for (int fd = (int)start; fd < maxfd; fd++) {
+        close(fd);
+    }
+}
+
 extern "C" void on_before_reload_process_linux()
 {
     unset_cloexec(STDIN_FILENO);
@@ -234,7 +252,12 @@ extern "C" void on_before_reload_process_linux()
     // close all file descriptors except stdin, stdout, stderr and possibly IPC.
     // if you're passing additional file descriptors to Bun, you're probably not passing more than 8.
     // If this fails, it's ultimately okay, we're just trying our best to avoid leaking file descriptors.
+#ifdef __OHOS__
+    // Use fallback on OHOS to avoid system call issues
+    close_range_fallback(3, ~0U);
+#else
     bun_close_range(3, ~0U, CLOSE_RANGE_CLOEXEC);
+#endif
 
     // reset all signals to default
     sigset_t signal_set;

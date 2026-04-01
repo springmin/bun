@@ -5,8 +5,14 @@ option(WEBKIT_VERSION "The version of WebKit to use")
 option(WEBKIT_LOCAL "If a local version of WebKit should be used instead of downloading")
 option(WEBKIT_BUILD_TYPE "The build type for local WebKit (defaults to CMAKE_BUILD_TYPE)")
 
+# OHOS must build WebKit locally (no prebuilt available)
+if(OHOS_BUILD AND NOT WEBKIT_LOCAL)
+    set(WEBKIT_LOCAL ON CACHE BOOL "Build WebKit locally for OHOS" FORCE)
+    message(STATUS "OHOS build: Forcing WEBKIT_LOCAL=ON")
+endif()
+
 if(NOT WEBKIT_VERSION)
-  set(WEBKIT_VERSION fc9f2fa7272fec64905df6a9c78e15d7912f14ca)
+set(WEBKIT_VERSION fc9f2fa7272fec64905df6a9c78e15d7912f14ca)
 endif()
 
 
@@ -76,7 +82,7 @@ if(WEBKIT_LOCAL)
   # --- Configure JSC ---
   message(STATUS "Configuring JSC from local WebKit source at ${WEBKIT_SOURCE_DIR}...")
 
-  set(JSC_CMAKE_ARGS
+set(JSC_CMAKE_ARGS
     -S ${WEBKIT_SOURCE_DIR}
     -B ${WEBKIT_PATH}
     -G ${CMAKE_GENERATOR}
@@ -96,28 +102,115 @@ if(WEBKIT_LOCAL)
     -DENABLE_MEDIA_SOURCE=OFF
     -DENABLE_MEDIA_STREAM=OFF
     -DENABLE_WEB_RTC=OFF
-  )
+    -DOHOS_BUILD=${OHOS_BUILD}
+)
 
-  if(WIN32)
+if(WIN32)
     # ICU paths and Windows-specific compiler/linker settings
     list(APPEND JSC_CMAKE_ARGS
-      -DICU_ROOT=${ICU_LOCAL_ROOT}
-      -DICU_LIBRARY=${ICU_LOCAL_ROOT}/lib
-      -DICU_INCLUDE_DIR=${ICU_LOCAL_ROOT}/include
-      -DCMAKE_LINKER=lld-link
+        -DICU_ROOT=${ICU_LOCAL_ROOT}
+        -DICU_LIBRARY=${ICU_LOCAL_ROOT}/lib
+        -DICU_INCLUDE_DIR=${ICU_LOCAL_ROOT}/include
+        -DCMAKE_LINKER=lld-link
     )
     # Static CRT and U_STATIC_IMPLEMENTATION
     if(WEBKIT_BUILD_TYPE STREQUAL "Debug")
-      set(JSC_MSVC_RUNTIME "MultiThreadedDebug")
+        set(JSC_MSVC_RUNTIME "MultiThreadedDebug")
     else()
-      set(JSC_MSVC_RUNTIME "MultiThreaded")
+        set(JSC_MSVC_RUNTIME "MultiThreaded")
     endif()
     list(APPEND JSC_CMAKE_ARGS
-      -DCMAKE_MSVC_RUNTIME_LIBRARY=${JSC_MSVC_RUNTIME}
-      "-DCMAKE_C_FLAGS=/DU_STATIC_IMPLEMENTATION"
-      "-DCMAKE_CXX_FLAGS=/DU_STATIC_IMPLEMENTATION /clang:-fno-c++-static-destructors"
+        -DCMAKE_MSVC_RUNTIME_LIBRARY=${JSC_MSVC_RUNTIME}
+        "-DCMAKE_C_FLAGS=/DU_STATIC_IMPLEMENTATION"
+        "-DCMAKE_CXX_FLAGS=/DU_STATIC_IMPLEMENTATION /clang:-fno-c++-static-destructors"
     )
-  endif()
+elseif(OHOS_BUILD)
+        # OHOS-specific WebKit build configuration
+        # Use system LLVM 21.1.8 for compilation (supports C++20)
+        # Use OHOS SDK libc++ headers (musl compatible) with C++20 features backported
+        set(ICU_OHOS_ROOT "${VENDOR_PATH}/icu-ohos")
+
+        # Determine OHOS SDK path
+        if(NOT DEFINED OHOS_SDK_NATIVE)
+            if(DEFINED ENV{OHOS_SDK_NATIVE})
+                set(OHOS_SDK_NATIVE "$ENV{OHOS_SDK_NATIVE}")
+            else()
+                set(OHOS_SDK_NATIVE "$ENV{HOME}/hmos-tools/sdk/default/openharmony/native")
+            endif()
+        endif()
+
+        # Use system LLVM 21 compiler
+        set(LLVM21_BIN "/usr/lib/llvm-21/bin")
+        set(LLVM21_LIB "/usr/lib/llvm-21/lib/clang/21")
+        set(OHOS_CLANG_C "${LLVM21_BIN}/clang")
+        set(OHOS_CLANG_CXX "${LLVM21_BIN}/clang++")
+
+        # OHOS SDK paths
+        set(OHOS_SYSROOT "${OHOS_SDK_NATIVE}/sysroot")
+        set(OHOS_LIB_DIR "${OHOS_SDK_NATIVE}/llvm/lib/aarch64-linux-ohos")
+        set(OHOS_ARCH_INCLUDE_DIR "${OHOS_SYSROOT}/usr/include/aarch64-linux-ohos")
+        set(OHOS_CXX_INCLUDE_DIR "${OHOS_SDK_NATIVE}/llvm/include/libcxx-ohos/include/c++/v1")
+
+        # LLVM 21 builtin headers
+        set(LLVM21_INCLUDE_DIR "${LLVM21_LIB}/include")
+
+# Compiler flags: target OHOS
+set(OHOS_COMMON_FLAGS "--target=aarch64-linux-ohos -fPIC -stdlib=libc++")
+set(OHOS_INCLUDE_FLAGS "-isystem ${OHOS_CXX_INCLUDE_DIR} -isystem ${LLVM21_INCLUDE_DIR} -isystem ${OHOS_ARCH_INCLUDE_DIR} -isystem ${OHOS_SYSROOT}/usr/include")
+set(OHOS_C_FLAGS "${OHOS_COMMON_FLAGS} ${OHOS_INCLUDE_FLAGS}")
+set(OHOS_CXX_FLAGS "${OHOS_COMMON_FLAGS} -std=c++20 ${OHOS_INCLUDE_FLAGS} -D_LIBCPP_DISABLE_ADDITIONAL_DIAGNOSTICS")
+# Linker flags: use sysroot for cross-compilation
+# Use OHOS SDK resource directory for runtime libraries
+set(OHOS_SDK_RESOURCE_DIR "${OHOS_SDK_NATIVE}/llvm/lib/clang/15.0.4")
+set(OHOS_LINKER_FLAGS "--target=aarch64-linux-ohos --sysroot=${OHOS_SYSROOT} -resource-dir ${OHOS_SDK_RESOURCE_DIR} -L${OHOS_LIB_DIR}")
+
+# Disable sanitizers for OHOS (not available in SDK)
+set(ENABLE_ASAN OFF CACHE BOOL "Disable ASAN for OHOS" FORCE)
+
+# OHOS uses musl libc where pthread is part of libc, not a separate library
+# Override CMake's thread detection to avoid linking -lpthreads
+set(CMAKE_THREAD_LIBS_INIT "" CACHE STRING "No separate pthread library for OHOS/musl" FORCE)
+set(CMAKE_HAVE_PTHREADS_CREATE OFF CACHE BOOL "pthread_create is in libc for OHOS/musl" FORCE)
+
+        # QEMU cross-compiling emulator for running build-time tools
+        # This allows LLIntSettingsExtractor to run on the host while being compiled for OHOS
+        find_program(QEMU_AARCH64 qemu-aarch64)
+        if(QEMU_AARCH64)
+            set(OHOS_CROSSCOMPILING_EMULATOR "${QEMU_AARCH64}")
+            message(STATUS "  Using QEMU for cross-compiling: ${QEMU_AARCH64}")
+        endif()
+
+list(APPEND JSC_CMAKE_ARGS
+-DCMAKE_C_COMPILER=${OHOS_CLANG_C}
+-DCMAKE_CXX_COMPILER=${OHOS_CLANG_CXX}
+-DCMAKE_C_FLAGS=${OHOS_C_FLAGS}
+-DCMAKE_CXX_FLAGS=${OHOS_CXX_FLAGS}
+-DCMAKE_EXE_LINKER_FLAGS=${OHOS_LINKER_FLAGS}
+-DCMAKE_SHARED_LINKER_FLAGS=${OHOS_LINKER_FLAGS}
+-DCMAKE_SYSTEM_NAME=Linux
+-DCMAKE_SYSTEM_PROCESSOR=aarch64
+-DCMAKE_CROSSCOMPILING=ON
+-DCMAKE_CROSSCOMPILING_EMULATOR=${OHOS_CROSSCOMPILING_EMULATOR}
+-DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY
+-DCMAKE_THREAD_LIBS_INIT=""
+-DCMAKE_USE_PTHREADS_INIT=OFF
+-DTHREADS_USE_PTHREADS_WIN32=OFF
+-DTHREADS_PREFER_PTHREAD_FLAG=OFF
+-DICU_ROOT=${ICU_OHOS_ROOT}
+            -DICU_INCLUDE_DIR=${ICU_OHOS_ROOT}/include
+            -DICU_LIBRARY=${ICU_OHOS_ROOT}/lib
+            -DICU_UC_LIBRARIES=${ICU_OHOS_ROOT}/lib/libicuuc.a
+            -DICU_I18N_LIBRARIES=${ICU_OHOS_ROOT}/lib/libicui18n.a
+            -DICU_DATA_LIBRARIES=${ICU_OHOS_ROOT}/lib/libicudata.a
+            -DOHOS_BUILD=${OHOS_BUILD}
+        )
+        message(STATUS "Configured WebKit for OHOS target with LLVM 21 + OHOS libc++")
+        message(STATUS "  C Compiler: ${OHOS_CLANG_C}")
+        message(STATUS "  C++ Compiler: ${OHOS_CLANG_CXX}")
+        message(STATUS "  C++ Standard: C++20")
+        message(STATUS "  libc++ headers: ${OHOS_CXX_INCLUDE_DIR}")
+        message(STATUS "  ICU from: ${ICU_OHOS_ROOT}")
+    endif()
 
   if(ENABLE_ASAN)
     list(APPEND JSC_CMAKE_ARGS -DENABLE_SANITIZERS=address)
@@ -207,7 +300,17 @@ else()
 endif()
 
 if(LINUX AND ABI STREQUAL "musl")
-  set(WEBKIT_SUFFIX "-musl")
+    set(WEBKIT_SUFFIX "-musl")
+endif()
+
+# OHOS-specific WebKit configuration
+if(OHOS_BUILD)
+    # OHOS doesn't have prebuilt WebKit, must build locally
+    message(STATUS "OHOS build detected: WebKit must be built locally")
+    if(NOT WEBKIT_LOCAL)
+        set(WEBKIT_LOCAL ON CACHE BOOL "Build WebKit locally for OHOS" FORCE)
+    endif()
+    set(WEBKIT_SUFFIX "-ohos")
 endif()
 
 # Baseline WebKit artifacts (-march=nehalem, /arch:SSE2 ICU) exist for

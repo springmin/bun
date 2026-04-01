@@ -147,9 +147,9 @@ constructScript(JSGlobalObject* globalObject, CallFrame* callFrame, JSValue newT
         }
         ASSERT(executable);
 
-        JSC::LexicallyScopedFeatures lexicallyScopedFeatures = globalObject->globalScopeExtension() ? JSC::TaintedByWithScopeLexicallyScopedFeature : JSC::NoLexicallyScopedFeatures;
-        JSC::SourceCodeKey key(script->source(), {}, JSC::SourceCodeType::ProgramType, lexicallyScopedFeatures, JSC::JSParserScriptMode::Classic, JSC::DerivedContextType::None, JSC::EvalContextType::None, false, {}, std::nullopt);
-        Ref<JSC::CachedBytecode> cachedBytecode = JSC::CachedBytecode::create(std::span(cachedData), nullptr, {});
+JSC::LexicallyScopedFeatures lexicallyScopedFeatures = globalObject->globalScopeExtension() ? JSC::TaintedByWithScopeLexicallyScopedFeature : JSC::NoLexicallyScopedFeatures;
+JSC::SourceCodeKey key(script->source(), {}, JSC::SourceCodeType::ProgramType, lexicallyScopedFeatures, JSC::JSParserScriptMode::Classic, JSC::DerivedContextType::None, JSC::EvalContextType::None, false, {}, std::nullopt);
+Ref<JSC::CachedBytecode> cachedBytecode = JSC::CachedBytecode::create(cachedData.mutableSpan(), nullptr, {});
         JSC::UnlinkedProgramCodeBlock* unlinkedBlock = JSC::decodeCodeBlock<UnlinkedProgramCodeBlock>(vm, key, WTF::move(cachedBytecode));
 
         if (!unlinkedBlock) {

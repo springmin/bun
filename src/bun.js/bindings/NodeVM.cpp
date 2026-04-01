@@ -157,8 +157,8 @@ JSC::JSFunction* constructAnonymousFunction(JSC::JSGlobalObject* globalObject, c
 
     TriState bytecodeAccepted = TriState::Indeterminate;
 
-    if (!options.cachedData.isEmpty()) {
-        cachedBytecode = CachedBytecode::create(std::span(options.cachedData), nullptr, {});
+if (!options.cachedData.isEmpty()) {
+cachedBytecode = CachedBytecode::create(options.cachedData.mutableSpan(), nullptr, {});
         SourceCodeKey key(sourceCode, {}, JSC::SourceCodeType::ProgramType, lexicallyScopedFeatures, JSC::JSParserScriptMode::Classic, JSC::DerivedContextType::None, JSC::EvalContextType::None, false, {}, std::nullopt);
         unlinkedProgramCodeBlock = JSC::decodeCodeBlock<UnlinkedProgramCodeBlock>(vm, key, *cachedBytecode);
         if (unlinkedProgramCodeBlock == nullptr) {
@@ -1612,9 +1612,9 @@ bool BaseVMOptions::fromJS(JSC::JSGlobalObject* globalObject, JSC::VM& vm, JSC::
     if (!optionsArg.isUndefined()) {
         if (optionsArg.isObject()) {
             options = asObject(optionsArg);
-        } else {
-            auto _ = ERR::INVALID_ARG_TYPE(scope, globalObject, "options"_s, "object"_s, optionsArg);
-            return false;
+} else {
+(void)ERR::INVALID_ARG_TYPE(scope, globalObject, "options"_s, "object"_s, optionsArg);
+return false;
         }
 
         auto filenameOpt = options->getIfPropertyExists(globalObject, builtinNames(vm).filenamePublicName());

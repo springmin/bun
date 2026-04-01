@@ -57,10 +57,19 @@ private:
 struct LiteralConversionContext : Detail::ContextBase<LiteralConversionContext> {
     using ElementContext = Detail::ElementOf<LiteralConversionContext>;
 
+#if defined(__OHOS__)
+    // OHOS SDK Clang 15 crashes on consteval in template contexts.
+    // Use constexpr instead for OHOS builds.
+    explicit constexpr LiteralConversionContext(WTF::ASCIILiteral name)
+        : m_name(name)
+    {
+    }
+#else
     explicit consteval LiteralConversionContext(WTF::ASCIILiteral name)
         : m_name(name)
     {
     }
+#endif
 
     auto source()
     {

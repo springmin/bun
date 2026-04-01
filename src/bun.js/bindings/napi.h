@@ -88,35 +88,48 @@ struct AsyncCleanupHook : CleanupHook {
 };
 
 struct EitherCleanupHook : std::variant<SyncCleanupHook, AsyncCleanupHook> {
-    template<typename Self>
-    auto& get(this Self& self)
-    {
-        using Hook = MatchConst<Self, CleanupHook>::type;
+using Base = std::variant<SyncCleanupHook, AsyncCleanupHook>;
+using Base::Base;
+using Base::operator=;
 
-        if (auto* sync = std::get_if<SyncCleanupHook>(&self)) {
-            return static_cast<Hook&>(*sync);
-        }
+EitherCleanupHook(const EitherCleanupHook&) = default;
+EitherCleanupHook(EitherCleanupHook&&) = default;
+EitherCleanupHook& operator=(const EitherCleanupHook&) = default;
+EitherCleanupHook& operator=(EitherCleanupHook&&) = default;
 
-        return static_cast<Hook&>(std::get<AsyncCleanupHook>(self));
-    }
+CleanupHook& get()
+{
+if (auto* sync = std::get_if<SyncCleanupHook>(this)) {
+return static_cast<CleanupHook&>(*sync);
+}
+return static_cast<CleanupHook&>(std::get<AsyncCleanupHook>(*this));
+}
 
-    struct Hash {
-        static size_t operator()(const EitherCleanupHook& hook)
-        {
-            return hook.get().hash();
-        }
-    };
+const CleanupHook& get() const
+{
+if (const auto* sync = std::get_if<SyncCleanupHook>(this)) {
+return static_cast<const CleanupHook&>(*sync);
+}
+return static_cast<const CleanupHook&>(std::get<AsyncCleanupHook>(*this));
+}
+
+struct Hash {
+size_t operator()(const EitherCleanupHook& hook) const
+{
+return hook.get().hash();
+}
+};
 
 private:
-    template<typename T, typename U>
-    struct MatchConst {
-        using type = U;
-    };
+template<typename T, typename U>
+struct MatchConst {
+using type = U;
+};
 
-    template<typename T, typename U>
-    struct MatchConst<const T, U> {
-        using type = const U;
-    };
+template<typename T, typename U>
+struct MatchConst<const T, U> {
+using type = const U;
+};
 };
 
 using HookSet = std::unordered_set<EitherCleanupHook, EitherCleanupHook::Hash>;

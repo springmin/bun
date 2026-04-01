@@ -138,6 +138,7 @@ struct IDLConversionContextBase : Detail::IDLConversionContextMarker {
         derived().throwTypeMustBe(global, scope, "an array"_s);
     }
 
+#if !defined(__OHOS__)
     template<HasIDLHumanReadableName IDLElement>
     void throwNotArray(JSC::JSGlobalObject& global, JSC::ThrowScope& scope)
     {
@@ -146,6 +147,7 @@ struct IDLConversionContextBase : Detail::IDLConversionContextMarker {
             scope,
             WTF::makeString("an array of "_s, idlHumanReadableName<IDLElement>()));
     }
+#endif
 
     template<typename IDLEnum = void>
     void throwBadEnumValue(JSC::JSGlobalObject& global, JSC::ThrowScope& scope)
@@ -153,22 +155,26 @@ struct IDLConversionContextBase : Detail::IDLConversionContextMarker {
         derived().throwRangeErrorWithPredicate(global, scope, "is not a valid enumeration value"_s);
     }
 
+#if !defined(__OHOS__)
     template<HasIDLHumanReadableName IDLEnum>
     void throwBadEnumValue(JSC::JSGlobalObject& global, JSC::ThrowScope& scope)
     {
         derived().throwTypeMustBe(global, scope, idlHumanReadableName<IDLEnum>());
     }
+#endif
 
+#if !defined(__OHOS__)
     template<HasIDLHumanReadableName... Alternatives>
-        requires(sizeof...(Alternatives) > 0)
+    requires(sizeof...(Alternatives) > 0)
     void throwNoMatchInUnion(JSC::JSGlobalObject& global, JSC::ThrowScope& scope)
     {
-        using Union = Detail::IDLUnionForDiagnostic<Alternatives...>::Type;
+        using Union = typename Detail::IDLUnionForDiagnostic<Alternatives...>::Type;
         derived().throwTypeErrorWithPredicate(
             global,
             scope,
             WTF::makeString("must be of type "_s, idlHumanReadableName<Union>()));
     }
+#endif
 
     template<typename... Alternatives>
     void throwNoMatchInUnion(JSC::JSGlobalObject& global, JSC::ThrowScope& scope)
@@ -232,8 +238,6 @@ struct IDLConversionContextBase : Detail::IDLConversionContextMarker {
 
     using ElementContext = Derived;
 
-    // When converting a sequence, the result of this function will be used as the context for
-    // converting each element of the sequence.
     auto contextForElement()
     {
         return typename Derived::ElementContext { derived() };
@@ -243,8 +247,6 @@ private:
     Derived& derived() { return *static_cast<Derived*>(this); }
 };
 
-// Default conversion context: throws a plain TypeError or RangeError with the message
-// "value must be ...". See also Bindgen::LiteralConversionContext, which uses Bun::throwError.
 struct DefaultConversionContext : IDLConversionContextBase<DefaultConversionContext> {
     WTF::ASCIILiteral source() { return "value"_s; }
 };

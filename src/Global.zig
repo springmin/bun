@@ -64,7 +64,11 @@ extern "kernel32" fn SetThreadDescription(thread: std.os.windows.HANDLE, name: [
 
 pub fn setThreadName(name: [:0]const u8) void {
     if (Environment.isLinux) {
-        _ = std.posix.prctl(.SET_NAME, .{@intFromPtr(name.ptr)}) catch 0;
+        // OHOS/musl: Skip prctl SET_NAME on musl-based systems
+        // The system call may have parameter compatibility issues on OHOS
+        if (!Environment.isMusl) {
+            _ = std.posix.prctl(.SET_NAME, .{@intFromPtr(name.ptr)}) catch 0;
+        }
     } else if (Environment.isMac) {
         _ = std.c.pthread_setname_np(name);
     } else if (Environment.isWindows) {

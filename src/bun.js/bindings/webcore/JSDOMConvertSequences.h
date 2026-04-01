@@ -144,8 +144,8 @@ struct SequenceTraits<IDLType, std::array<typename IDLType::ImplementationType, 
 
 template<typename IDLType, typename VectorType = Vector<typename IDLType::SequenceStorageType>>
 struct GenericSequenceConverter {
-    using Traits = SequenceTraits<IDLType, VectorType>;
-    using ReturnType = Traits::VectorType;
+using Traits = SequenceTraits<IDLType, VectorType>;
+using ReturnType = typename Traits::VectorType;
 
     template<Bun::IDLConversionContext Ctx>
     static ReturnType convert(JSC::JSGlobalObject& lexicalGlobalObject, JSC::JSObject* object, Ctx& ctx)

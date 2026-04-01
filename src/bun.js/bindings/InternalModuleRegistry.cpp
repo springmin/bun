@@ -101,8 +101,8 @@ ALWAYS_INLINE JSC::JSValue generateNativeModule(
 JSValue initializeInternalModuleFromDisk(JSGlobalObject* globalObject, VM& vm, const WTF::String& moduleName, WTF::String fileBase, const WTF::String& urlString)
 {
     WTF::String file = makeString(ASCIILiteral::fromLiteralUnsafe(BUN_DYNAMIC_JS_LOAD_PATH), "/"_s, WTF::move(fileBase));
-    if (auto contents = WTF::FileSystemImpl::readEntireFile(file)) {
-        auto string = WTF::String::fromUTF8(contents.value());
+if (auto contents = WTF::FileSystemImpl::readEntireFile(file)) {
+auto string = WTF::String::fromUTF8(contents.value().span());
         return generateModule(globalObject, vm, string, moduleName, urlString);
     } else {
         printf("\nFATAL: bun-debug failed to load bundled version of \"%s\" at \"%s\" (was it deleted?)\n"

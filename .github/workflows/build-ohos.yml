@@ -1,0 +1,103 @@
+name: Build OHOS
+
+on:
+  push:
+    branches: [ohos]
+  pull_request:
+    branches: [ohos]
+  workflow_dispatch:
+    inputs:
+      build_type:
+        description: "Build type"
+        required: true
+        default: "Release"
+        type: choice
+        options:
+          - Release
+          - Debug
+
+env:
+  OHOS_SDK_VERSION: "5.0.0.61"
+  CMAKE_BUILD_TYPE: ${{ github.event.inputs.build_type || 'Release' }}
+
+jobs:
+  build-ohos:
+    name: Build Bun for OHOS (aarch64)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 180
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Setup environment
+        run: |
+          sudo apt update
+          sudo apt install -y \
+            build-essential cmake ninja-build pkg-config \
+            python3 curl wget unzip autoconf automake libtool \
+            bison flex gperf gawk ruby ruby-dev \
+            llvm-21 clang-21 lld-21 \
+            qemu-user qemu-user-static \
+            xz-utils
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+      - name: Install OHOS SDK
+        run: |
+          mkdir -p ~/hmos-tools/sdk
+          SDK_URL="https://contentcenter-vali-drcn.dbankcdn.cn/pvt_2/DeveloperAlliance_package_901_9/openharmony/sdk/3rd/openharmony-sdk-${{ env.OHOS_SDK_VERSION }}-linux_x86_64.zip"
+          echo "Downloading OHOS SDK..."
+          wget -q --tries=3 --timeout=30 -O ~/hmos-tools/openharmony-sdk.zip "$SDK_URL" || {
+            echo "SDK download failed, trying alternative..."
+            exit 1
+          }
+          cd ~/hmos-tools && unzip -q openharmony-sdk.zip
+          echo "OHOS_SDK_NATIVE=$HOME/hmos-tools/sdk/default/openharmony/native" >> $GITHUB_ENV
+
+      - name: Configure build
+        run: |
+          cmake -B build/ohos-release -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/ohos-aarch64.cmake \
+            -DCMAKE_BUILD_TYPE=${{ env.CMAKE_BUILD_TYPE }} \
+            -DENABLE_LTO=ON
+
+      - name: Build Bun
+        run: ninja -C build/ohos-release bun
+
+      - name: Verify build
+        run: |
+          ls -lh build/ohos-release/bun
+          file build/ohos-release/bun
+          qemu-aarch64 build/ohos-release/bun --version
+          qemu-aarch64 build/ohos-release/bun -e 'console.log("OHOS build OK!")'
+
+      - name: Run tests
+        run: |
+          qemu-aarch64 build/ohos-release/bun test-ohos.ts
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bun-ohos-aarch64-${{ env.CMAKE_BUILD_TYPE }}
+          path: build/ohos-release/bun
+          retention-days: 30
+
+      - name: Create release package
+        if: github.event_name == 'push' && github.ref == 'refs/heads/ohos'
+        run: |
+          mkdir -p bun-ohos-aarch64
+          cp build/ohos-release/bun bun-ohos-aarch64/
+          cp LICENSE bun-ohos-aarch64/
+          tar czf bun-ohos-aarch64-${{ github.sha }}.tar.gz bun-ohos-aarch64/
+
+      - name: Upload release package
+        if: github.event_name == 'push' && github.ref == 'refs/heads/ohos'
+        uses: actions/upload-artifact@v4
+        with:
+          name: bun-ohos-release-package
+          path: bun-ohos-aarch64-${{ github.sha }}.tar.gz
+          retention-days: 90

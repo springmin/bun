@@ -28,6 +28,12 @@ else()
   message(FATAL_ERROR "Unsupported architecture: ${CMAKE_HOST_SYSTEM_PROCESSOR}")
 endif()
 
+# Skip download if zig already exists
+if(EXISTS ${ZIG_PATH}/${ZIG_EXE})
+  message(STATUS "Zig already exists at ${ZIG_PATH}/${ZIG_EXE}, skipping download")
+  return()
+endif()
+
 set(ZIG_NAME bootstrap-${ZIG_ARCH}-${ZIG_OS_ABI})
 if(ZIG_COMPILER_SAFE)
   set(ZIG_NAME ${ZIG_NAME}-ReleaseSafe)

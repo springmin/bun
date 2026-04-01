@@ -163,35 +163,35 @@ ExceptionOr<void> URLPatternConstructorStringParser::computeProtocolMatchSpecial
 // https://urlpattern.spec.whatwg.org/#change-state
 void URLPatternConstructorStringParser::changeState(URLPatternConstructorStringParserState newState, size_t skip)
 {
-    if (m_state != URLPatternConstructorStringParserState::Init
-        && m_state != URLPatternConstructorStringParserState::Authority
-        && m_state != URLPatternConstructorStringParserState::Done)
-        setInitComponentFromState(m_result, m_state, makeComponentString());
+if (m_state != URLPatternConstructorStringParserState::Init
+&& m_state != URLPatternConstructorStringParserState::Authority
+&& m_state != URLPatternConstructorStringParserState::Done)
+setInitComponentFromState(m_result, m_state, makeComponentString());
 
-    if (m_state != URLPatternConstructorStringParserState::Init && newState != URLPatternConstructorStringParserState::Done) {
-        // Set init's hostname to empty if conditions are met.
-        static constexpr std::array validStateConditionsForEmptyHostname { URLPatternConstructorStringParserState::Protocol, URLPatternConstructorStringParserState::Authority, URLPatternConstructorStringParserState::Username, URLPatternConstructorStringParserState::Password };
-        static constexpr std::array validNewStateConditionsForEmptyHostname { URLPatternConstructorStringParserState::Port, URLPatternConstructorStringParserState::Pathname, URLPatternConstructorStringParserState::Search, URLPatternConstructorStringParserState::Hash };
-        if (std::ranges::find(validStateConditionsForEmptyHostname, m_state) != validStateConditionsForEmptyHostname.end()
-            && std::ranges::find(validNewStateConditionsForEmptyHostname, newState) != validNewStateConditionsForEmptyHostname.end()
-            && m_result.hostname.isNull()) {
-            m_result.hostname = emptyString();
-        }
-        // Set init's pathname to empty if conditions are met.
-        static constexpr std::array validStateConditionsForEmptyPathname { URLPatternConstructorStringParserState::Protocol, URLPatternConstructorStringParserState::Authority, URLPatternConstructorStringParserState::Username, URLPatternConstructorStringParserState::Password, URLPatternConstructorStringParserState::Hostname, URLPatternConstructorStringParserState::Port };
-        static constexpr std::array validNewStateConditionsForEmptyPathname { URLPatternConstructorStringParserState::Search, URLPatternConstructorStringParserState::Hash };
-        if (std::ranges::find(validStateConditionsForEmptyPathname, m_state) != validStateConditionsForEmptyPathname.end()
-            && std::ranges::find(validNewStateConditionsForEmptyPathname, newState) != validNewStateConditionsForEmptyPathname.end()
-            && m_result.pathname.isNull()) {
-            m_result.pathname = m_protocolMatchesSpecialSchemeFlag ? "/"_s : emptyString();
-        }
-        // Set init's search to empty if conditions are met.
-        static constexpr std::array validStateConditionsForEmptySearch { URLPatternConstructorStringParserState::Protocol, URLPatternConstructorStringParserState::Authority, URLPatternConstructorStringParserState::Username, URLPatternConstructorStringParserState::Password, URLPatternConstructorStringParserState::Hostname, URLPatternConstructorStringParserState::Port, URLPatternConstructorStringParserState::Pathname };
-        if (std::ranges::find(validStateConditionsForEmptySearch, m_state) != validStateConditionsForEmptySearch.end()
-            && newState == URLPatternConstructorStringParserState::Hash
-            && m_result.search.isNull()) {
-            m_result.search = emptyString();
-        }
+if (m_state != URLPatternConstructorStringParserState::Init && newState != URLPatternConstructorStringParserState::Done) {
+// Set init's hostname to empty if conditions are met.
+static constexpr std::array validStateConditionsForEmptyHostname { URLPatternConstructorStringParserState::Protocol, URLPatternConstructorStringParserState::Authority, URLPatternConstructorStringParserState::Username, URLPatternConstructorStringParserState::Password };
+static constexpr std::array validNewStateConditionsForEmptyHostname { URLPatternConstructorStringParserState::Port, URLPatternConstructorStringParserState::Pathname, URLPatternConstructorStringParserState::Search, URLPatternConstructorStringParserState::Hash };
+if (std::find(validStateConditionsForEmptyHostname.begin(), validStateConditionsForEmptyHostname.end(), m_state) != validStateConditionsForEmptyHostname.end()
+&& std::find(validNewStateConditionsForEmptyHostname.begin(), validNewStateConditionsForEmptyHostname.end(), newState) != validNewStateConditionsForEmptyHostname.end()
+&& m_result.hostname.isNull()) {
+m_result.hostname = emptyString();
+}
+// Set init's pathname to empty if conditions are met.
+static constexpr std::array validStateConditionsForEmptyPathname { URLPatternConstructorStringParserState::Protocol, URLPatternConstructorStringParserState::Authority, URLPatternConstructorStringParserState::Username, URLPatternConstructorStringParserState::Password, URLPatternConstructorStringParserState::Hostname, URLPatternConstructorStringParserState::Port };
+static constexpr std::array validNewStateConditionsForEmptyPathname { URLPatternConstructorStringParserState::Search, URLPatternConstructorStringParserState::Hash };
+if (std::find(validStateConditionsForEmptyPathname.begin(), validStateConditionsForEmptyPathname.end(), m_state) != validStateConditionsForEmptyPathname.end()
+&& std::find(validNewStateConditionsForEmptyPathname.begin(), validNewStateConditionsForEmptyPathname.end(), newState) != validNewStateConditionsForEmptyPathname.end()
+&& m_result.pathname.isNull()) {
+m_result.pathname = m_protocolMatchesSpecialSchemeFlag ? "/"_s : emptyString();
+}
+// Set init's search to empty if conditions are met.
+static constexpr std::array validStateConditionsForEmptySearch { URLPatternConstructorStringParserState::Protocol, URLPatternConstructorStringParserState::Authority, URLPatternConstructorStringParserState::Username, URLPatternConstructorStringParserState::Password, URLPatternConstructorStringParserState::Hostname, URLPatternConstructorStringParserState::Port, URLPatternConstructorStringParserState::Pathname };
+if (std::find(validStateConditionsForEmptySearch.begin(), validStateConditionsForEmptySearch.end(), m_state) != validStateConditionsForEmptySearch.end()
+&& newState == URLPatternConstructorStringParserState::Hash
+&& m_result.search.isNull()) {
+m_result.search = emptyString();
+}
     }
 
     m_state = newState;

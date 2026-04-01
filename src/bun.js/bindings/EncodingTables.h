@@ -57,8 +57,11 @@ inline void checkEncodingTableInvariants() {}
 
 // LLVM 21+ -Wcharacter-conversion flags intentional char32_t/char16_t comparisons
 // used for Unicode code point range checks in findFirstInSortedPairs.
+// OHOS SDK Clang 15 doesn't support this warning, so we conditionally ignore it.
+#if !defined(__OHOS__)
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wcharacter-conversion"
+#endif
 struct CompareFirst {
     template<typename TypeA, typename TypeB> bool operator()(const TypeA& a, const TypeB& b)
     {
@@ -130,12 +133,15 @@ template<typename CollectionType, typename KeyType> static auto findFirstInSorte
 
 template<typename CollectionType, typename KeyType> static auto findInSortedPairs(const CollectionType& collection, const KeyType& key) -> std::span<std::remove_reference_t<decltype(*std::begin(collection))>>
 {
-    if constexpr (std::is_integral_v<KeyType>) {
-        if (key != decltype(std::begin(collection)->first)(key))
-            return {};
-    }
-    return std::ranges::equal_range(collection, makeFirstAdapter(key), CompareFirst {});
+if constexpr (std::is_integral_v<KeyType>) {
+if (key != decltype(std::begin(collection)->first)(key))
+return {};
 }
+auto range = std::equal_range(std::begin(collection), std::end(collection), makeFirstAdapter(key), CompareFirst {});
+return std::span(range.first, range.second);
+}
+#if !defined(__OHOS__)
 #pragma clang diagnostic pop
+#endif
 
 }

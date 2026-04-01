@@ -227,7 +227,7 @@ JSC::JSValue KeyObject::exportJwkSecretKey(JSC::JSGlobalObject* lexicalGlobalObj
 
     JSObject* jwk = JSC::constructEmptyObject(lexicalGlobalObject);
 
-    JSValue encoded = JSValue::decode(StringBytes::encode(lexicalGlobalObject, scope, m_data->symmetricKey, BufferEncodingType::base64url));
+    JSValue encoded = JSValue::decode(StringBytes::encode(lexicalGlobalObject, scope, m_data->symmetricKey.span(), BufferEncodingType::base64url));
     RETURN_IF_EXCEPTION(scope, {});
 
     jwk->putDirect(vm,
@@ -580,13 +580,14 @@ JSObject* KeyObject::asymmetricKeyDetails(JSGlobalObject* globalObject, ThrowSco
         getDsaKeyDetails(globalObject, scope, result);
         RETURN_IF_EXCEPTION(scope, {});
         break;
-    case EVP_PKEY_EC: {
-        getEcKeyDetails(globalObject, scope, result);
-        RETURN_IF_EXCEPTION(scope, {});
-        break;
-    }
-    default:
-    }
+case EVP_PKEY_EC: {
+getEcKeyDetails(globalObject, scope, result);
+RETURN_IF_EXCEPTION(scope, {});
+break;
+}
+default:
+break;
+}
 
     return result;
 }
@@ -864,16 +865,15 @@ KeyObject KeyObject::getKeyObjectHandleFromJwk(JSGlobalObject* globalObject, Thr
             break;
         }
 
-        MarkPopErrorOnReturn markPopError;
+MarkPopErrorOnReturn markPopError;
 
-        auto buf = ncrypto::Buffer {
-            .data = bufSpan.data(),
-            .len = bufSpan.size(),
-        };
+ncrypto::Buffer<const unsigned char> buf;
+buf.data = bufSpan.data();
+buf.len = bufSpan.size();
 
-        auto key = keyType == CryptoKeyType::Public
-            ? EVPKeyPointer::NewRawPublic(nid, buf)
-            : EVPKeyPointer::NewRawPrivate(nid, buf);
+auto key = keyType == CryptoKeyType::Public
+? EVPKeyPointer::NewRawPublic(nid, buf)
+: EVPKeyPointer::NewRawPrivate(nid, buf);
 
         if (!key) {
             ERR::CRYPTO_INVALID_JWK(scope, globalObject);

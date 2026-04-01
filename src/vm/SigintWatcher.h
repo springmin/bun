@@ -66,21 +66,21 @@ public:
             return *this;
         }
 
-        void ALWAYS_INLINE assign(SigintHoldable auto* ptr)
-        {
-            using T = std::remove_pointer_t<decltype(ptr)>;
-            if constexpr (std::derived_from<T, JSC::JSGlobalObject>) {
-                if ((m_globalObject = ptr)) {
-                    get().ref();
-                    get().registerGlobalObject(m_globalObject);
-                }
-            } else if constexpr (std::derived_from<T, SigintReceiver>) {
-                m_receivers.append(ptr);
-                get().registerReceiver(ptr);
-            } else {
-                static_assert(false, "Invalid held type");
-            }
-        }
+void ALWAYS_INLINE assign(SigintHoldable auto* ptr)
+{
+using T = std::remove_pointer_t<decltype(ptr)>;
+if constexpr (std::derived_from<T, JSC::JSGlobalObject>) {
+if ((m_globalObject = ptr)) {
+get().ref();
+get().registerGlobalObject(m_globalObject);
+}
+} else if constexpr (std::derived_from<T, SigintReceiver>) {
+m_receivers.append(ptr);
+get().registerReceiver(ptr);
+} else {
+static_assert(sizeof(T) == 0, "Invalid held type");
+}
+}
 
     private:
         JSC::JSGlobalObject* m_globalObject = nullptr;

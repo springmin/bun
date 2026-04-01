@@ -3860,6 +3860,11 @@ pub const NodeFS = struct {
             return Maybe(Return.Lchmod).todo();
         }
 
+        // lchmod is not available on all platforms (e.g., OHOS/musl)
+        if (!@hasDecl(c, "lchmod")) {
+            return Maybe(Return.Lchmod).todo();
+        }
+
         const path = args.path.sliceZ(&this.sync_error_buf);
         return Maybe(Return.Lchmod).errnoSysP(c.lchmod(path, @truncate(args.mode)), .lchmod, path) orelse
             .success;

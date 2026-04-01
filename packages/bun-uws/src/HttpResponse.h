@@ -687,38 +687,38 @@ public:
         return this;
     }
 
-    /* Attach handler for writable HTTP response */
-    HttpResponse *onWritable(void* userData, HttpResponseData<SSL>::OnWritableCallback handler) {
-        HttpResponseData<SSL> *httpResponseData = getHttpResponseData();
+/* Attach handler for writable HTTP response */
+HttpResponse *onWritable(void* userData, typename HttpResponseData<SSL>::OnWritableCallback handler) {
+HttpResponseData<SSL> *httpResponseData = getHttpResponseData();
 
-        httpResponseData->userData = userData;
-        httpResponseData->onWritable = handler;
-        return this;
-    }
+httpResponseData->userData = userData;
+httpResponseData->onWritable = handler;
+return this;
+}
 
-    /* Remove handler for writable HTTP response */
-    HttpResponse *clearOnWritable() {
-        HttpResponseData<SSL> *httpResponseData = getHttpResponseData();
+/* Remove handler for writable HTTP response */
+HttpResponse *clearOnWritable() {
+HttpResponseData<SSL> *httpResponseData = getHttpResponseData();
 
-        httpResponseData->onWritable = nullptr;
-        return this;
-    }
+httpResponseData->onWritable = nullptr;
+return this;
+}
 
-    /* Attach handler for aborted HTTP request */
-    HttpResponse *onAborted(void* userData,  HttpResponseData<SSL>::OnAbortedCallback handler) {
-        HttpResponseData<SSL> *httpResponseData = getHttpResponseData();
+/* Attach handler for aborted HTTP request */
+HttpResponse *onAborted(void* userData, typename HttpResponseData<SSL>::OnAbortedCallback handler) {
+HttpResponseData<SSL> *httpResponseData = getHttpResponseData();
 
-        httpResponseData->userData = userData;
-        httpResponseData->onAborted = handler;
-        return this;
-    }
+httpResponseData->userData = userData;
+httpResponseData->onAborted = handler;
+return this;
+}
 
-    HttpResponse *onTimeout(void* userData,  HttpResponseData<SSL>::OnTimeoutCallback handler) {
-        HttpResponseData<SSL> *httpResponseData = getHttpResponseData();
+HttpResponse *onTimeout(void* userData, typename HttpResponseData<SSL>::OnTimeoutCallback handler) {
+HttpResponseData<SSL> *httpResponseData = getHttpResponseData();
 
-        httpResponseData->userData = userData;
-        httpResponseData->onTimeout = handler;
-        return this;
+httpResponseData->userData = userData;
+httpResponseData->onTimeout = handler;
+return this;
     }
 
     HttpResponse* clearOnWritableAndAborted() {
@@ -745,7 +745,7 @@ public:
         return this;
     }
     /* Attach a read handler for data sent. Will be called with FIN set true if last segment. */
-    void onData(void* userData, HttpResponseData<SSL>::OnDataCallback handler) {
+    void onData(void* userData, typename HttpResponseData<SSL>::OnDataCallback handler) {
         HttpResponseData<SSL> *data = getHttpResponseData();
         data->userData = userData;
         data->inStream = handler;

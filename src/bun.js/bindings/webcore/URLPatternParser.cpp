@@ -315,19 +315,19 @@ String generateSegmentWildcardRegexp(const URLPatternStringOptions& options)
 template<typename CharacterType>
 static String escapeRegexStringForCharacters(std::span<const CharacterType> characters)
 {
-    static constexpr auto regexEscapeCharacters = std::to_array<const CharacterType>({ '.', '+', '*', '?', '^', '$', '{', '}', '(', ')', '[', ']', '|', '/', '\\' }); // NOLINT
+static constexpr auto regexEscapeCharacters = std::to_array<const CharacterType>({ '.', '+', '*', '?', '^', '$', '{', '}', '(', ')', '[', ']', '|', '/', '\\' }); // NOLINT
 
-    StringBuilder result;
-    result.reserveCapacity(characters.size());
+StringBuilder result;
+result.reserveCapacity(characters.size());
 
-    for (auto character : characters) {
-        if (std::ranges::find(regexEscapeCharacters, character) != regexEscapeCharacters.end())
-            result.append('\\');
+for (auto character : characters) {
+if (std::find(regexEscapeCharacters.begin(), regexEscapeCharacters.end(), character) != regexEscapeCharacters.end())
+result.append('\\');
 
-        result.append(character);
-    }
+result.append(character);
+}
 
-    return result.toString();
+return result.toString();
 }
 
 // https://urlpattern.spec.whatwg.org/#escape-a-regexp-string
@@ -514,19 +514,19 @@ String generatePatternString(const Vector<Part>& partList, const URLPatternStrin
 template<typename CharacterType>
 static String escapePatternStringForCharacters(std::span<const CharacterType> characters)
 {
-    static constexpr auto escapeCharacters = std::to_array<const CharacterType>({ '+', '*', '?', ':', '(', ')', '\\', '{', '}' }); // NOLINT
+static constexpr auto escapeCharacters = std::to_array<const CharacterType>({ '+', '*', '?', ':', '(', ')', '\\', '{', '}' }); // NOLINT
 
-    StringBuilder result;
-    result.reserveCapacity(characters.size());
+StringBuilder result;
+result.reserveCapacity(characters.size());
 
-    for (auto character : characters) {
-        if (std::ranges::find(escapeCharacters, character) != escapeCharacters.end())
-            result.append('\\');
+for (auto character : characters) {
+if (std::find(escapeCharacters.begin(), escapeCharacters.end(), character) != escapeCharacters.end())
+result.append('\\');
 
-        result.append(character);
-    }
+result.append(character);
+}
 
-    return result.toString();
+return result.toString();
 }
 
 // https://urlpattern.spec.whatwg.org/#escape-a-pattern-string

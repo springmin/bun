@@ -71,9 +71,9 @@ template<> struct WebCore::Converter<Bun::IDLStrictUndefined>
 
 template<typename IDL>
 struct WebCore::Converter<Bun::IDLLooseNullable<IDL>>
-    : Bun::DefaultTryConverter<Bun::IDLLooseNullable<IDL>> {
+: Bun::DefaultTryConverter<Bun::IDLLooseNullable<IDL>> {
 
-    using ReturnType = WebCore::Converter<WebCore::IDLNullable<IDL>>::ReturnType;
+using ReturnType = typename WebCore::Converter<WebCore::IDLNullable<IDL>>::ReturnType;
 
     template<Bun::IDLConversionContext Ctx>
     static std::optional<ReturnType> tryConvert(

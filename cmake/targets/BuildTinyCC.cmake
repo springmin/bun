@@ -1,22 +1,28 @@
 register_repository(
-  NAME
-    tinycc
-  REPOSITORY
-    oven-sh/tinycc
-  COMMIT
-    12882eee073cfe5c7621bcfadf679e1372d4537b
+NAME
+tinycc
+REPOSITORY
+oven-sh/tinycc
+COMMIT
+12882eee073cfe5c7621bcfadf679e1372d4537b
 )
+
+# TinyCC is x86/x86_64 only, skip for OHOS/ARM64
+if(OHOS_BUILD)
+    message(STATUS "Skipping TinyCC for OHOS (x86/x86_64 only)")
+    return()
+endif()
 
 # Suppress all warnings from vendored tinycc on Windows (clang-cl)
 if(WIN32)
-  set(TINYCC_CMAKE_ARGS "-DCMAKE_C_FLAGS=-w")
+set(TINYCC_CMAKE_ARGS "-DCMAKE_C_FLAGS=-w")
 endif()
 
 register_cmake_command(
-  TARGET
-    tinycc
-  ARGS
-    ${TINYCC_CMAKE_ARGS}
-  LIBRARIES
-    tcc
+TARGET
+tinycc
+ARGS
+${TINYCC_CMAKE_ARGS}
+LIBRARIES
+tcc
 )

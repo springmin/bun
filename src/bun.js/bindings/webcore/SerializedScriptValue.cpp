@@ -5130,11 +5130,11 @@ private:
             // if (!unwrapCryptoKey(m_lexicalGlobalObject, wrappedKey, serializedKey)) {
             //     fail();
             //     return JSValue();
-            // }
-            JSValue cryptoKey;
-            // Vector<RefPtr<MessagePort>> dummyMessagePorts;
-            // CloneDeserializer rawKeyDeserializer(m_lexicalGlobalObject, m_globalObject, dummyMessagePorts, nullptr, {}, serializedKey);
-            CloneDeserializer rawKeyDeserializer(m_lexicalGlobalObject, m_globalObject, {}, nullptr, serializedKey);
+// }
+JSValue cryptoKey;
+// Vector<RefPtr<MessagePort>> dummyMessagePorts;
+// CloneDeserializer rawKeyDeserializer(m_lexicalGlobalObject, m_globalObject, dummyMessagePorts, nullptr, {}, serializedKey);
+CloneDeserializer rawKeyDeserializer(m_lexicalGlobalObject, m_globalObject, {}, nullptr, serializedKey.mutableSpan());
             if (!rawKeyDeserializer.readCryptoKey(cryptoKey)) {
                 fail();
                 return JSValue();
@@ -6682,14 +6682,13 @@ JSValue SerializedScriptValue::deserialize(JSGlobalObject& lexicalGlobalObject, 
     DeserializationResult result = CloneDeserializer::deserialize(&lexicalGlobalObject, globalObject, messagePorts
 #if ENABLE(OFFSCREEN_CANVAS_IN_WORKERS)
         ,
-        WTF::move(m_detachedOffscreenCanvases)
+WTF::move(m_detachedOffscreenCanvases)
 #endif
 #if ENABLE(WEB_RTC)
-            ,
-        WTF::move(m_detachedRTCDataChannels)
+,
+WTF::move(m_detachedRTCDataChannels)
 #endif
-            ,
-        m_arrayBufferContentsArray.get(), m_data, blobURLs, blobFilePaths, m_sharedBufferContentsArray.get()
+, m_arrayBufferContentsArray.get(), m_data.mutableSpan(), blobURLs, blobFilePaths, m_sharedBufferContentsArray.get()
 #if ENABLE(WEBASSEMBLY)
                                                                                ,
         m_wasmModulesArray.get(), m_wasmMemoryHandlesArray.get()
