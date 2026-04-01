@@ -69,6 +69,9 @@ jobs:
         run: |
           ls -lh build/ohos-release/bun
           file build/ohos-release/bun
+          # Verify 4K alignment for HarmonyOS signing compatibility
+          # UPX compression breaks 4K alignment, so we use LTO build directly
+          readelf -lW build/ohos-release/bun | grep "LOAD"
           qemu-aarch64 build/ohos-release/bun --version
           qemu-aarch64 build/ohos-release/bun -e 'console.log("OHOS build OK!")'
 
