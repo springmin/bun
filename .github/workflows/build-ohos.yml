@@ -17,7 +17,6 @@ on:
           - Debug
 
 env:
-  OHOS_SDK_VERSION: "5.0.0.61"
   CMAKE_BUILD_TYPE: ${{ github.event.inputs.build_type || 'Release' }}
 
 jobs:
@@ -50,16 +49,11 @@ jobs:
           echo "$HOME/.cargo/bin" >> $GITHUB_PATH
 
       - name: Install OHOS SDK
-        run: |
-          mkdir -p ~/hmos-tools/sdk
-          SDK_URL="https://contentcenter-vali-drcn.dbankcdn.cn/pvt_2/DeveloperAlliance_package_901_9/openharmony/sdk/3rd/openharmony-sdk-${{ env.OHOS_SDK_VERSION }}-linux_x86_64.zip"
-          echo "Downloading OHOS SDK..."
-          wget -q --tries=3 --timeout=30 -O ~/hmos-tools/openharmony-sdk.zip "$SDK_URL" || {
-            echo "SDK download failed, trying alternative..."
-            exit 1
-          }
-          cd ~/hmos-tools && unzip -q openharmony-sdk.zip
-          echo "OHOS_SDK_NATIVE=$HOME/hmos-tools/sdk/default/openharmony/native" >> $GITHUB_ENV
+        uses: openharmony-rs/setup-ohos-sdk@v1.0.0
+        with:
+          version: "5.0.0"
+          cache: true
+          mirror: true
 
       - name: Configure build
         run: |
