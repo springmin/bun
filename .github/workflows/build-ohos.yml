@@ -71,6 +71,7 @@ jobs:
         run: |
           # Download prebuilt WebKit from GitHub Release instead of building from source
           # This avoids C++20 compatibility issues between WebKit and OHOS SDK libc++
+          # The tarball also includes ICU headers from vendor/icu-ohos
           mkdir -p vendor/WebKit/WebKitBuild
           wget -q -O /tmp/bun-webkit-ohos-aarch64-release.tar.gz \
             https://github.com/springmin/bun/releases/download/webkit-ohos-prebuilt/bun-webkit-ohos-aarch64-release.tar.gz
@@ -81,6 +82,18 @@ jobs:
           if [ -d "vendor/WebKit/WebKitBuild/Release" ]; then
             cp -r vendor/WebKit/WebKitBuild/Release/* vendor/WebKit/WebKitBuild/
             rm -rf vendor/WebKit/WebKitBuild/Release
+          fi
+
+          # Extract ICU headers from the tarball (included as icu-headers/)
+          # and copy to vendor/icu-ohos for the build
+          if [ -d "vendor/WebKit/WebKitBuild/icu-headers" ]; then
+            mkdir -p vendor/icu-ohos/include
+            cp -r vendor/WebKit/WebKitBuild/icu-headers/unicode/* vendor/icu-ohos/include/unicode/ 2>/dev/null || \
+            mv vendor/WebKit/WebKitBuild/icu-headers/unicode vendor/icu-ohos/include/
+            echo "=== ICU headers extracted from WebKit tarball ==="
+            ls -la vendor/icu-ohos/include/
+          else
+            echo "WARNING: ICU headers not found in WebKit tarball"
           fi
 
           # Check what we have
