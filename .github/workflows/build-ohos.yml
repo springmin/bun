@@ -71,20 +71,27 @@ jobs:
         run: |
           # Download prebuilt WebKit from GitHub Release instead of building from source
           # This avoids C++20 compatibility issues between WebKit and OHOS SDK libc++
-          mkdir -p vendor/WebKit/WebKitBuild/Release
+          mkdir -p vendor/WebKit/WebKitBuild
           wget -q -O /tmp/bun-webkit-ohos-aarch64-release.tar.gz \
             https://github.com/springmin/bun/releases/download/webkit-ohos-prebuilt/bun-webkit-ohos-aarch64-release.tar.gz
-          tar xzf /tmp/bun-webkit-ohos-aarch64-release.tar.gz -C vendor/WebKit/WebKitBuild/Release/
+          tar xzf /tmp/bun-webkit-ohos-aarch64-release.tar.gz -C vendor/WebKit/WebKitBuild/
 
-          # Check what was extracted
-          echo "=== Release directory structure ==="
-          ls -la vendor/WebKit/WebKitBuild/Release/
-          echo "=== JavaScriptCore Headers ==="
-          ls -la vendor/WebKit/WebKitBuild/Release/JavaScriptCore/ 2>/dev/null || echo "No Headers"
-          echo "=== JavaScriptCore PrivateHeaders ==="
-          ls -la vendor/WebKit/WebKitBuild/Release/JavaScriptCore/PrivateHeaders/ 2>/dev/null || echo "No PrivateHeaders"
+          # Fix: Move Release contents to correct location
+          # The tarball has Release/lib and Release/JavaScriptCore, but we need them in WebKitBuild/
+          if [ -d "vendor/WebKit/WebKitBuild/Release" ]; then
+            mv vendor/WebKit/WebKitBuild/Release/* vendor/WebKit/WebKitBuild/
+            rmdir vendor/WebKit/WebKitBuild/Release
+          fi
+
+          # Check what we have
+          echo "=== WebKitBuild directory ==="
+          ls -la vendor/WebKit/WebKitBuild/
           echo "=== lib/ ==="
-          ls -la vendor/WebKit/WebKitBuild/Release/lib/ 2>/dev/null || echo "No lib"
+          ls -la vendor/WebKit/WebKitBuild/lib/ 2>/dev/null || echo "No lib"
+          echo "=== JavaScriptCore ==="
+          ls -la vendor/WebKit/WebKitBuild/JavaScriptCore/ 2>/dev/null || echo "No JavaScriptCore"
+          echo "=== WTF ==="
+          ls -la vendor/WebKit/WebKitBuild/WTF/ 2>/dev/null || echo "No WTF"
 
       - name: Setup vendor/icu-ohos
         run: |
