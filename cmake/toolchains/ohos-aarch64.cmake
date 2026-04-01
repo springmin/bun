@@ -101,9 +101,10 @@ set(OHOS_LIB_DIR "${OHOS_LIB_DIR}" CACHE INTERNAL "OHOS library directory")
 set(OHOS_INCLUDE_DIR "${OHOS_SDK_NATIVE}/sysroot/usr/include" CACHE INTERNAL "OHOS include directory")
 
 # ICU paths for WebKit
-set(ICU_ROOT "${OHOS_SDK_NATIVE}/sysroot/usr" CACHE INTERNAL "ICU root directory")
-set(ICU_INCLUDE_DIR "${OHOS_SDK_NATIVE}/sysroot/usr/include" CACHE INTERNAL "ICU include directory")
-set(ICU_LIBRARY "${OHOS_SDK_NATIVE}/sysroot/usr/lib/aarch64-linux-ohos" CACHE INTERNAL "ICU library directory")
+# Use vendor/icu-ohos which has ICU headers copied from OHOS SDK
+set(ICU_ROOT "${CMAKE_SOURCE_DIR}/vendor/icu-ohos" CACHE INTERNAL "ICU root directory")
+set(ICU_INCLUDE_DIR "${CMAKE_SOURCE_DIR}/vendor/icu-ohos/include" CACHE INTERNAL "ICU include directory")
+set(ICU_LIBRARY "${CMAKE_SOURCE_DIR}/vendor/icu-ohos/lib" CACHE INTERNAL "ICU library directory")
 
 # Print configuration summary
 message(STATUS "OHOS Toolchain Configuration:")
