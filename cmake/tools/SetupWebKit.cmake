@@ -4,9 +4,10 @@
 option(WEBKIT_VERSION "The version of WebKit to use")
 option(WEBKIT_LOCAL "If a local version of WebKit should be used instead of downloading")
 option(WEBKIT_BUILD_TYPE "The build type for local WebKit (defaults to CMAKE_BUILD_TYPE)")
+option(WEBKIT_PREBUILT "If a prebuilt WebKit tarball should be used instead of building (for OHOS CI)")
 
-# OHOS must build WebKit locally (no prebuilt available)
-if(OHOS_BUILD AND NOT WEBKIT_LOCAL)
+# OHOS must build WebKit locally (no prebuilt available) unless WEBKIT_PREBUILT is set
+if(OHOS_BUILD AND NOT WEBKIT_LOCAL AND NOT WEBKIT_PREBUILT)
     set(WEBKIT_LOCAL ON CACHE BOOL "Build WebKit locally for OHOS" FORCE)
     message(STATUS "OHOS build: Forcing WEBKIT_LOCAL=ON")
 endif()
@@ -18,6 +19,33 @@ endif()
 
 string(SUBSTRING ${WEBKIT_VERSION} 0 16 WEBKIT_VERSION_PREFIX)
 string(SUBSTRING ${WEBKIT_VERSION} 0 8 WEBKIT_VERSION_SHORT)
+
+if(WEBKIT_PREBUILT)
+  # --- Prebuilt WebKit (for OHOS CI) ---
+  # Skip all compilation, just use prebuilt libraries and headers
+  # WEBKIT_PATH should point to extracted prebuilt tarball (Release/ directory)
+  message(STATUS "Using prebuilt WebKit at ${WEBKIT_PATH}")
+
+  set(WEBKIT_INCLUDE_PATH ${WEBKIT_PATH})
+  set(WEBKIT_LIB_PATH ${WEBKIT_PATH}/lib)
+
+  include_directories(
+    ${WEBKIT_PATH}
+    ${WEBKIT_PATH}/JavaScriptCore/Headers
+    ${WEBKIT_PATH}/JavaScriptCore/Headers/JavaScriptCore
+    ${WEBKIT_PATH}/JavaScriptCore/PrivateHeaders
+    ${WEBKIT_PATH}/bmalloc/Headers
+    ${WEBKIT_PATH}/WTF/Headers
+    ${WEBKIT_PATH}/JavaScriptCore/PrivateHeaders/JavaScriptCore
+  )
+
+  # No build target needed - libraries already built
+  add_custom_target(jsc ALL
+    COMMENT "Using prebuilt WebKit (no build needed)"
+  )
+
+  return()
+endif()
 
 if(WEBKIT_LOCAL)
   if(NOT WEBKIT_BUILD_TYPE)

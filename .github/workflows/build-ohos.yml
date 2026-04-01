@@ -67,14 +67,15 @@ jobs:
           mkdir -p cmake/sources
           bun run glob-sources
 
-      - name: Clone WebKit (required for OHOS local build)
+      - name: Download prebuilt WebKit
         run: |
-          # OHOS has no prebuilt WebKit, must build from source
-          # vendor/WebKit is a separate repo not tracked in bun's git
-          WEBKIT_VERSION="fc9f2fa7272fec64905df6a9c78e15d7912f14ca"
-          git clone --depth 1 --branch autobuild-${WEBKIT_VERSION} \
-            https://github.com/oven-sh/WebKit.git vendor/WebKit
-          cd vendor/WebKit && git checkout ${WEBKIT_VERSION}
+          # Download prebuilt WebKit from GitHub Release instead of building from source
+          # This avoids C++20 compatibility issues between WebKit and OHOS SDK libc++
+          mkdir -p vendor/WebKit/WebKitBuild
+          wget -q -O /tmp/bun-webkit-ohos-aarch64-release.tar.gz \
+            https://github.com/springmin/bun/releases/download/webkit-ohos-prebuilt/bun-webkit-ohos-aarch64-release.tar.gz
+          tar xzf /tmp/bun-webkit-ohos-aarch64-release.tar.gz -C vendor/WebKit/WebKitBuild/
+          ls -la vendor/WebKit/WebKitBuild/Release/lib/
 
       - name: Setup vendor/icu-ohos
         run: |
@@ -106,7 +107,9 @@ jobs:
           cmake -B build/ohos-release -G Ninja \
             -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/ohos-aarch64.cmake \
             -DCMAKE_BUILD_TYPE=${{ env.CMAKE_BUILD_TYPE }} \
-            -DENABLE_LTO=ON
+            -DENABLE_LTO=ON \
+            -DWEBKIT_PREBUILT=ON \
+            -DWEBKIT_PATH=vendor/WebKit/WebKitBuild/Release
 
       - name: Build Bun
         run: ninja -C build/ohos-release bun
