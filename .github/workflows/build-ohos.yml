@@ -81,15 +81,13 @@ jobs:
           # vendor/icu-ohos is not tracked in git, must be set up for CI
           # OHOS SDK provides shared libicu.so, but WebKit cmake expects static .a files
           # Create .a symlinks to .so files (linker will handle this)
-          mkdir -p vendor/icu-ohos/{include,lib}
+          mkdir -p vendor/icu-ohos/include
+          mkdir -p vendor/icu-ohos/lib
           SDK_NATIVE="${OHOS_SDK_NATIVE:-$HOME/setup-ohos-sdk/linux/native}"
 
           # Copy ICU headers from sysroot
           if [ -d "${SDK_NATIVE}/sysroot/usr/include/unicode" ]; then
             cp -r "${SDK_NATIVE}/sysroot/usr/include/unicode" vendor/icu-ohos/include/
-          fi
-          if [ -d "${SDK_NATIVE}/sysroot/usr/include/unicode/" ]; then
-            cp -r "${SDK_NATIVE}/sysroot/usr/include/unicode/" vendor/icu-ohos/include/
           fi
 
           # Create .a symlinks to .so (linker handles shared libs as static)
