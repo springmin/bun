@@ -103,13 +103,13 @@ jobs:
           # OHOS SDK provides a single libicu.so, but WebKit cmake expects
           # separate ICU libraries (libicuuc.a, libicui18n.a, libicudata.a)
           # Create symlinks from the single libicu.so to satisfy cmake
-          mkdir -p vendor/icu-ohos/include
+          mkdir -p vendor/icu-ohos/include/unicode
           mkdir -p vendor/icu-ohos/lib
           SDK_NATIVE="${OHOS_SDK_NATIVE:-$HOME/setup-ohos-sdk/linux/native}"
 
-          # Copy ICU headers from sysroot
+          # Copy ALL ICU headers from sysroot recursively
           if [ -d "${SDK_NATIVE}/sysroot/usr/include/unicode" ]; then
-            cp -r "${SDK_NATIVE}/sysroot/usr/include/unicode" vendor/icu-ohos/include/
+            cp -r "${SDK_NATIVE}/sysroot/usr/include/unicode/"* vendor/icu-ohos/include/unicode/
             echo "=== ICU headers copied ==="
             ls -la vendor/icu-ohos/include/
           else
@@ -129,8 +129,14 @@ jobs:
       - name: Configure build
         run: |
           echo "=== ICU headers check ==="
-          ls -la vendor/icu-ohos/include/ 2>/dev/null || echo "No ICU include"
-          ls -la vendor/icu-ohos/include/unicode/ 2>/dev/null | head -10 || echo "No unicode dir"
+          ls -la vendor/icu-ohos/include/unicode/ 2>/dev/null | head -20 || echo "No unicode dir"
+
+          # Check if ustring.h exists
+          if [ -f "vendor/icu-ohos/include/unicode/ustring.h" ]; then
+            echo "ustring.h found!"
+          else
+            echo "ERROR: ustring.h NOT found in vendor/icu-ohos/include/unicode/"
+          fi
 
           cmake -B build/ohos-release -G Ninja \
             -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/ohos-aarch64.cmake \
