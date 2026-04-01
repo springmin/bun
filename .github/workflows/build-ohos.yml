@@ -98,7 +98,7 @@ jobs:
               ln -sf "${OHOS_LIB}/lib${lib}.so" "lib${lib}.a"
             fi
           done
-          ls -la vendor/icu-ohos/lib/
+          ls -la
 
       - name: Configure build
         run: |
