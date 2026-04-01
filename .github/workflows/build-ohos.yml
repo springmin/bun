@@ -90,6 +90,10 @@ jobs:
           ls -la vendor/WebKit/WebKitBuild/lib/ 2>/dev/null || echo "No lib"
           echo "=== JavaScriptCore ==="
           ls -la vendor/WebKit/WebKitBuild/JavaScriptCore/ 2>/dev/null || echo "No JavaScriptCore"
+          echo "=== JavaScriptCore/PrivateHeaders ==="
+          ls -la vendor/WebKit/WebKitBuild/JavaScriptCore/PrivateHeaders/ 2>/dev/null || echo "No PrivateHeaders"
+          echo "=== JavaScriptCore/PrivateHeaders/JavaScriptCore ==="
+          ls -la vendor/WebKit/WebKitBuild/JavaScriptCore/PrivateHeaders/JavaScriptCore/ 2>/dev/null | head -10
           echo "=== WTF ==="
           ls -la vendor/WebKit/WebKitBuild/WTF/ 2>/dev/null || echo "No WTF"
 
