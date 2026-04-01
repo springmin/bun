@@ -1328,11 +1328,10 @@ endif()
 include_directories(${WEBKIT_INCLUDE_PATH})
 
 # For prebuilt WebKit, add PrivateHeaders to find JSC internal headers like JSCJSValue.h
+# The file is at JavaScriptCore/PrivateHeaders/JavaScriptCore/JSCJSValue.h
+# so we need JavaScriptCore/PrivateHeaders as an include path
 if(WEBKIT_PREBUILT)
-  target_include_directories(${bun} PRIVATE
-    ${WEBKIT_PATH}/JavaScriptCore/PrivateHeaders
-    ${WEBKIT_PATH}/JavaScriptCore/PrivateHeaders/JavaScriptCore
-  )
+  include_directories(${WEBKIT_PATH}/JavaScriptCore/PrivateHeaders)
 endif()
 
 # When building with a local WebKit, ensure JSC is built before compiling Bun's C++ sources.
