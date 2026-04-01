@@ -71,11 +71,20 @@ jobs:
         run: |
           # Download prebuilt WebKit from GitHub Release instead of building from source
           # This avoids C++20 compatibility issues between WebKit and OHOS SDK libc++
-          mkdir -p vendor/WebKit/WebKitBuild
+          mkdir -p vendor/WebKit/WebKitBuild/Release
           wget -q -O /tmp/bun-webkit-ohos-aarch64-release.tar.gz \
             https://github.com/springmin/bun/releases/download/webkit-ohos-prebuilt/bun-webkit-ohos-aarch64-release.tar.gz
-          tar xzf /tmp/bun-webkit-ohos-aarch64-release.tar.gz -C vendor/WebKit/WebKitBuild/
-          ls -la vendor/WebKit/WebKitBuild/Release/lib/
+          tar xzf /tmp/bun-webkit-ohos-aarch64-release.tar.gz -C vendor/WebKit/WebKitBuild/Release/
+
+          # Check what was extracted
+          echo "=== Release directory structure ==="
+          ls -la vendor/WebKit/WebKitBuild/Release/
+          echo "=== JavaScriptCore Headers ==="
+          ls -la vendor/WebKit/WebKitBuild/Release/JavaScriptCore/ 2>/dev/null || echo "No Headers"
+          echo "=== JavaScriptCore PrivateHeaders ==="
+          ls -la vendor/WebKit/WebKitBuild/Release/JavaScriptCore/PrivateHeaders/ 2>/dev/null || echo "No PrivateHeaders"
+          echo "=== lib/ ==="
+          ls -la vendor/WebKit/WebKitBuild/Release/lib/ 2>/dev/null || echo "No lib"
 
       - name: Setup vendor/icu-ohos
         run: |
