@@ -110,6 +110,10 @@ jobs:
           # Copy ICU headers from sysroot
           if [ -d "${SDK_NATIVE}/sysroot/usr/include/unicode" ]; then
             cp -r "${SDK_NATIVE}/sysroot/usr/include/unicode" vendor/icu-ohos/include/
+            echo "=== ICU headers copied ==="
+            ls -la vendor/icu-ohos/include/
+          else
+            echo "WARNING: ICU headers not found at ${SDK_NATIVE}/sysroot/usr/include/unicode"
           fi
 
           # Create symlinks for each expected ICU library
@@ -124,6 +128,10 @@ jobs:
 
       - name: Configure build
         run: |
+          echo "=== ICU headers check ==="
+          ls -la vendor/icu-ohos/include/ 2>/dev/null || echo "No ICU include"
+          ls -la vendor/icu-ohos/include/unicode/ 2>/dev/null | head -10 || echo "No unicode dir"
+
           cmake -B build/ohos-release -G Ninja \
             -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/ohos-aarch64.cmake \
             -DCMAKE_BUILD_TYPE=${{ env.CMAKE_BUILD_TYPE }} \
