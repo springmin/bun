@@ -35,12 +35,15 @@ jobs:
 
       - name: Setup environment
         run: |
+          # Add LLVM apt repository for clang-21
+          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
+          echo "deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-21 main" | sudo tee /etc/apt/sources.list.d/llvm-21.list
           sudo apt update
           sudo apt install -y \
             build-essential cmake ninja-build pkg-config \
             python3 curl wget unzip autoconf automake libtool \
             bison flex gperf gawk ruby ruby-dev \
-            llvm-21 clang-21 lld-21 \
+            clang-21 lld-21 \
             qemu-user qemu-user-static \
             xz-utils
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
