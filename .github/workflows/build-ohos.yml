@@ -71,24 +71,16 @@ jobs:
         run: |
           # vendor/zig is not tracked in git, must be downloaded for CI
           # Zig compiler runs on host (x86_64 Linux) and cross-compiles to aarch64-linux-ohos
-          # Use the same commit as in cmake/tools/SetupZig.cmake
+          # IMPORTANT: Use Zig 0.15.2 to match local build (Bun requires newer Zig API)
           mkdir -p vendor/zig
           cd vendor/zig
-          ZIG_COMMIT="c031cbebf5b063210473ff5204a24ebfb2492c72"
-          # Download the full Zig release (includes lib/ directory)
-          wget -q "https://ziglang.org/download/${ZIG_COMMIT}/zig-linux-x86_64-${ZIG_COMMIT}.tar.xz" -O zig.tar.xz || \
-          wget -q "https://ziglang.org/download/0.14.0/zig-linux-x86_64-0.14.0.tar.xz" -O zig.tar.xz
+          # Download Zig 0.15.2 (same version as local build)
+          wget -q "https://ziglang.org/download/0.15.2/zig-linux-x86_64-0.15.2.tar.xz" -O zig.tar.xz
           # Extract the entire tarball
           tar xf zig.tar.xz
           # Move all contents to vendor/zig root (including lib/)
-          if [ -d "zig-linux-x86_64-${ZIG_COMMIT}" ]; then
-            cp -r zig-linux-x86_64-${ZIG_COMMIT}/* .
-            rm -rf zig-linux-x86_64-${ZIG_COMMIT}
-          elif [ -d "zig-linux-x86_64-0.14.0" ]; then
-            cp -r zig-linux-x86_64-0.14.0/* .
-            rm -rf zig-linux-x86_64-0.14.0
-          fi
-          rm -f zig.tar.xz
+          cp -r zig-linux-x86_64-0.15.2/* .
+          rm -rf zig-linux-x86_64-0.15.2 zig.tar.xz
           chmod +x zig
           ./zig version
           ls -la lib/
