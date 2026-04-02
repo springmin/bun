@@ -1413,11 +1413,18 @@ else()
     if(OHOS_BUILD)
         set(ICU_ROOT "${CMAKE_SOURCE_DIR}/vendor/icu-ohos")
         set(ICU_INCLUDE_DIR "${ICU_ROOT}/include")
+        set(ICU_LIBRARY_DIR "${ICU_ROOT}/lib")
         target_include_directories(${bun} PRIVATE ${ICU_INCLUDE_DIR})
+        target_link_libraries(${bun} PRIVATE
+            ${ICU_LIBRARY_DIR}/libicuuc.a
+            ${ICU_LIBRARY_DIR}/libicui18n.a
+            ${ICU_LIBRARY_DIR}/libicudata.a
+        )
+    else()
+        target_link_libraries(${bun} PRIVATE ${WEBKIT_LIB_PATH}/libicudata.a)
+        target_link_libraries(${bun} PRIVATE ${WEBKIT_LIB_PATH}/libicui18n.a)
+        target_link_libraries(${bun} PRIVATE ${WEBKIT_LIB_PATH}/libicuuc.a)
     endif()
-    target_link_libraries(${bun} PRIVATE ${WEBKIT_LIB_PATH}/libicudata.a)
-    target_link_libraries(${bun} PRIVATE ${WEBKIT_LIB_PATH}/libicui18n.a)
-    target_link_libraries(${bun} PRIVATE ${WEBKIT_LIB_PATH}/libicuuc.a)
   endif()
 endif()
 
