@@ -116,18 +116,8 @@ jobs:
           # OHOS SDK provides a single libicu.so, but WebKit cmake expects
           # separate ICU libraries (libicuuc.a, libicui18n.a, libicudata.a)
           # Create symlinks from the single libicu.so to satisfy cmake
-          mkdir -p vendor/icu-ohos/include/unicode
           mkdir -p vendor/icu-ohos/lib
           SDK_NATIVE="${OHOS_SDK_NATIVE:-$HOME/setup-ohos-sdk/linux/native}"
-
-          # Copy ALL ICU headers from sysroot recursively
-          if [ -d "${SDK_NATIVE}/sysroot/usr/include/unicode" ]; then
-            cp -r "${SDK_NATIVE}/sysroot/usr/include/unicode/"* vendor/icu-ohos/include/unicode/
-            echo "=== ICU headers copied ==="
-            ls -la vendor/icu-ohos/include/
-          else
-            echo "WARNING: ICU headers not found at ${SDK_NATIVE}/sysroot/usr/include/unicode"
-          fi
 
           # Create symlinks for each expected ICU library
           OHOS_LIB="${SDK_NATIVE}/sysroot/usr/lib/aarch64-linux-ohos"
