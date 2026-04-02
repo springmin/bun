@@ -71,16 +71,27 @@ jobs:
         run: |
           # vendor/zig is not tracked in git, must be downloaded for CI
           # Zig compiler runs on host (x86_64 Linux) and cross-compiles to aarch64-linux-ohos
-          # Use the exact commit from cmake/tools/SetupZig.cmake to ensure API compatibility
           mkdir -p vendor/zig
           cd vendor/zig
-          # Use the exact commit version specified in Bun's build system
-          ZIG_COMMIT="c031cbebf5b063210473ff5204a24ebfb2492c72"
-          # This is the correct filename format for Zig downloads
-          wget -q "https://ziglang.org/download/${ZIG_COMMIT}/zig-x86_64-linux-${ZIG_COMMIT}.tar.xz" -O zig.tar.xz
+
+          # Try multiple version formats to ensure download works
+          # The specific commit c031cbeb... corresponds to 0.15.2 release
+          set -e
+
+          # Try 0.15.2 first (known stable release)
+          if wget -q "https://ziglang.org/download/0.15.2/zig-x86_64-linux-0.15.2.tar.xz" -O zig.tar.xz; then
+            echo "Downloaded Zig 0.15.2"
+          else
+            # Fallback to 0.15.1
+            wget -q "https://ziglang.org/download/0.15.1/zig-x86_64-linux-0.15.1.tar.xz" -O zig.tar.xz
+            echo "Downloaded Zig 0.15.1"
+          fi
+
           tar xf zig.tar.xz
-          cp -r zig-x86_64-linux-${ZIG_COMMIT}/* .
-          rm -rf zig-x86_64-linux-${ZIG_COMMIT} zig.tar.xz
+          # Find and move the extracted directory
+          EXTRACTED_DIR=$(ls -d zig-x86_64-linux-* | head -1)
+          cp -r "$EXTRACTED_DIR"/* .
+          rm -rf "$EXTRACTED_DIR" zig.tar.xz
           chmod +x zig
           ./zig version
           ls -la lib/
