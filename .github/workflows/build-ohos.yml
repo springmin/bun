@@ -140,22 +140,18 @@ jobs:
 
       - name: Setup vendor/icu-ohos
         run: |
-          # vendor/icu-ohos is not tracked in git, must be set up for CI
-          # OHOS SDK provides a single libicu.so, but WebKit cmake expects
-          # separate ICU libraries (libicuuc.a, libicui18n.a, libicudata.a)
-          # Create symlinks from the single libicu.so to satisfy cmake
-          mkdir -p vendor/icu-ohos/lib
-          SDK_NATIVE="${OHOS_SDK_NATIVE:-$HOME/setup-ohos-sdk/linux/native}"
+          # Download prebuilt ICU static libraries for OHOS
+          # These were compiled from source with OHOS toolchain
+          mkdir -p vendor/icu-ohos
+          cd vendor/icu-ohos
+          wget -q -O /tmp/icu-ohos-static-libs.tar.gz \
+            https://github.com/springmin/bun/releases/download/webkit-ohos-prebuilt/icu-ohos-static-libs.tar.gz
+          tar xzf /tmp/icu-ohos-static-libs.tar.gz
+          rm -f /tmp/icu-ohos-static-libs.tar.gz
 
-          # Create symlinks for each expected ICU library
-          OHOS_LIB="${SDK_NATIVE}/sysroot/usr/lib/aarch64-linux-ohos"
-          cd vendor/icu-ohos/lib
-          for lib in icuuc icui18n icudata; do
-            if [ -f "${OHOS_LIB}/libicu.so" ]; then
-              ln -sf "${OHOS_LIB}/libicu.so" "lib${lib}.a"
-            fi
-          done
-          ls -la
+          echo "=== ICU static libraries ==="
+          ls -la lib/
+          file lib/*.a | head -5
 
       - name: Configure build
         run: |
