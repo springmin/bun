@@ -26,17 +26,20 @@ if(WEBKIT_PREBUILT)
   # WEBKIT_PATH should point to extracted prebuilt tarball (Release/ directory)
   message(STATUS "Using prebuilt WebKit at ${WEBKIT_PATH}")
 
-  set(WEBKIT_INCLUDE_PATH ${WEBKIT_PATH})
-  set(WEBKIT_LIB_PATH ${WEBKIT_PATH}/lib)
+  # Convert to absolute path to avoid linker issues with relative paths
+  get_filename_component(WEBKIT_PATH_ABS "${WEBKIT_PATH}" ABSOLUTE)
+
+  set(WEBKIT_INCLUDE_PATH ${WEBKIT_PATH_ABS})
+  set(WEBKIT_LIB_PATH ${WEBKIT_PATH_ABS}/lib)
 
   include_directories(
-    ${WEBKIT_PATH}
-    ${WEBKIT_PATH}/JavaScriptCore/Headers
-    ${WEBKIT_PATH}/JavaScriptCore/Headers/JavaScriptCore
-    ${WEBKIT_PATH}/JavaScriptCore/PrivateHeaders
-    ${WEBKIT_PATH}/bmalloc/Headers
-    ${WEBKIT_PATH}/WTF/Headers
-    ${WEBKIT_PATH}/JavaScriptCore/PrivateHeaders/JavaScriptCore
+    ${WEBKIT_PATH_ABS}
+    ${WEBKIT_PATH_ABS}/JavaScriptCore/Headers
+    ${WEBKIT_PATH_ABS}/JavaScriptCore/Headers/JavaScriptCore
+    ${WEBKIT_PATH_ABS}/JavaScriptCore/PrivateHeaders
+    ${WEBKIT_PATH_ABS}/bmalloc/Headers
+    ${WEBKIT_PATH_ABS}/WTF/Headers
+    ${WEBKIT_PATH_ABS}/JavaScriptCore/PrivateHeaders/JavaScriptCore
   )
 
   # No build target needed - libraries already built

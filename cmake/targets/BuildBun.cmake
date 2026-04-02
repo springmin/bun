@@ -1335,10 +1335,10 @@ include_directories(${WEBKIT_INCLUDE_PATH})
 # Use target_include_directories since bun target is created before SetupWebKit is included
 if(WEBKIT_PREBUILT)
   target_include_directories(${bun} PRIVATE
-    ${WEBKIT_PATH}/JavaScriptCore/PrivateHeaders
-    ${WEBKIT_PATH}/JavaScriptCore/PrivateHeaders/JavaScriptCore
+    ${WEBKIT_PATH_ABS}/JavaScriptCore/PrivateHeaders
+    ${WEBKIT_PATH_ABS}/JavaScriptCore/PrivateHeaders/JavaScriptCore
   )
-  message(STATUS "Added WebKit PrivateHeaders includes: ${WEBKIT_PATH}/JavaScriptCore/PrivateHeaders and JavaScriptCore/PrivateHeaders/JavaScriptCore")
+  message(STATUS "Added WebKit PrivateHeaders includes: ${WEBKIT_PATH_ABS}/JavaScriptCore/PrivateHeaders and JavaScriptCore/PrivateHeaders/JavaScriptCore")
 endif()
 
 # When building with a local WebKit, ensure JSC is built before compiling Bun's C++ sources.

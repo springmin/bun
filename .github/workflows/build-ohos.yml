@@ -127,8 +127,8 @@ jobs:
           # Check what we have
           echo "=== WebKitBuild directory ==="
           ls -la vendor/WebKit/WebKitBuild/
-          echo "=== lib/ ==="
-          ls -la vendor/WebKit/WebKitBuild/lib/ 2>/dev/null || echo "No lib"
+          echo "=== WebKit lib directory ==="
+          ls -la vendor/WebKit/WebKitBuild/lib/ 2>/dev/null || echo "No lib directory in WebKitBuild root"
           echo "=== JavaScriptCore ==="
           ls -la vendor/WebKit/WebKitBuild/JavaScriptCore/ 2>/dev/null || echo "No JavaScriptCore"
           echo "=== JavaScriptCore/PrivateHeaders ==="
