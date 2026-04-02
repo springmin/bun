@@ -75,21 +75,23 @@ jobs:
           mkdir -p vendor/zig
           cd vendor/zig
           ZIG_COMMIT="c031cbebf5b063210473ff5204a24ebfb2492c72"
-          # Try to download the specific commit version
+          # Download the full Zig release (includes lib/ directory)
           wget -q "https://ziglang.org/download/${ZIG_COMMIT}/zig-linux-x86_64-${ZIG_COMMIT}.tar.xz" -O zig.tar.xz || \
           wget -q "https://ziglang.org/download/0.14.0/zig-linux-x86_64-0.14.0.tar.xz" -O zig.tar.xz
+          # Extract the entire tarball
           tar xf zig.tar.xz
-          # Move zig binary to vendor/zig root
+          # Move all contents to vendor/zig root (including lib/)
           if [ -d "zig-linux-x86_64-${ZIG_COMMIT}" ]; then
-            mv zig-linux-x86_64-${ZIG_COMMIT}/zig .
+            cp -r zig-linux-x86_64-${ZIG_COMMIT}/* .
             rm -rf zig-linux-x86_64-${ZIG_COMMIT}
           elif [ -d "zig-linux-x86_64-0.14.0" ]; then
-            mv zig-linux-x86_64-0.14.0/zig .
+            cp -r zig-linux-x86_64-0.14.0/* .
             rm -rf zig-linux-x86_64-0.14.0
           fi
           rm -f zig.tar.xz
           chmod +x zig
           ./zig version
+          ls -la lib/
 
       - name: Download prebuilt WebKit
         run: |
