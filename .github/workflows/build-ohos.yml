@@ -201,7 +201,7 @@ jobs:
         run: |
           mkdir -p bun-ohos-aarch64
           cp build/ohos-release/bun bun-ohos-aarch64/
-          cp LICENSE bun-ohos-aarch64/
+          cp LICENSE.md bun-ohos-aarch64/LICENSE 2>/dev/null || echo "LICENSE.md not found, skipping"
           tar czf bun-ohos-aarch64-${{ github.sha }}.tar.gz bun-ohos-aarch64/
 
       - name: Upload release package
