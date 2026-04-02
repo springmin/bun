@@ -75,12 +75,13 @@ jobs:
           mkdir -p vendor/zig
           cd vendor/zig
           # Download Zig 0.15.2 (same version as local build)
-          wget -q "https://ziglang.org/download/0.15.2/zig-linux-x86_64-0.15.2.tar.xz" -O zig.tar.xz
+          # Correct filename format: zig-x86_64-linux-VERSION.tar.xz (not zig-linux-x86_64-VERSION.tar.xz)
+          wget -q "https://ziglang.org/download/0.15.2/zig-x86_64-linux-0.15.2.tar.xz" -O zig.tar.xz
           # Extract the entire tarball
           tar xf zig.tar.xz
           # Move all contents to vendor/zig root (including lib/)
-          cp -r zig-linux-x86_64-0.15.2/* .
-          rm -rf zig-linux-x86_64-0.15.2 zig.tar.xz
+          cp -r zig-x86_64-linux-0.15.2/* .
+          rm -rf zig-x86_64-linux-0.15.2 zig.tar.xz
           chmod +x zig
           ./zig version
           ls -la lib/
