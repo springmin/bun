@@ -176,11 +176,19 @@ std::__n::function -> NSt4__n18function
 ### 后续优化 (优先级: 低)
 
 1. **进一步减小文件大小**
-   - UPX 压缩（ARM64 静态链接支持有限）
+   - ~~UPX 压缩~~ ❌ **不可用** - UPX 压缩后导致真机签名失败（4K 对齐被破坏）
+   - 当前方案：使用 LTO 优化（已启用，文件大小 98MB）
 
-2. **CI/CD 集成**
-   - 自动化构建流程
-   - 真机自动化测试
+2. **CI/CD 集成** ✅ **已完成**
+   - ✅ GitHub Actions 自动化构建流程
+   - ✅ 构建产物自动上传到 Artifacts
+   - ✅ Release 自动发布
+   - ⚠️ 真机自动化测试（需要 OHOS 设备池）
+
+3. **Release 发布** ✅ **已完成**
+   - Release: https://github.com/springmin/bun/releases/tag/bun-ohos-aarch64
+   - 包含：bun 可执行文件 + LICENSE
+   - 验证：QEMU 测试通过
 
 ## 相关文档
 
