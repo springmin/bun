@@ -1,0 +1,158 @@
+name: Build WebKit for OHOS
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_type:
+        description: "Build type"
+        required: true
+        default: "Release"
+        type: choice
+        options:
+          - Release
+          - Debug
+  push:
+    branches: [ohos]
+  pull_request:
+    branches: [ohos]
+
+env:
+  CMAKE_BUILD_TYPE: ${{ github.event.inputs.build_type || 'Release' }}
+
+jobs:
+  build-webkit-ohos:
+    name: Build WebKit for OHOS (aarch64)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 240
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Setup environment
+        run: |
+          # Add LLVM apt repository for clang-21
+          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
+          echo "deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-21 main" | sudo tee /etc/apt/sources.list.d/llvm-21.list
+          sudo apt update
+          sudo apt install -y \
+            build-essential cmake ninja-build pkg-config \
+            python3 curl wget unzip autoconf automake libtool \
+            bison flex gperf gawk ruby ruby-dev \
+            clang-21 lld-21 libc++-21-dev libc++abi-21-dev \
+            qemu-user qemu-user-static \
+            xz-utils
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+      - name: Install OHOS SDK
+        uses: openharmony-rs/setup-ohos-sdk@v1.0.0
+        with:
+          version: "5.0.0"
+          cache: true
+          mirror: true
+
+      - name: Setup Rust target for OHOS
+        run: |
+          rustup target add aarch64-unknown-linux-ohos
+          export OHOS_NDK_HOME="${OHOS_SDK_NATIVE:-$HOME/setup-ohos-sdk/linux}"
+          export PATH="$OHOS_NDK_HOME/llvm/bin:$PATH"
+          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_OHOS_LINKER=$OHOS_NDK_HOME/llvm/bin/aarch64-unknown-linux-ohos-clang" >> $GITHUB_ENV
+          rustup show
+
+      - name: Generate source lists
+        run: |
+          mkdir -p cmake/sources
+          bun run glob-sources
+
+      - name: Setup vendor/zig
+        run: |
+          mkdir -p vendor/zig
+          cd vendor/zig
+          wget -q "https://github.com/springmin/bun/releases/download/webkit-ohos-prebuilt/zig-x86_64-linux-0.15.2-custom.tar.xz" -O zig.tar.xz
+          tar xf zig.tar.xz
+          rm -f zig.tar.xz
+          chmod +x zig
+          ./zig version
+          ls -la lib/
+
+      - name: Cache WebKit build
+        uses: actions/cache@v4
+        with:
+          path: vendor/webkit-build-ohos
+          key: webkit-ohos-prebuilt-${{ hashFiles('vendor/build-webkit-ohos-v2.sh', 'cmake/toolchains/ohos-aarch64.cmake') }}
+
+      - name: Download WebKit source
+        run: |
+          if [ ! -f "vendor/WebKit/CMakeLists.txt" ]; then
+            echo "=== Downloading WebKit source ==="
+            git clone --single-branch --branch main https://github.com/oven-sh/WebKit vendor/WebKit
+          else
+            echo "=== WebKit source already exists ==="
+          fi
+
+      - name: Build WebKit for OHOS
+        run: |
+          cd vendor
+          export OHOS_SDK_NATIVE="${OHOS_SDK_NATIVE:-$HOME/setup-ohos-sdk/linux}"
+          
+          echo "=== Building WebKit from source ==="
+          bash build-webkit-ohos-v2.sh
+
+          mkdir -p WebKit/WebKitBuild/Release/lib
+          cp webkit-build-ohos/lib/*.a WebKit/WebKitBuild/Release/lib/
+
+          if [ -d "webkit-build-ohos/JavaScriptCore/PrivateHeaders" ]; then
+            cp -r webkit-build-ohos/JavaScriptCore/PrivateHeaders WebKit/WebKitBuild/Release/
+          fi
+          if [ -d "webkit-build-ohos/WTF/Headers" ]; then
+            cp -r webkit-build-ohos/WTF/Headers WebKit/WebKitBuild/Release/
+          fi
+
+          echo "=== WebKit build output ==="
+          ls -lh WebKit/WebKitBuild/Release/lib/*.a
+          file WebKit/WebKitBuild/Release/lib/libJavaScriptCore.a
+          
+          OBJ_COUNT=$(llvm-ar t WebKit/WebKitBuild/Release/lib/libJavaScriptCore.a | wc -l)
+          echo "libJavaScriptCore.a object files: $OBJ_COUNT"
+
+      - name: Package WebKit prebuilt
+        run: |
+          cd vendor/WebKit/WebKitBuild/Release
+          tar czf ../../../webkit-ohos-aarch64.tar.gz lib/ Headers/
+          ls -lh ../../webkit-ohos-aarch64.tar.gz
+
+      - name: Upload WebKit artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: webkit-ohos-aarch64-${{ env.CMAKE_BUILD_TYPE }}
+          path: vendor/WebKit/WebKitBuild/Release/../webkit-ohos-aarch64.tar.gz
+          retention-days: 30
+
+      - name: Create WebKit release
+        if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/ohos')
+        run: |
+          cd vendor/WebKit/WebKitBuild/Release
+          tar czf ../../webkit-ohos-aarch64-${{ env.CMAKE_BUILD_TYPE }}.tar.gz lib/ Headers/
+          ls -lh ../../webkit-ohos-${{ env.CMAKE_BUILD_TYPE }}.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload WebKit release package
+        if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/ohos')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: webkit-ohos-prebuilt
+          files: vendor/WebKit/WebKitBuild/Release/../webkit-ohos-${{ env.CMAKE_BUILD_TYPE }}.tar.gz
+          generate_release_notes: true
+          name: WebKit OHOS Prebuilt ${{ env.CMAKE_BUILD_TYPE }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
