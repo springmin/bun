@@ -237,7 +237,7 @@ jobs:
         run: |
           cd vendor/WebKit/WebKitBuild/Release
           tar czf ../webkit-ohos-aarch64-${{ env.CMAKE_BUILD_TYPE }}.tar.gz lib/ Headers/
-          ls -lh ../webkit-ohos-${{ env.CMAKE_BUILD_TYPE }}.tar.gz
+          ls -lh ../webkit-ohos-aarch64-${{ env.CMAKE_BUILD_TYPE }}.tar.gz
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -246,7 +246,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: webkit-ohos-prebuilt
-          files: vendor/WebKit/webkit-ohos-${{ env.CMAKE_BUILD_TYPE }}.tar.gz
+          files: vendor/WebKit/webkit-ohos-aarch64-${{ env.CMAKE_BUILD_TYPE }}.tar.gz
           generate_release_notes: true
           name: WebKit OHOS Prebuilt ${{ env.CMAKE_BUILD_TYPE }}
         env:
