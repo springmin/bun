@@ -138,9 +138,13 @@ jobs:
 
            # Verify build
            echo "=== ICU 75.1 build complete ==="
-           ls -lh icu-ohos/lib/*.a
+           ls -lh icu-ohos/lib/
+           echo "=== ICU library files ==="
+           find icu-ohos/lib -name "*.a" -type f
            echo "=== ICU headers ==="
-           ls -la icu-ohos/include/unicode/ | head -10
+           ls -la icu-ohos/include/unicode/ 2>/dev/null || echo "No unicode headers"
+           echo "=== ICU include structure ==="
+           find icu-ohos/include -name "*.h" -type f | head -20
 
           # Clean up build directories to save space
           rm -rf icu-build-native icu-build-ohos icu
