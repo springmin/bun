@@ -25,10 +25,12 @@ set(CMAKE_SYSTEM_VERSION 1)
 set(ABI musl)
 set(OHOS_BUILD ON CACHE BOOL "Building for OHOS platform")
 
-# Provide dummy Threads target for OHOS to satisfy WebKit's link requirement
-if(OHOS_BUILD AND NOT TARGET Threads::Threads)
-    add_library(Threads::Threads INTERFACE)
-endif()
+# Threading: OHOS uses musl where pthread is part of libc
+# Prefer pthread and let FindThreads create the Threads::Threads target
+set(THREADS_PREFER_PTHREADS TRUE)
+set(CMAKE_USE_PTHREADS_INIT ON)
+# No extra pthread library needed (pthread in libc)
+set(CMAKE_THREAD_LIBS_INIT "")
 
 # SDK path detection
 if(NOT DEFINED OHOS_SDK_NATIVE)

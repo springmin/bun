@@ -1,8 +1,5 @@
-# OHOS uses musl libc where pthread is part of libc, not a separate library
-# Skip find_package(Threads) for OHOS to avoid -lpthreads linking error
-if (NOT OHOS_BUILD)
-    find_package(Threads REQUIRED)
-endif()
+# Find Threads package (creates Threads::Threads target)
+find_package(Threads REQUIRED)
 
 if (MSVC)
     include(OptionsMSVC)
@@ -223,6 +220,9 @@ endif ()
  else ()
      find_package(ICU 70.1 REQUIRED COMPONENTS data i18n uc)
  endif ()
+
+# Always find Threads (FindThreads will create Threads::Threads target)
+find_package(Threads REQUIRED)
 
 if (APPLE)
     add_definitions(-DU_DISABLE_RENAMING=1)
