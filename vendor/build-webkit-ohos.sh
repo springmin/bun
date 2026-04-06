@@ -65,16 +65,6 @@ echo ""
    echo ""
    echo "=== Configuring WebKit ==="
    
-    # Ensure custom FindICU.cmake is in the expected location for OptionsJSCOnly.cmake
-    # The workflow clones WebKit from upstream, but our custom FindICU.cmake is in
-    # the main repository's vendor/WebKit/Source/cmake/. Copy it to the cloned WebKit.
-    if [ -f "${BUN_ROOT}/vendor/WebKit/Source/cmake/FindICU.cmake" ]; then
-      echo "Copying custom FindICU.cmake from main repo to $WEBKIT_SOURCE/cmake/"
-      mkdir -p "$WEBKIT_SOURCE/cmake"
-      cp -f "${BUN_ROOT}/vendor/WebKit/Source/cmake/FindICU.cmake" "$WEBKIT_SOURCE/cmake/"
-    else
-      echo "WARNING: Custom FindICU.cmake not found in main repo, falling back to system FindICU"
-    fi
    
    cmake -B "$BUILD_DIR" \
     -S "$WEBKIT_SOURCE" \
