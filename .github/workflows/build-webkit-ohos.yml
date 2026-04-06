@@ -39,7 +39,6 @@ jobs:
 
       - name: Setup environment
         run: |
-          # Add LLVM apt repository for clang-21
           wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
           echo "deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-21 main" | sudo tee /etc/apt/sources.list.d/llvm-21.list
           sudo apt update
@@ -68,10 +67,19 @@ jobs:
           echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_OHOS_LINKER=$OHOS_NDK_HOME/llvm/bin/aarch64-unknown-linux-ohos-clang" >> $GITHUB_ENV
           rustup show
 
-      - name: Generate source lists
+      - name: Setup ICU prebuilt
         run: |
-          mkdir -p cmake/sources
-          bun run glob-sources
+          cd vendor
+          if [ ! -d "icu-ohos/lib" ]; then
+            echo "Downloading prebuilt ICU for OHOS..."
+            wget -q "https://github.com/springmin/bun/releases/download/webkit-ohos-prebuilt/icu-ohos-static-libs.tar.gz" -O icu-prebuilt.tar.gz
+            tar xzf icu-prebuilt.tar.gz
+            rm icu-prebuilt.tar.gz
+            echo "ICU prebuilt extracted."
+          else
+            echo "ICU already exists (cached)."
+          fi
+          ls -lh icu-ohos/lib/
 
       - name: Setup vendor/zig
         run: |
@@ -83,12 +91,6 @@ jobs:
           chmod +x zig
           ./zig version
           ls -la lib/
-
-      - name: Cache WebKit build
-        uses: actions/cache@v4
-        with:
-          path: vendor/webkit-build-ohos
-          key: webkit-ohos-prebuilt-${{ hashFiles('vendor/build-webkit-ohos-v2.sh', 'cmake/toolchains/ohos-aarch64.cmake') }}
 
       - name: Download WebKit source
         run: |
@@ -103,26 +105,17 @@ jobs:
         run: |
           cd vendor
           export OHOS_SDK_NATIVE="${OHOS_SDK_NATIVE:-$HOME/setup-ohos-sdk/linux}"
+          export ICU_ROOT="$PWD/icu-ohos"
           
-          echo "=== Building WebKit from source ==="
-          bash build-webkit-ohos-v2.sh
-
-          mkdir -p WebKit/WebKitBuild/Release/lib
-          cp webkit-build-ohos/lib/*.a WebKit/WebKitBuild/Release/lib/
-
-          if [ -d "webkit-build-ohos/JavaScriptCore/PrivateHeaders" ]; then
-            cp -r webkit-build-ohos/JavaScriptCore/PrivateHeaders WebKit/WebKitBuild/Release/
-          fi
-          if [ -d "webkit-build-ohos/WTF/Headers" ]; then
-            cp -r webkit-build-ohos/WTF/Headers WebKit/WebKitBuild/Release/
-          fi
-
-          echo "=== WebKit build output ==="
-          ls -lh WebKit/WebKitBuild/Release/lib/*.a
-          file WebKit/WebKitBuild/Release/lib/libJavaScriptCore.a
+          echo "=== Building WebKit for OHOS ==="
+          echo "OHOS SDK: $OHOS_SDK_NATIVE"
+          echo "ICU: $ICU_ROOT"
           
-          OBJ_COUNT=$(llvm-ar t WebKit/WebKitBuild/Release/lib/libJavaScriptCore.a | wc -l)
-          echo "libJavaScriptCore.a object files: $OBJ_COUNT"
+          bash build-webkit-ohos.sh
+          
+          echo "=== Build Complete ==="
+          echo "Output:"
+          ls -lh WebKitBuild/Release/lib/
 
       - name: Package WebKit prebuilt
         run: |
