@@ -95,18 +95,33 @@ ninja -C "$BUILD_DIR" jsc
 
 echo ""
 echo "=== Installing to $WEBKIT_SOURCE/WebKitBuild/Release/ ==="
-ninja -C "$BUILD_DIR" install
 
-echo ""
-echo "=== Build Complete ==="
-echo "End time: $(date)"
+# Create directories
+mkdir -p "$WEBKIT_SOURCE/WebKitBuild/Release/lib"
+mkdir -p "$WEBKIT_SOURCE/WebKitBuild/Release/Headers/WTF"
+mkdir -p "$WEBKIT_SOURCE/WebKitBuild/Release/Headers/JavaScriptCore"
 
-# Verify output
-echo ""
-echo "=== Build Output ==="
-ls -lh "$BUILD_DIR/lib/"*.a
-ls -lh "$WEBKIT_SOURCE/WebKitBuild/Release/lib/"
-if [ -d "$WEBKIT_SOURCE/WebKitBuild/Release/Headers" ]; then
-    echo "Headers installed:"
-    ls -lh "$WEBKIT_SOURCE/WebKitBuild/Release/Headers/"
+# Copy libraries
+cp "$BUILD_DIR/lib/"*.a "$WEBKIT_SOURCE/WebKitBuild/Release/lib/"
+
+# Copy WTF headers from source (patched)
+cp -r "$WEBKIT_SOURCE/Source/WTF/wtf/." "$WEBKIT_SOURCE/WebKitBuild/Release/Headers/WTF/"
+
+# Copy JavaScriptCore public headers (API)
+cp -r "$WEBKIT_SOURCE/Source/JavaScriptCore/API/." "$WEBKIT_SOURCE/WebKitBuild/Release/Headers/JavaScriptCore/"
+
+# Copy top-level JavaScriptCore headers (e.g., JavaScriptCore.h, JSExportMacros.h, etc.)
+cp "$WEBKIT_SOURCE/Source/JavaScriptCore/"*.h "$WEBKIT_SOURCE/WebKitBuild/Release/Headers/JavaScriptCore/" 2>/dev/null || true
+
+# Copy internal headers if they exist (needed for some APIs)
+if [ -d "$WEBKIT_SOURCE/Source/JavaScriptCore/internal" ]; then
+    cp -r "$WEBKIT_SOURCE/Source/JavaScriptCore/internal/." "$WEBKIT_SOURCE/WebKitBuild/Release/Headers/JavaScriptCore/" 2>/dev/null || true
 fi
+
+echo ""
+echo "=== Build Summary ==="
+echo "Libraries:"
+ls -lh "$WEBKIT_SOURCE/WebKitBuild/Release/lib/"
+echo "Headers:"
+ls -lh "$WEBKIT_SOURCE/WebKitBuild/Release/Headers/WTF/" | head -5
+ls -lh "$WEBKIT_SOURCE/WebKitBuild/Release/Headers/JavaScriptCore/" | head -5
