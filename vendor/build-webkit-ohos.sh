@@ -77,7 +77,9 @@ echo "=== Configuring WebKit ==="
    -DUSE_BUN_JSC_ADDITIONS=ON \
    -DUSE_THIN_ARCHIVES=OFF \
    -DENABLE_REMOTE_INSPECTOR=ON \
-   -DICU_ROOT="$ICU_ROOT"
+   -DICU_ROOT="$ICU_ROOT" \
+   -DICU_INCLUDE_DIR="$ICU_ROOT/include" \
+   -DICU_LIBRARY_DIR="$ICU_ROOT/lib"
 
 
 # Build

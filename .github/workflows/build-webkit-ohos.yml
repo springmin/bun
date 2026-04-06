@@ -72,33 +72,40 @@ jobs:
 
       - name: Build ICU for OHOS
         run: |
-          # Build ICU 75.1 static libraries from source with OHOS toolchain
-          # This ensures reproducibility and matches WebKit requirements (ICU >= 70.1)
+          set -euo pipefail
+
           cd vendor
 
-          # Download ICU 75.1 source
-          echo "Downloading ICU 75.1 source..."
-          wget -q https://github.com/unicode-org/icu/releases/download/release-75-1/icu4c-75_1-src.tgz
-          tar xzf icu4c-75_1-src.tgz
-          rm icu4c-75_1-src.tgz
+          # Download ICU 75.1 source if not already present
+          if [ ! -d "icu" ]; then
+            echo "Downloading ICU 75.1 source..."
+            wget -q https://github.com/unicode-org/icu/releases/download/release-75-1/icu4c-75_1-src.tgz
+            tar xzf icu4c-75_1-src.tgz
+            rm icu4c-75_1-src.tgz
+          fi
 
-          # Build native tools first (required for cross-compilation)
-          echo "Building ICU native tools..."
+          # === Stage 1: Native build (for tools) ===
+          echo "=== Stage 1: Native ICU build (tools) ==="
           mkdir -p icu-build-native
           cd icu-build-native
-          ../icu/source/configure \
+
+          # Use runConfigureICU for proper platform setup
+          ../icu/source/runConfigureICU Linux \
             --prefix="$PWD/install" \
             --disable-shared \
             --enable-static \
             --disable-samples \
             --disable-tests \
-            --disable-extras
+            --disable-tools \
+            --with-data-packaging=static
+
           make -j$(nproc)
           make install
+
           cd ..
 
-          # Cross-compile for OHOS
-          echo "Cross-compiling ICU for OHOS..."
+          # === Stage 2: Cross-compile for OHOS aarch64 ===
+          echo "=== Stage 2: Cross-compile ICU for OHOS ==="
           mkdir -p icu-build-ohos
           cd icu-build-ohos
 
@@ -110,41 +117,41 @@ jobs:
           export CFLAGS="--target=aarch64-linux-ohos -fPIC -O2"
           export CXXFLAGS="--target=aarch64-linux-ohos -fPIC -O2 -std=c++17"
 
-          # Note: ICU doesn't recognize 'ohos', use aarch64-linux-gnu as host
-          ../icu/source/configure \
+          # Use runConfigureICU with cross-build reference
+          # Important: Use 'Linux' platform with explicit host
+          ../icu/source/runConfigureICU Linux \
             --host=aarch64-linux-gnu \
+            --with-cross-build="$PWD/../icu-build-native" \
             --prefix="$PWD/../icu-ohos" \
             --disable-shared \
             --enable-static \
             --disable-samples \
             --disable-tests \
-            --disable-extras \
-            --with-cross-build="$PWD/../icu-build-native" \
-            ac_cv_func_memcpy=yes \
-            ac_cv_func_memmove=yes \
-            ac_cv_func_memset=yes
+            --with-data-packaging=static
 
-           make -j$(nproc)
-           make install
-           cd ..
+          make -j$(nproc)
+          make install
 
-           # Ensure ICU headers are present in the expected location
-           # make install may not put headers in prefix; copy from source if needed
-           if [ ! -d "icu-ohos/include/unicode" ]; then
-             echo "Copying ICU headers from source..."
-             mkdir -p icu-ohos/include
-             cp -r icu/source/include/* icu-ohos/include/
-           fi
+          cd ..
 
-           # Verify build
-           echo "=== ICU 75.1 build complete ==="
-           ls -lh icu-ohos/lib/
-           echo "=== ICU library files ==="
-           find icu-ohos/lib -name "*.a" -type f
-           echo "=== ICU headers ==="
-           ls -la icu-ohos/include/unicode/ 2>/dev/null || echo "No unicode headers"
-           echo "=== ICU include structure ==="
-           find icu-ohos/include -name "*.h" -type f | head -20
+          # === Verification ===
+          echo "=== ICU build verification ==="
+          ls -lh icu-ohos/lib/
+          echo "Required libraries:"
+          for lib in libicudata.a libicui18n.a libicuuc.a libicuio.a libicutu.a; do
+            if [ -f "icu-ohos/lib/$lib" ]; then
+              echo "✓ $lib"
+            else
+              echo "✗ MISSING: $lib"
+            fi
+          done
+
+          # Ensure headers are present for WebKit
+          if [ ! -d "icu-ohos/include/unicode" ]; then
+            echo "Copying ICU headers from source..."
+            mkdir -p icu-ohos/include
+            cp -r icu/source/include/* icu-ohos/include/
+          fi
 
           # Clean up build directories to save space
           rm -rf icu-build-native icu-build-ohos icu
