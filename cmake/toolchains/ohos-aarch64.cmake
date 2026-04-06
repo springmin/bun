@@ -25,6 +25,11 @@ set(CMAKE_SYSTEM_VERSION 1)
 set(ABI musl)
 set(OHOS_BUILD ON CACHE BOOL "Building for OHOS platform")
 
+# Provide dummy Threads target for OHOS to satisfy WebKit's link requirement
+if(OHOS_BUILD AND NOT TARGET Threads::Threads)
+    add_library(Threads::Threads INTERFACE)
+endif()
+
 # SDK path detection
 if(NOT DEFINED OHOS_SDK_NATIVE)
     if(DEFINED ENV{OHOS_SDK_NATIVE})
