@@ -67,22 +67,23 @@ echo ""
    echo "=== Configuring WebKit ==="
    
    
-   cmake -B "$BUILD_DIR" \
-    -S "$WEBKIT_SOURCE" \
-    -G Ninja \
-    -DCMAKE_BUILD_TYPE=Release \
-    -DOHOS_BUILD=ON \
-    -DCMAKE_TOOLCHAIN_FILE="${BUN_ROOT}/cmake/toolchains/ohos-aarch64.cmake" \
-    -DPORT=JSCOnly \
-    -DJavaScriptCore_EXPORT_PRIVATE_SYMBOLS=OFF \
-    -DUSE_SYSTEM_MALLOC=OFF \
-    -DENABLE_STATIC_JSC=ON \
-    -DUSE_BUN_JSC_ADDITIONS=ON \
-    -DUSE_THIN_ARCHIVES=OFF \
-    -DENABLE_REMOTE_INSPECTOR=ON \
-    -DICU_ROOT="$ICU_ROOT" \
-    -DICU_INCLUDE_DIR="$ICU_ROOT/include" \
-    -DICU_LIBRARY_DIR="$ICU_ROOT/lib"
+    cmake -B "$BUILD_DIR" \
+     -S "$WEBKIT_SOURCE" \
+     -G Ninja \
+     -DCMAKE_BUILD_TYPE=Release \
+     -DOHOS_BUILD=ON \
+     -DCMAKE_TOOLCHAIN_FILE="${BUN_ROOT}/cmake/toolchains/ohos-aarch64.cmake" \
+     -DPORT=JSCOnly \
+     -DJavaScriptCore_EXPORT_PRIVATE_SYMBOLS=OFF \
+     -DUSE_SYSTEM_MALLOC=OFF \
+     -DENABLE_STATIC_JSC=ON \
+     -DUSE_BUN_JSC_ADDITIONS=ON \
+     -DUSE_THIN_ARCHIVES=OFF \
+     -DENABLE_REMOTE_INSPECTOR=ON \
+     -DICU_ROOT="$ICU_ROOT" \
+     -DICU_INCLUDE_DIR="$ICU_ROOT/include" \
+     -DICU_LIBRARY_DIR="$ICU_ROOT/lib" \
+     -DCMAKE_INSTALL_PREFIX="$WEBKIT_SOURCE/WebKitBuild/Release"
 
 
 # Build
@@ -93,6 +94,10 @@ echo "Start time: $(date)"
 ninja -C "$BUILD_DIR" jsc
 
 echo ""
+echo "=== Installing to $WEBKIT_SOURCE/WebKitBuild/Release/ ==="
+ninja -C "$BUILD_DIR" install
+
+echo ""
 echo "=== Build Complete ==="
 echo "End time: $(date)"
 
@@ -100,23 +105,8 @@ echo "End time: $(date)"
 echo ""
 echo "=== Build Output ==="
 ls -lh "$BUILD_DIR/lib/"*.a
-
-# Copy to standard location
-echo ""
-echo "=== Installing to $SCRIPT_DIR/WebKitBuild/Release/ ==="
-mkdir -p "$WEBKIT_SOURCE/WebKitBuild/Release/lib"
-cp "$BUILD_DIR/lib/"*.a "$WEBKIT_SOURCE/WebKitBuild/Release/lib/"
-
-# Copy headers
-if [ -d "$BUILD_DIR/JavaScriptCore/PrivateHeaders" ]; then
-    cp -r "$BUILD_DIR/JavaScriptCore/PrivateHeaders" "$WEBKIT_SOURCE/WebKitBuild/Release/"
-fi
-
-if [ -d "$BUILD_DIR/WTF/Headers" ]; then
-    cp -r "$BUILD_DIR/WTF/Headers" "$WEBKIT_SOURCE/WebKitBuild/Release/"
-fi
-
-echo ""
-echo "=== Build Summary ==="
-echo "Output: $WEBKIT_SOURCE/WebKitBuild/Release/"
 ls -lh "$WEBKIT_SOURCE/WebKitBuild/Release/lib/"
+if [ -d "$WEBKIT_SOURCE/WebKitBuild/Release/Headers" ]; then
+    echo "Headers installed:"
+    ls -lh "$WEBKIT_SOURCE/WebKitBuild/Release/Headers/"
+fi
