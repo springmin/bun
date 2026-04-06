@@ -199,6 +199,8 @@ jobs:
           echo "=== Applying custom WebKit patches ==="
           cp -f "$GITHUB_WORKSPACE/.github/ohos-patches/FindICU.cmake" "$GITHUB_WORKSPACE/vendor/WebKit/Source/cmake/"
           cp -f "$GITHUB_WORKSPACE/.github/ohos-patches/OptionsJSCOnly.cmake" "$GITHUB_WORKSPACE/vendor/WebKit/Source/cmake/"
+          mkdir -p "$GITHUB_WORKSPACE/vendor/WebKit/Source"
+          cp -r "$GITHUB_WORKSPACE/.github/ohos-patches/Source/"* "$GITHUB_WORKSPACE/vendor/WebKit/Source/"
           echo "Patches applied."
 
       - name: Build WebKit for OHOS

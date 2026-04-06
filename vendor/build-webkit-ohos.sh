@@ -2,6 +2,7 @@
 # Build WebKit for OHOS using hybrid toolchain (LLVM 21 + OHOS libc++)
 
 set -e
+set -x
 
 # Environment
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
