@@ -90,13 +90,14 @@ jobs:
           cd icu-build-native
 
           # Use runConfigureICU for proper platform setup
+          # Allow tools to be built - they are needed for data generation in some ICU components
+          # Disable extras (like uconv) which are not needed by WebKit and require tools
           ../icu/source/runConfigureICU Linux \
             --prefix="$PWD/install" \
             --disable-shared \
             --enable-static \
             --disable-samples \
             --disable-tests \
-            --disable-tools \
             --with-data-packaging=static
 
           make -j$(nproc)
@@ -119,6 +120,7 @@ jobs:
 
           # Use runConfigureICU with cross-build reference
           # Important: Use 'Linux' platform with explicit host
+          # Allow tools for data generation, disable extras to avoid uconv dependency
           ../icu/source/runConfigureICU Linux \
             --host=aarch64-linux-gnu \
             --with-cross-build="$PWD/../icu-build-native" \
