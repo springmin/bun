@@ -158,11 +158,28 @@ jobs:
 
       - name: Download WebKit source
         run: |
-          if [ ! -f "vendor/WebKit/CMakeLists.txt" ]; then
-            echo "=== Downloading WebKit source ==="
-            git clone --single-branch --branch main https://github.com/oven-sh/WebKit vendor/WebKit
+          # Use fixed commit for reproducibility and faster download (shallow fetch)
+          WEBKIT_COMMIT="c2010c47d12c525d36adabe3a17b2eb6ec850960"
+          if [ ! -d "vendor/WebKit/.git" ]; then
+            echo "=== Downloading WebKit source at commit $WEBKIT_COMMIT ==="
+            mkdir -p vendor/WebKit
+            cd vendor/WebKit
+            git init
+            git remote add origin https://github.com/oven-sh/WebKit
+            # Fetch only the specific commit (shallow)
+            git fetch --depth=1 origin "${WEBKIT_COMMIT}"
+            git checkout -q FETCH_HEAD
+            echo "WebKit source checked out at: $(git rev-parse --short HEAD)"
           else
             echo "=== WebKit source already exists ==="
+            cd vendor/WebKit
+            CURRENT_COMMIT=$(git rev-parse --short HEAD)
+            echo "Current commit: $CURRENT_COMMIT"
+            if [ "$CURRENT_COMMIT" != "c2010c47d" ]; then
+              echo "Updating to fixed commit..."
+              git fetch --depth=1 origin "${WEBKIT_COMMIT}"
+              git checkout -q FETCH_HEAD
+            fi
           fi
 
       - name: Build WebKit for OHOS
