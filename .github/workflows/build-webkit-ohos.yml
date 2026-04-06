@@ -222,8 +222,8 @@ jobs:
       - name: Package WebKit prebuilt
         run: |
           cd vendor/WebKit/WebKitBuild/Release
-          tar czf ../../../webkit-ohos-aarch64.tar.gz lib/ Headers/
-          ls -lh ../../webkit-ohos-aarch64.tar.gz
+          tar czf ../webkit-ohos-aarch64.tar.gz lib/ Headers/
+          ls -lh ../webkit-ohos-aarch64.tar.gz
 
       - name: Upload WebKit artifact
         uses: actions/upload-artifact@v4
@@ -236,8 +236,8 @@ jobs:
         if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/ohos')
         run: |
           cd vendor/WebKit/WebKitBuild/Release
-          tar czf ../../webkit-ohos-aarch64-${{ env.CMAKE_BUILD_TYPE }}.tar.gz lib/ Headers/
-          ls -lh ../../webkit-ohos-${{ env.CMAKE_BUILD_TYPE }}.tar.gz
+          tar czf ../webkit-ohos-aarch64-${{ env.CMAKE_BUILD_TYPE }}.tar.gz lib/ Headers/
+          ls -lh ../webkit-ohos-${{ env.CMAKE_BUILD_TYPE }}.tar.gz
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
