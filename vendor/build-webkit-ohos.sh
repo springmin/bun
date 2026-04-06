@@ -5,7 +5,8 @@ set -e
 
 # Environment
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-export OHOS_SDK_NATIVE="${OHOS_SDK_NATIVE:-$HOME/hmos-tools/sdk/default/openharmony/native}"
+export BUN_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"  # Repository root
+export OHOS_SDK_NATIVE="${OHOS_SDK_NATIVE:-$HOME/setup-ohos-sdk/linux/native}"
 export ICU_ROOT="$SCRIPT_DIR/icu-ohos"
 WEBKIT_SOURCE="$SCRIPT_DIR/WebKit"
 
