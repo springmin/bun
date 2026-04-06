@@ -72,7 +72,7 @@ jobs:
       - name: Setup ICU prebuilt
         run: |
           cd vendor
-          if [ ! -d "icu-ohos/lib" ]; then
+          if [ ! -d "icu-ohos" ] || [ -z "$(find icu-ohos -name 'libicu*.a' 2>/dev/null)" ]; then
             echo "Downloading prebuilt ICU for OHOS..."
             wget -q "https://github.com/springmin/bun/releases/download/webkit-ohos-prebuilt/icu-ohos-static-libs.tar.gz" -O icu-prebuilt.tar.gz
             tar xzf icu-prebuilt.tar.gz
@@ -81,7 +81,27 @@ jobs:
           else
             echo "ICU already exists (cached)."
           fi
-          ls -lh icu-ohos/lib/
+
+          # Auto-detect ICU library directory
+          ICU_LIB_DIR=""
+          for dir in icu-ohos/lib icu-ohos/lib64 icu-ohos/static/lib icu-ohos; do
+            if [ -d "$dir" ] && ls "$dir"/*.a &>/dev/null; then
+              ICU_LIB_DIR="$dir"
+              break
+            fi
+          done
+
+          if [ -z "$ICU_LIB_DIR" ]; then
+            echo "ERROR: Could not find ICU libraries in icu-ohos/"
+            echo "Contents of icu-ohos:"
+            ls -la icu-ohos || echo "icu-ohos does not exist"
+            exit 1
+          fi
+
+          # Set ICU_ROOT (parent directory of lib dir)
+          export ICU_ROOT=$(cd "$ICU_LIB_DIR/.." && pwd)
+          echo "ICU_ROOT=$ICU_ROOT" >> $GITHUB_ENV
+          echo "Found ICU libraries in: $ICU_LIB_DIR"
 
       - name: Setup vendor/zig
         run: |
@@ -108,13 +128,13 @@ jobs:
           cd vendor
           export OHOS_SDK_NATIVE="${OHOS_SDK_NATIVE:-$HOME/setup-ohos-sdk/linux}"
           export ICU_ROOT="$PWD/icu-ohos"
-          
+
           echo "=== Building WebKit for OHOS ==="
           echo "OHOS SDK: $OHOS_SDK_NATIVE"
           echo "ICU: $ICU_ROOT"
-          
+
           bash build-webkit-ohos.sh
-          
+
           echo "=== Build Complete ==="
           echo "Output:"
           ls -lh WebKitBuild/Release/lib/

@@ -15,9 +15,28 @@ if [ ! -d "$OHOS_SDK_NATIVE" ]; then
     exit 1
 fi
 
-if [ ! -d "$ICU_ROOT/lib" ]; then
-    echo "ERROR: ICU not found at $ICU_ROOT"
-    echo "Please run build-icu-ohos.sh first"
+# Auto-detect ICU library directory (workflow tarball structure may vary)
+if [ -d "$ICU_ROOT" ]; then
+    ICU_LIB_DIR=""
+    for dir in "$ICU_ROOT/lib" "$ICU_ROOT/lib64" "$ICU_ROOT/static/lib" "$ICU_ROOT"; do
+      if [ -d "$dir" ] && ls "$dir"/*.a &>/dev/null; then
+        ICU_LIB_DIR="$dir"
+        break
+      fi
+    done
+
+    if [ -z "$ICU_LIB_DIR" ]; then
+      echo "ERROR: ICU libraries not found in $ICU_ROOT"
+      echo "Searched in: lib, lib64, static/lib, or root"
+      echo "Contents of $ICU_ROOT:"
+      ls -la "$ICU_ROOT" || echo "Directory does not exist"
+      exit 1
+    fi
+
+    echo "Using ICU libraries from: $ICU_LIB_DIR"
+    ICU_LIB_DIR="$ICU_LIB_DIR"
+else
+    echo "ERROR: ICU_ROOT directory does not exist: $ICU_ROOT"
     exit 1
 fi
 
@@ -36,22 +55,22 @@ echo ""
 echo ""
 echo "=== Configuring WebKit ==="
 
-cmake -B "$BUILD_DIR" \
-  -S "$WEBKIT_SOURCE" \
-  -G Ninja \
-  -DCMAKE_BUILD_TYPE=Release \
-  -DCMAKE_TOOLCHAIN_FILE="${BUN_ROOT}/cmake/toolchains/ohos-aarch64.cmake" \
-  -DCMAKE_MODULE_PATH="$SCRIPT_DIR/cmake" \
-  -DPORT=JSCOnly \
-  -DJavaScriptCore_EXPORT_PRIVATE_SYMBOLS=OFF \
-  -DUSE_SYSTEM_MALLOC=OFF \
-  -DENABLE_STATIC_JSC=ON \
-  -DUSE_BUN_JSC_ADDITIONS=ON \
-  -DUSE_THIN_ARCHIVES=OFF \
-  -DENABLE_REMOTE_INSPECTOR=ON \
-  -DICU_ROOT="$ICU_ROOT" \
-  -DICU_INCLUDE_DIR="$ICU_ROOT/include" \
-  -DICU_LIBRARY_DIR="$ICU_ROOT/lib"
+  cmake -B "$BUILD_DIR" \
+   -S "$WEBKIT_SOURCE" \
+   -G Ninja \
+   -DCMAKE_BUILD_TYPE=Release \
+   -DCMAKE_TOOLCHAIN_FILE="${BUN_ROOT}/cmake/toolchains/ohos-aarch64.cmake" \
+   -DCMAKE_MODULE_PATH="$SCRIPT_DIR/cmake" \
+   -DPORT=JSCOnly \
+   -DJavaScriptCore_EXPORT_PRIVATE_SYMBOLS=OFF \
+   -DUSE_SYSTEM_MALLOC=OFF \
+   -DENABLE_STATIC_JSC=ON \
+   -DUSE_BUN_JSC_ADDITIONS=ON \
+   -DUSE_THIN_ARCHIVES=OFF \
+   -DENABLE_REMOTE_INSPECTOR=ON \
+   -DICU_ROOT="$ICU_ROOT" \
+   -DICU_INCLUDE_DIR="$ICU_ROOT/include" \
+   -DICU_LIBRARY_DIR="$ICU_LIB_DIR"
 
 
 # Build
