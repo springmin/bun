@@ -25,13 +25,6 @@ set(CMAKE_SYSTEM_VERSION 1)
 set(ABI musl)
 set(OHOS_BUILD ON CACHE BOOL "Building for OHOS platform")
 
-# Threading: OHOS uses musl where pthread is part of libc
-# Prefer pthread and let FindThreads create the Threads::Threads target
-set(THREADS_PREFER_PTHREADS TRUE)
-set(CMAKE_USE_PTHREADS_INIT ON)
-# No extra pthread library needed (pthread in libc)
-set(CMAKE_THREAD_LIBS_INIT "")
-
 # SDK path detection
 if(NOT DEFINED OHOS_SDK_NATIVE)
     if(DEFINED ENV{OHOS_SDK_NATIVE})
@@ -73,9 +66,10 @@ set(OHOS_LIB_DIR "${OHOS_LLVM_DIR}/lib/aarch64-linux-ohos")
 
 # Compiler flags
 # Use LLVM libc++ instead of GNU libstdc++
-set(CMAKE_C_FLAGS "--target=aarch64-linux-ohos -fPIC" CACHE STRING "" FORCE)
+# -pthread is required for thread detection on OHOS (pthread in libc)
+set(CMAKE_C_FLAGS "--target=aarch64-linux-ohos -fPIC -pthread" CACHE STRING "" FORCE)
 set(CMAKE_CXX_FLAGS 
-    "--target=aarch64-linux-ohos -stdlib=libc++ -fPIC" 
+    "--target=aarch64-linux-ohos -stdlib=libc++ -fPIC -pthread" 
     CACHE STRING "" FORCE
 )
 
