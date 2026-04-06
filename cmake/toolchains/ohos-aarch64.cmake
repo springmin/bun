@@ -67,9 +67,10 @@ set(OHOS_LIB_DIR "${OHOS_LLVM_DIR}/lib/aarch64-linux-ohos")
 # Compiler flags
 # Use LLVM libc++ instead of GNU libstdc++
 # -pthread is required for thread detection on OHOS (pthread in libc)
+# Enable experimental C++20 features in libc++ (ranges, etc.)
 set(CMAKE_C_FLAGS "--target=aarch64-linux-ohos -fPIC -pthread" CACHE STRING "" FORCE)
 set(CMAKE_CXX_FLAGS 
-    "--target=aarch64-linux-ohos -stdlib=libc++ -fPIC -pthread" 
+    "--target=aarch64-linux-ohos -stdlib=libc++ -fPIC -pthread -D_LIBCPP_ENABLE_EXPERIMENTAL=1 -D_LIBCPP_ENABLE_RANGES=1" 
     CACHE STRING "" FORCE
 )
 
