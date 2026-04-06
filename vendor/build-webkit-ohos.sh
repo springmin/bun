@@ -68,6 +68,7 @@ echo "=== Configuring WebKit ==="
     -S "$WEBKIT_SOURCE" \
     -G Ninja \
     -DCMAKE_BUILD_TYPE=Release \
+    -DOHOS_BUILD=ON \
     -DCMAKE_TOOLCHAIN_FILE="${BUN_ROOT}/cmake/toolchains/ohos-aarch64.cmake" \
     -DPORT=JSCOnly \
     -DJavaScriptCore_EXPORT_PRIVATE_SYMBOLS=OFF \
