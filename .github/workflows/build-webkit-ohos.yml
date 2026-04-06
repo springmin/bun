@@ -55,7 +55,7 @@ jobs:
       - name: Install OHOS SDK
         uses: openharmony-rs/setup-ohos-sdk@v1.0.0
         with:
-          version: "5.0.0"
+          version: "6.0"
           cache: true
           mirror: true
 
@@ -69,39 +69,72 @@ jobs:
 
       - name: Prepare vendor directory
         run: mkdir -p vendor
-      - name: Setup ICU prebuilt
+
+      - name: Build ICU for OHOS
         run: |
+          # Build ICU 75.1 static libraries from source with OHOS toolchain
+          # This ensures reproducibility and matches WebKit requirements (ICU >= 70.1)
           cd vendor
-          if [ ! -d "icu-ohos" ] || [ -z "$(find icu-ohos -name 'libicu*.a' 2>/dev/null)" ]; then
-            echo "Downloading prebuilt ICU for OHOS..."
-            wget -q "https://github.com/springmin/bun/releases/download/webkit-ohos-prebuilt/icu-ohos-static-libs.tar.gz" -O icu-prebuilt.tar.gz
-            tar xzf icu-prebuilt.tar.gz
-            rm icu-prebuilt.tar.gz
-            echo "ICU prebuilt extracted."
-          else
-            echo "ICU already exists (cached)."
-          fi
 
-          # Auto-detect ICU library directory
-          ICU_LIB_DIR=""
-          for dir in icu-ohos/lib icu-ohos/lib64 icu-ohos/static/lib icu-ohos; do
-            if [ -d "$dir" ] && ls "$dir"/*.a &>/dev/null; then
-              ICU_LIB_DIR="$dir"
-              break
-            fi
-          done
+          # Download ICU 75.1 source
+          echo "Downloading ICU 75.1 source..."
+          wget -q https://github.com/unicode-org/icu/releases/download/release-75-1/icu4c-75_1-src.tgz
+          tar xzf icu4c-75_1-src.tgz
+          rm icu4c-75_1-src.tgz
 
-          if [ -z "$ICU_LIB_DIR" ]; then
-            echo "ERROR: Could not find ICU libraries in icu-ohos/"
-            echo "Contents of icu-ohos:"
-            ls -la icu-ohos || echo "icu-ohos does not exist"
-            exit 1
-          fi
+          # Build native tools first (required for cross-compilation)
+          echo "Building ICU native tools..."
+          mkdir -p icu-build-native
+          cd icu-build-native
+          ../icu/source/configure \
+            --prefix="$PWD/install" \
+            --disable-shared \
+            --enable-static \
+            --disable-samples \
+            --disable-tests \
+            --disable-extras
+          make -j$(nproc)
+          make install
+          cd ..
 
-          # Set ICU_ROOT (parent directory of lib dir)
-          export ICU_ROOT=$(cd "$ICU_LIB_DIR/.." && pwd)
-          echo "ICU_ROOT=$ICU_ROOT" >> $GITHUB_ENV
-          echo "Found ICU libraries in: $ICU_LIB_DIR"
+          # Cross-compile for OHOS
+          echo "Cross-compiling ICU for OHOS..."
+          mkdir -p icu-build-ohos
+          cd icu-build-ohos
+
+          OHOS_LLVM="$OHOS_SDK_NATIVE/llvm"
+          export CC="$OHOS_LLVM/bin/aarch64-unknown-linux-ohos-clang"
+          export CXX="$OHOS_LLVM/bin/aarch64-unknown-linux-ohos-clang++"
+          export AR="$OHOS_LLVM/bin/llvm-ar"
+          export RANLIB="$OHOS_LLVM/bin/llvm-ranlib"
+          export CFLAGS="--target=aarch64-linux-ohos -fPIC -O2"
+          export CXXFLAGS="--target=aarch64-linux-ohos -fPIC -O2 -std=c++17"
+
+          # Note: ICU doesn't recognize 'ohos', use aarch64-linux-gnu as host
+          ../icu/source/configure \
+            --host=aarch64-linux-gnu \
+            --prefix="$PWD/../icu-ohos" \
+            --disable-shared \
+            --enable-static \
+            --disable-samples \
+            --disable-tests \
+            --disable-extras \
+            --with-cross-build="$PWD/../icu-build-native" \
+            ac_cv_func_memcpy=yes \
+            ac_cv_func_memmove=yes \
+            ac_cv_func_memset=yes
+
+          make -j$(nproc)
+          make install
+          cd ..
+
+          # Verify build
+          echo "=== ICU 75.1 build complete ==="
+          ls -lh icu-ohos/lib/*.a
+          file icu-ohos/lib/libicuuc.a | head -1
+
+          # Clean up build directories to save space
+          rm -rf icu-build-native icu-build-ohos icu
 
       - name: Setup vendor/zig
         run: |
