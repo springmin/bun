@@ -124,14 +124,23 @@ jobs:
             ac_cv_func_memmove=yes \
             ac_cv_func_memset=yes
 
-          make -j$(nproc)
-          make install
-          cd ..
+           make -j$(nproc)
+           make install
+           cd ..
 
-          # Verify build
-          echo "=== ICU 75.1 build complete ==="
-          ls -lh icu-ohos/lib/*.a
-          file icu-ohos/lib/libicuuc.a | head -1
+           # Ensure ICU headers are present in the expected location
+           # make install may not put headers in prefix; copy from source if needed
+           if [ ! -d "icu-ohos/include/unicode" ]; then
+             echo "Copying ICU headers from source..."
+             mkdir -p icu-ohos/include
+             cp -r icu/source/include/* icu-ohos/include/
+           fi
+
+           # Verify build
+           echo "=== ICU 75.1 build complete ==="
+           ls -lh icu-ohos/lib/*.a
+           echo "=== ICU headers ==="
+           ls -la icu-ohos/include/unicode/ | head -10
 
           # Clean up build directories to save space
           rm -rf icu-build-native icu-build-ohos icu
