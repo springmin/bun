@@ -69,7 +69,6 @@ echo "=== Configuring WebKit ==="
     -G Ninja \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_TOOLCHAIN_FILE="${BUN_ROOT}/cmake/toolchains/ohos-aarch64.cmake" \
-    -DCMAKE_MODULE_PATH="$WEBKIT_SOURCE/Source/cmake" \
     -DPORT=JSCOnly \
     -DJavaScriptCore_EXPORT_PRIVATE_SYMBOLS=OFF \
     -DUSE_SYSTEM_MALLOC=OFF \
