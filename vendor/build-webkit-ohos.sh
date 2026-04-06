@@ -62,8 +62,18 @@ mkdir -p "$BUILD_DIR"
 echo ""
 
 echo ""
-echo "=== Configuring WebKit ==="
-
+   echo ""
+   echo "=== Configuring WebKit ==="
+   
+    # Ensure custom FindICU.cmake is in the expected location for OptionsJSCOnly.cmake
+    # The workflow clones WebKit directly, so we need to copy our custom FindICU.cmake
+    # from Source/cmake to the cmake directory at the repository root
+    if [ -f "$WEBKIT_SOURCE/Source/cmake/FindICU.cmake" ]; then
+      echo "Copying custom FindICU.cmake to $WEBKIT_SOURCE/cmake/"
+      mkdir -p "$WEBKIT_SOURCE/cmake"
+      cp -f "$WEBKIT_SOURCE/Source/cmake/FindICU.cmake" "$WEBKIT_SOURCE/cmake/"
+    fi
+   
    cmake -B "$BUILD_DIR" \
     -S "$WEBKIT_SOURCE" \
     -G Ninja \
