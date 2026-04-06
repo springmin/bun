@@ -64,22 +64,22 @@ echo ""
 echo ""
 echo "=== Configuring WebKit ==="
 
-  cmake -B "$BUILD_DIR" \
-   -S "$WEBKIT_SOURCE" \
-   -G Ninja \
-   -DCMAKE_BUILD_TYPE=Release \
-   -DCMAKE_TOOLCHAIN_FILE="${BUN_ROOT}/cmake/toolchains/ohos-aarch64.cmake" \
-   -DCMAKE_MODULE_PATH="$SCRIPT_DIR/cmake" \
-   -DPORT=JSCOnly \
-   -DJavaScriptCore_EXPORT_PRIVATE_SYMBOLS=OFF \
-   -DUSE_SYSTEM_MALLOC=OFF \
-   -DENABLE_STATIC_JSC=ON \
-   -DUSE_BUN_JSC_ADDITIONS=ON \
-   -DUSE_THIN_ARCHIVES=OFF \
-   -DENABLE_REMOTE_INSPECTOR=ON \
-   -DICU_ROOT="$ICU_ROOT" \
-   -DICU_INCLUDE_DIR="$ICU_ROOT/include" \
-   -DICU_LIBRARY_DIR="$ICU_ROOT/lib"
+   cmake -B "$BUILD_DIR" \
+    -S "$WEBKIT_SOURCE" \
+    -G Ninja \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_TOOLCHAIN_FILE="${BUN_ROOT}/cmake/toolchains/ohos-aarch64.cmake" \
+    -DCMAKE_MODULE_PATH="$WEBKIT_SOURCE/Source/cmake" \
+    -DPORT=JSCOnly \
+    -DJavaScriptCore_EXPORT_PRIVATE_SYMBOLS=OFF \
+    -DUSE_SYSTEM_MALLOC=OFF \
+    -DENABLE_STATIC_JSC=ON \
+    -DUSE_BUN_JSC_ADDITIONS=ON \
+    -DUSE_THIN_ARCHIVES=OFF \
+    -DENABLE_REMOTE_INSPECTOR=ON \
+    -DICU_ROOT="$ICU_ROOT" \
+    -DICU_INCLUDE_DIR="$ICU_ROOT/include" \
+    -DICU_LIBRARY_DIR="$ICU_ROOT/lib"
 
 
 # Build
