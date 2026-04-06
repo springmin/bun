@@ -213,11 +213,11 @@ jobs:
           echo "OHOS SDK: $OHOS_SDK_NATIVE"
           echo "ICU: $ICU_ROOT"
 
-          bash build-webkit-ohos.sh
+           bash build-webkit-ohos.sh
 
-          echo "=== Build Complete ==="
-          echo "Output:"
-          ls -lh WebKitBuild/Release/lib/
+           echo "=== Build Complete ==="
+           echo "Output:"
+           ls -lh WebKit/WebKitBuild/Release/lib/
 
       - name: Package WebKit prebuilt
         run: |
