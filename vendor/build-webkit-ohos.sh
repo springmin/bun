@@ -34,8 +34,16 @@ if [ -d "$ICU_ROOT" ]; then
       exit 1
     fi
 
-    echo "Using ICU libraries from: $ICU_LIB_DIR"
-    ICU_LIB_DIR="$ICU_LIB_DIR"
+    echo "ICU libraries detected in: $ICU_LIB_DIR"
+
+    # Standardize to $ICU_ROOT/lib for CMake FindICU
+    if [ "$ICU_LIB_DIR" != "$ICU_ROOT/lib" ]; then
+      echo "Standardizing ICU library location to \$ICU_ROOT/lib"
+      mkdir -p "$ICU_ROOT/lib"
+      cp -f "$ICU_LIB_DIR"/*.a "$ICU_ROOT/lib/" 2>/dev/null || true
+      echo "ICU libraries now in \$ICU_ROOT/lib:"
+      ls -lh "$ICU_ROOT/lib/" || echo "Warning: copy may have failed"
+    fi
 else
     echo "ERROR: ICU_ROOT directory does not exist: $ICU_ROOT"
     exit 1
@@ -69,9 +77,7 @@ echo "=== Configuring WebKit ==="
    -DUSE_BUN_JSC_ADDITIONS=ON \
    -DUSE_THIN_ARCHIVES=OFF \
    -DENABLE_REMOTE_INSPECTOR=ON \
-   -DICU_ROOT="$ICU_ROOT" \
-   -DICU_INCLUDE_DIR="$ICU_ROOT/include" \
-   -DICU_LIBRARY_DIR="$ICU_LIB_DIR"
+   -DICU_ROOT="$ICU_ROOT"
 
 
 # Build
