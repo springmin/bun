@@ -105,8 +105,8 @@ mkdir -p "$WEBKIT_SOURCE/WebKitBuild/Release/Headers/JavaScriptCore"
 cp "$BUILD_DIR/lib/"*.a "$WEBKIT_SOURCE/WebKitBuild/Release/lib/"
 
 # Copy cmakeconfig.h (needed for BuildBun.cmake includes)
-if [ -f "$BUILD_DIR/../cmakeconfig.h" ]; then
-    cp "$BUILD_DIR/../cmakeconfig.h" "$WEBKIT_SOURCE/WebKitBuild/Release/"
+if [ -f "$BUILD_DIR/cmakeconfig.h" ]; then
+    cp "$BUILD_DIR/cmakeconfig.h" "$WEBKIT_SOURCE/WebKitBuild/Release/"
 fi
 
 # Copy WTF headers from source (patched) - use lowercase 'wtf' to match #include <wtf/...>
