@@ -222,7 +222,7 @@ jobs:
       - name: Package WebKit prebuilt
         run: |
           cd vendor/WebKit/WebKitBuild/Release
-          tar czf ../../webkit-ohos-aarch64-${{ env.CMAKE_BUILD_TYPE }}.tar.gz lib/ Headers/
+          tar czf ../../webkit-ohos-aarch64-${{ env.CMAKE_BUILD_TYPE }}.tar.gz lib/ Headers/ cmakeconfig.h
           ls -lh ../../webkit-ohos-aarch64-${{ env.CMAKE_BUILD_TYPE }}.tar.gz
 
       - name: Upload WebKit artifact
