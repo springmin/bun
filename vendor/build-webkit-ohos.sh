@@ -98,14 +98,14 @@ echo "=== Installing to $WEBKIT_SOURCE/WebKitBuild/Release/ ==="
 
 # Create directories
 mkdir -p "$WEBKIT_SOURCE/WebKitBuild/Release/lib"
-mkdir -p "$WEBKIT_SOURCE/WebKitBuild/Release/Headers/WTF"
+mkdir -p "$WEBKIT_SOURCE/WebKitBuild/Release/Headers/wtf"
 mkdir -p "$WEBKIT_SOURCE/WebKitBuild/Release/Headers/JavaScriptCore"
 
 # Copy libraries
 cp "$BUILD_DIR/lib/"*.a "$WEBKIT_SOURCE/WebKitBuild/Release/lib/"
 
-# Copy WTF headers from source (patched)
-cp -r "$WEBKIT_SOURCE/Source/WTF/wtf/." "$WEBKIT_SOURCE/WebKitBuild/Release/Headers/WTF/"
+# Copy WTF headers from source (patched) - use lowercase 'wtf' to match #include <wtf/...>
+cp -r "$WEBKIT_SOURCE/Source/WTF/wtf/." "$WEBKIT_SOURCE/WebKitBuild/Release/Headers/wtf/"
 
 # Copy JavaScriptCore public headers (API)
 cp -r "$WEBKIT_SOURCE/Source/JavaScriptCore/API/." "$WEBKIT_SOURCE/WebKitBuild/Release/Headers/JavaScriptCore/"
@@ -123,5 +123,5 @@ echo "=== Build Summary ==="
 echo "Libraries:"
 ls -lh "$WEBKIT_SOURCE/WebKitBuild/Release/lib/"
 echo "Headers:"
-ls -lh "$WEBKIT_SOURCE/WebKitBuild/Release/Headers/WTF/" | head -5
+ls -lh "$WEBKIT_SOURCE/WebKitBuild/Release/Headers/wtf/" | head -5
 ls -lh "$WEBKIT_SOURCE/WebKitBuild/Release/Headers/JavaScriptCore/" | head -5
