@@ -32,15 +32,19 @@ if(WEBKIT_PREBUILT)
   set(WEBKIT_INCLUDE_PATH ${WEBKIT_PATH_ABS})
   set(WEBKIT_LIB_PATH ${WEBKIT_PATH_ABS}/lib)
 
-  include_directories(
-    ${WEBKIT_PATH_ABS}
-    ${WEBKIT_PATH_ABS}/JavaScriptCore/Headers
-    ${WEBKIT_PATH_ABS}/JavaScriptCore/Headers/JavaScriptCore
-    ${WEBKIT_PATH_ABS}/JavaScriptCore/PrivateHeaders
-    ${WEBKIT_PATH_ABS}/bmalloc/Headers
-    ${WEBKIT_PATH_ABS}/WTF/Headers
-    ${WEBKIT_PATH_ABS}/JavaScriptCore/PrivateHeaders/JavaScriptCore
-  )
+   include_directories(
+     ${WEBKIT_PATH_ABS}
+     # New artifact layout (2026-04-07): Headers/JavaScriptCore, Headers/WTF
+     ${WEBKIT_PATH_ABS}/Headers/JavaScriptCore
+     ${WEBKIT_PATH_ABS}/Headers/WTF
+     # Backward compatibility with old artifact layout
+     ${WEBKIT_PATH_ABS}/JavaScriptCore/Headers
+     ${WEBKIT_PATH_ABS}/JavaScriptCore/Headers/JavaScriptCore
+     ${WEBKIT_PATH_ABS}/JavaScriptCore/PrivateHeaders
+     ${WEBKIT_PATH_ABS}/bmalloc/Headers
+     ${WEBKIT_PATH_ABS}/WTF/Headers
+     ${WEBKIT_PATH_ABS}/JavaScriptCore/PrivateHeaders/JavaScriptCore
+   )
 
   # No build target needed - libraries already built
   add_custom_target(jsc ALL
@@ -295,6 +299,10 @@ list(APPEND JSC_CMAKE_ARGS
 
   include_directories(
     ${WEBKIT_PATH}
+    # New artifact layout (2026-04-07): Headers/JavaScriptCore, Headers/WTF
+    ${WEBKIT_PATH}/Headers/JavaScriptCore
+    ${WEBKIT_PATH}/Headers/WTF
+    # Backward compatibility with old artifact layout
     ${WEBKIT_PATH}/JavaScriptCore/Headers
     ${WEBKIT_PATH}/JavaScriptCore/Headers/JavaScriptCore
     ${WEBKIT_PATH}/JavaScriptCore/PrivateHeaders
