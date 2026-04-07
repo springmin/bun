@@ -34,9 +34,8 @@ if(WEBKIT_PREBUILT)
 
    include_directories(
      ${WEBKIT_PATH_ABS}
-     # New artifact layout (2026-04-07): Headers/JavaScriptCore, Headers/WTF
-     ${WEBKIT_PATH_ABS}/Headers/JavaScriptCore
-     ${WEBKIT_PATH_ABS}/Headers/WTF
+     # New artifact layout (2026-04-07): Headers/ contains wtf/, JavaScriptCore/ subdirs
+     ${WEBKIT_PATH_ABS}/Headers
      # Backward compatibility with old artifact layout
      ${WEBKIT_PATH_ABS}/JavaScriptCore/Headers
      ${WEBKIT_PATH_ABS}/JavaScriptCore/Headers/JavaScriptCore
@@ -299,9 +298,8 @@ list(APPEND JSC_CMAKE_ARGS
 
   include_directories(
     ${WEBKIT_PATH}
-    # New artifact layout (2026-04-07): Headers/JavaScriptCore, Headers/WTF
-    ${WEBKIT_PATH}/Headers/JavaScriptCore
-    ${WEBKIT_PATH}/Headers/WTF
+    # New artifact layout (2026-04-07): Headers/ contains wtf/, JavaScriptCore/ subdirs
+    ${WEBKIT_PATH}/Headers
     # Backward compatibility with old artifact layout
     ${WEBKIT_PATH}/JavaScriptCore/Headers
     ${WEBKIT_PATH}/JavaScriptCore/Headers/JavaScriptCore
