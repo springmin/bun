@@ -118,9 +118,11 @@ cp -r "$WEBKIT_SOURCE/Source/JavaScriptCore/API/." "$WEBKIT_SOURCE/WebKitBuild/R
 # Copy top-level JavaScriptCore headers (e.g., JavaScriptCore.h, JSExportMacros.h, etc.)
 cp "$WEBKIT_SOURCE/Source/JavaScriptCore/"*.h "$WEBKIT_SOURCE/WebKitBuild/Release/Headers/JavaScriptCore/" 2>/dev/null || true
 
-# Copy bmalloc headers (needed by WTF and JavaScriptCore)
-mkdir -p "$WEBKIT_SOURCE/WebKitBuild/Release/Headers/bmalloc"
-cp -r "$WEBKIT_SOURCE/Source/bmalloc/." "$WEBKIT_SOURCE/WebKitBuild/Release/Headers/bmalloc/" 2>/dev/null || true
+# Copy bmalloc headers from the build output (generated headers, e.g., BPlatform.h)
+# These are placed in ../bmalloc/Headers/bmalloc relative to the build directory
+if [ -d "$SCRIPT_DIR/bmalloc/Headers/bmalloc" ]; then
+    cp -r "$SCRIPT_DIR/bmalloc/Headers/bmalloc/." "$WEBKIT_SOURCE/WebKitBuild/Release/Headers/bmalloc/"
+fi
 
 # Copy internal headers if they exist (needed for some APIs)
 if [ -d "$WEBKIT_SOURCE/Source/JavaScriptCore/internal" ]; then
