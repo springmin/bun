@@ -119,9 +119,14 @@ cp -r "$WEBKIT_SOURCE/Source/JavaScriptCore/API/." "$WEBKIT_SOURCE/WebKitBuild/R
 cp "$WEBKIT_SOURCE/Source/JavaScriptCore/"*.h "$WEBKIT_SOURCE/WebKitBuild/Release/Headers/JavaScriptCore/" 2>/dev/null || true
 
 # Copy bmalloc headers from the build output (generated headers, e.g., BPlatform.h)
-# These are placed in ../../bmalloc/Headers/bmalloc relative to the build directory,
-# which corresponds to $SCRIPT_DIR/bmalloc/Headers/bmalloc (vendor/bmalloc/Headers/bmalloc)
-if [ -d "$SCRIPT_DIR/bmalloc/Headers/bmalloc" ]; then
+# These are placed in ../../bmalloc/Headers/bmalloc relative to the build directory.
+# Build directory is $BUILD_DIR (e.g., vendor/WebKit/webkit-build-ohos), so the path resolves to either:
+# - vendor/WebKit/bmalloc/Headers/bmalloc (if generated from BUILD_DIR)
+# - vendor/bmalloc/Headers/bmalloc (if generated from BUILD_DIR/../..)
+# Check both possible locations.
+if [ -d "$WEBKIT_SOURCE/bmalloc/Headers/bmalloc" ]; then
+    cp -r "$WEBKIT_SOURCE/bmalloc/Headers/bmalloc/." "$WEBKIT_SOURCE/WebKitBuild/Release/Headers/bmalloc/"
+elif [ -d "$SCRIPT_DIR/bmalloc/Headers/bmalloc" ]; then
     cp -r "$SCRIPT_DIR/bmalloc/Headers/bmalloc/." "$WEBKIT_SOURCE/WebKitBuild/Release/Headers/bmalloc/"
 fi
 
