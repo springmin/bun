@@ -229,7 +229,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: webkit-ohos-aarch64-${{ env.CMAKE_BUILD_TYPE }}
-          path: vendor/WebKit/webkit-ohos-aarch64.tar.gz
+          path: vendor/WebKit/webkit-ohos-aarch64-${{ env.CMAKE_BUILD_TYPE }}.tar.gz
           retention-days: 30
 
       - name: Create WebKit release
