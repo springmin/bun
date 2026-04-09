@@ -116,22 +116,33 @@ cp -r "$WEBKIT_SOURCE/Source/WTF/wtf/." "$WEBKIT_SOURCE/WebKitBuild/Release/Head
 # Uses rsync to copy only header files and preserve directory structure.
 rsync -av --prune-empty-dirs --include="*/" --include="*.h" --include="*.hpp" --include="*.def" --include="*.inc" --exclude="*" "$WEBKIT_SOURCE/Source/JavaScriptCore/" "$WEBKIT_SOURCE/WebKitBuild/Release/Headers/JavaScriptCore/"
 
-# Copy internal headers if they exist (needed for some APIs)
-if [ -d "$WEBKIT_SOURCE/Source/JavaScriptCore/internal" ]; then
-    cp -r "$WEBKIT_SOURCE/Source/JavaScriptCore/internal/." "$WEBKIT_SOURCE/WebKitBuild/Release/Headers/JavaScriptCore/" 2>/dev/null || true
-fi
-
-# Copy necessary subdirectories containing headers (runtime, parser, yarr, inspector, assembler, config, collective, debugger, jslib, etc.)
-# These contain headers needed for building JSC.
-for subdir in runtime parser yarr inspector assembler config collective debugger jslib bytecode; do
-    if [ -d "$WEBKIT_SOURCE/Source/JavaScriptCore/$subdir" ]; then
-        cp -r "$WEBKIT_SOURCE/Source/JavaScriptCore/$subdir/." "$WEBKIT_SOURCE/WebKitBuild/Release/Headers/JavaScriptCore/"
-    fi
-done
-
-# Copy internal headers if they exist (needed for some APIs)
-if [ -d "$WEBKIT_SOURCE/Source/JavaScriptCore/internal" ]; then
-    cp -r "$WEBKIT_SOURCE/Source/JavaScriptCore/internal/." "$WEBKIT_SOURCE/WebKitBuild/Release/Headers/JavaScriptCore/" 2>/dev/null || true
+# Copy bmalloc headers from the build output (generated headers, e.g., BPlatform.h)
+# These are placed in ../../bmalloc/Headers/bmalloc relative to the build directory.
+# Build directory is $BUILD_DIR (e.g., vendor/WebKit/webkit-build-ohos), so the path resolves to:
+# - $BUILD_DIR/bmalloc/Headers/bmalloc (most likely, if generated from a subdir like CMakeFiles/bmalloc.dir)
+# - vendor/WebKit/bmalloc/Headers/bmalloc (if generated from BUILD_DIR root)
+# - vendor/bmalloc/Headers/bmalloc (fallback)
+# Check all possible locations in order of likelihood.
+echo "Checking for bmalloc headers in:"
+echo "  Option 1: $BUILD_DIR/bmalloc/Headers/bmalloc"
+echo "  Option 2: $WEBKIT_SOURCE/bmalloc/Headers/bmalloc"
+echo "  Option 3: $SCRIPT_DIR/bmalloc/Headers/bmalloc"
+if [ -d "$BUILD_DIR/bmalloc/Headers/bmalloc" ]; then
+    echo "Found bmalloc headers at option 1 (BUILD_DIR)"
+    cp -r "$BUILD_DIR/bmalloc/Headers/bmalloc/." "$WEBKIT_SOURCE/WebKitBuild/Release/Headers/bmalloc/"
+elif [ -d "$WEBKIT_SOURCE/bmalloc/Headers/bmalloc" ]; then
+    echo "Found bmalloc headers at option 2 (WEBKIT_SOURCE)"
+    cp -r "$WEBKIT_SOURCE/bmalloc/Headers/bmalloc/." "$WEBKIT_SOURCE/WebKitBuild/Release/Headers/bmalloc/"
+elif [ -d "$SCRIPT_DIR/bmalloc/Headers/bmalloc" ]; then
+    echo "Found bmalloc headers at option 3 (SCRIPT_DIR)"
+    cp -r "$SCRIPT_DIR/bmalloc/Headers/bmalloc/." "$WEBKIT_SOURCE/WebKitBuild/Release/Headers/bmalloc/"
+else
+    echo "ERROR: bmalloc headers not found in any expected location!"
+    echo "Listing candidate directories for debugging:"
+    ls -la "$BUILD_DIR/bmalloc" 2>/dev/null || echo "  $BUILD_DIR/bmalloc does not exist"
+    ls -la "$WEBKIT_SOURCE/bmalloc" 2>/dev/null || echo "  $WEBKIT_SOURCE/bmalloc does not exist"
+    ls -la "$SCRIPT_DIR/bmalloc" 2>/dev/null || echo "  $SCRIPT_DIR/bmalloc does not exist"
+    exit 1
 fi
 
 echo ""
