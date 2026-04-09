@@ -40,8 +40,8 @@ if(WEBKIT_PREBUILT)
       ${WEBKIT_PATH_ABS}/JavaScriptCore/Headers
       ${WEBKIT_PATH_ABS}/JavaScriptCore/Headers/JavaScriptCore
       ${WEBKIT_PATH_ABS}/JavaScriptCore/PrivateHeaders
-      ${WEBKIT_PATH_ABS}/Headers/bmalloc
-      ${WEBKIT_PATH_ABS}/Headers/wtf
+      ${WEBKIT_PATH_ABS}/bmalloc/Headers
+      ${WEBKIT_PATH_ABS}/WTF/Headers
       ${WEBKIT_PATH_ABS}/JavaScriptCore/PrivateHeaders/JavaScriptCore
     )
 
@@ -304,8 +304,8 @@ list(APPEND JSC_CMAKE_ARGS
     ${WEBKIT_PATH}/JavaScriptCore/Headers
     ${WEBKIT_PATH}/JavaScriptCore/Headers/JavaScriptCore
     ${WEBKIT_PATH}/JavaScriptCore/PrivateHeaders
-    ${WEBKIT_PATH}/Headers/bmalloc
-    ${WEBKIT_PATH}/Headers/wtf
+    ${WEBKIT_PATH}/bmalloc/Headers
+    ${WEBKIT_PATH}/WTF/Headers
     ${WEBKIT_PATH}/JavaScriptCore/PrivateHeaders/JavaScriptCore
   )
 
