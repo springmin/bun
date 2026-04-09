@@ -124,10 +124,21 @@ cp "$WEBKIT_SOURCE/Source/JavaScriptCore/"*.h "$WEBKIT_SOURCE/WebKitBuild/Releas
 # - vendor/WebKit/bmalloc/Headers/bmalloc (if generated from BUILD_DIR)
 # - vendor/bmalloc/Headers/bmalloc (if generated from BUILD_DIR/../..)
 # Check both possible locations.
+echo "Checking for bmalloc headers in:"
+echo "  Option 1: $WEBKIT_SOURCE/bmalloc/Headers/bmalloc"
+echo "  Option 2: $SCRIPT_DIR/bmalloc/Headers/bmalloc"
 if [ -d "$WEBKIT_SOURCE/bmalloc/Headers/bmalloc" ]; then
+    echo "Found bmalloc headers at option 1"
     cp -r "$WEBKIT_SOURCE/bmalloc/Headers/bmalloc/." "$WEBKIT_SOURCE/WebKitBuild/Release/Headers/bmalloc/"
 elif [ -d "$SCRIPT_DIR/bmalloc/Headers/bmalloc" ]; then
+    echo "Found bmalloc headers at option 2"
     cp -r "$SCRIPT_DIR/bmalloc/Headers/bmalloc/." "$WEBKIT_SOURCE/WebKitBuild/Release/Headers/bmalloc/"
+else
+    echo "ERROR: bmalloc headers not found in either location!"
+    echo "Listing candidate directories for debugging:"
+    ls -la "$WEBKIT_SOURCE/bmalloc" 2>/dev/null || echo "  $WEBKIT_SOURCE/bmalloc does not exist"
+    ls -la "$SCRIPT_DIR/bmalloc" 2>/dev/null || echo "  $SCRIPT_DIR/bmalloc does not exist"
+    exit 1
 fi
 
 # Copy internal headers if they exist (needed for some APIs)
