@@ -120,22 +120,28 @@ cp "$WEBKIT_SOURCE/Source/JavaScriptCore/"*.h "$WEBKIT_SOURCE/WebKitBuild/Releas
 
 # Copy bmalloc headers from the build output (generated headers, e.g., BPlatform.h)
 # These are placed in ../../bmalloc/Headers/bmalloc relative to the build directory.
-# Build directory is $BUILD_DIR (e.g., vendor/WebKit/webkit-build-ohos), so the path resolves to either:
-# - vendor/WebKit/bmalloc/Headers/bmalloc (if generated from BUILD_DIR)
-# - vendor/bmalloc/Headers/bmalloc (if generated from BUILD_DIR/../..)
-# Check both possible locations.
+# Build directory is $BUILD_DIR (e.g., vendor/WebKit/webkit-build-ohos), so the path resolves to:
+# - $BUILD_DIR/bmalloc/Headers/bmalloc (most likely, if generated from a subdir like CMakeFiles/bmalloc.dir)
+# - vendor/WebKit/bmalloc/Headers/bmalloc (if generated from BUILD_DIR root)
+# - vendor/bmalloc/Headers/bmalloc (fallback)
+# Check all possible locations in order of likelihood.
 echo "Checking for bmalloc headers in:"
-echo "  Option 1: $WEBKIT_SOURCE/bmalloc/Headers/bmalloc"
-echo "  Option 2: $SCRIPT_DIR/bmalloc/Headers/bmalloc"
-if [ -d "$WEBKIT_SOURCE/bmalloc/Headers/bmalloc" ]; then
-    echo "Found bmalloc headers at option 1"
+echo "  Option 1: $BUILD_DIR/bmalloc/Headers/bmalloc"
+echo "  Option 2: $WEBKIT_SOURCE/bmalloc/Headers/bmalloc"
+echo "  Option 3: $SCRIPT_DIR/bmalloc/Headers/bmalloc"
+if [ -d "$BUILD_DIR/bmalloc/Headers/bmalloc" ]; then
+    echo "Found bmalloc headers at option 1 (BUILD_DIR)"
+    cp -r "$BUILD_DIR/bmalloc/Headers/bmalloc/." "$WEBKIT_SOURCE/WebKitBuild/Release/Headers/bmalloc/"
+elif [ -d "$WEBKIT_SOURCE/bmalloc/Headers/bmalloc" ]; then
+    echo "Found bmalloc headers at option 2 (WEBKIT_SOURCE)"
     cp -r "$WEBKIT_SOURCE/bmalloc/Headers/bmalloc/." "$WEBKIT_SOURCE/WebKitBuild/Release/Headers/bmalloc/"
 elif [ -d "$SCRIPT_DIR/bmalloc/Headers/bmalloc" ]; then
-    echo "Found bmalloc headers at option 2"
+    echo "Found bmalloc headers at option 3 (SCRIPT_DIR)"
     cp -r "$SCRIPT_DIR/bmalloc/Headers/bmalloc/." "$WEBKIT_SOURCE/WebKitBuild/Release/Headers/bmalloc/"
 else
-    echo "ERROR: bmalloc headers not found in either location!"
+    echo "ERROR: bmalloc headers not found in any expected location!"
     echo "Listing candidate directories for debugging:"
+    ls -la "$BUILD_DIR/bmalloc" 2>/dev/null || echo "  $BUILD_DIR/bmalloc does not exist"
     ls -la "$WEBKIT_SOURCE/bmalloc" 2>/dev/null || echo "  $WEBKIT_SOURCE/bmalloc does not exist"
     ls -la "$SCRIPT_DIR/bmalloc" 2>/dev/null || echo "  $SCRIPT_DIR/bmalloc does not exist"
     exit 1
