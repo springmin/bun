@@ -159,15 +159,7 @@ else
 fi
 
 echo "Copying any remaining JavaScriptCore headers from build..."
-find "$BUILD_DIR/JavaScriptCore" -type f \( -name '*.h' -o -name '*.hpp' -o -name '*.def' -o -name '*.inc' \) -exec sh -c '
-    for f; do
-        bn=$(basename "$f")
-        if [ ! -f "$WEBKIT_SOURCE/WebKitBuild/Release/Headers/JavaScriptCore/$bn" ]; then
-            echo "Copying $bn from $f"
-            cp "$f" "$WEBKIT_SOURCE/WebKitBuild/Release/Headers/JavaScriptCore/"
-        fi
-    done
-' sh {} +
+find "$BUILD_DIR/JavaScriptCore" -type f \( -name '*.h' -o -name '*.hpp' -o -name '*.def' -o -name '*.inc' \) -exec cp {} "$WEBKIT_SOURCE/WebKitBuild/Release/Headers/JavaScriptCore/" \;
 
 # Headers contains some additional generated headers (if any)
 if [ -d "$BUILD_DIR/JavaScriptCore/Headers" ]; then
