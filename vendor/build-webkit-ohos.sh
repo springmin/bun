@@ -147,7 +147,13 @@ else
     exit 1
 fi
 
-# Copy generated JavaScriptCore headers from build directory (e.g., Bytecodes.h, OpcodeSize.h)
+# Copy generated JavaScriptCore headers from build directory
+# PrivateHeaders contains headers like Bytecodes.h, OpcodeSize.h, etc.
+if [ -d "$BUILD_DIR/JavaScriptCore/PrivateHeaders" ]; then
+    cp -r "$BUILD_DIR/JavaScriptCore/PrivateHeaders/." "$WEBKIT_SOURCE/WebKitBuild/Release/JavaScriptCore/PrivateHeaders/"
+fi
+
+# Headers contains some additional generated headers (if any)
 if [ -d "$BUILD_DIR/JavaScriptCore/Headers" ]; then
     cp -r "$BUILD_DIR/JavaScriptCore/Headers/." "$WEBKIT_SOURCE/WebKitBuild/Release/Headers/JavaScriptCore/"
 fi
