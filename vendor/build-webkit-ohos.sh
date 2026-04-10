@@ -158,7 +158,7 @@ else
     echo "WARNING: $BUILD_DIR/JavaScriptCore/PrivateHeaders does not exist"
 fi
 
-for header in Bytecodes.h OpcodeSize.h; do
+for header in Bytecodes.h OpcodeSize.h WasmOps.h; do
     if [ ! -f "$WEBKIT_SOURCE/WebKitBuild/Release/Headers/JavaScriptCore/$header" ]; then
         found=$(find "$BUILD_DIR" -name "$header" | head -n1)
         if [ -n "$found" ]; then
@@ -187,4 +187,12 @@ ls -lh "$WEBKIT_SOURCE/WebKitBuild/Release/lib/"
 echo "Headers:"
 ls -lh "$WEBKIT_SOURCE/WebKitBuild/Release/Headers/wtf/" | head -5
 ls -lh "$WEBKIT_SOURCE/WebKitBuild/Release/Headers/bmalloc/" | head -5
-ls -lh "$WEBKIT_SOURCE/WebKitBuild/Release/Headers/JavaScriptCore/" | head -5
+echo "JavaScriptCore headers (top 20):"
+ls -lh "$WEBKIT_SOURCE/WebKitBuild/Release/Headers/JavaScriptCore/" | head -20
+for h in WasmOps.h Bytecodes.h OpcodeSize.h; do
+    if [ -f "$WEBKIT_SOURCE/WebKitBuild/Release/Headers/JavaScriptCore/$h" ]; then
+        echo "Found $h"
+    else
+        echo "WARNING: $h missing!"
+    fi
+done
