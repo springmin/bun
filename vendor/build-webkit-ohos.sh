@@ -147,6 +147,16 @@ else
     exit 1
 fi
 
+# Copy generated JavaScriptCore headers from build directory (e.g., Bytecodes.h, OpcodeSize.h)
+if [ -d "$BUILD_DIR/JavaScriptCore/Headers" ]; then
+    cp -r "$BUILD_DIR/JavaScriptCore/Headers/." "$WEBKIT_SOURCE/WebKitBuild/Release/Headers/JavaScriptCore/"
+fi
+
+# Copy internal headers if they exist (needed for some APIs)
+if [ -d "$WEBKIT_SOURCE/Source/JavaScriptCore/internal" ]; then
+    cp -r "$WEBKIT_SOURCE/Source/JavaScriptCore/internal/." "$WEBKIT_SOURCE/WebKitBuild/Release/Headers/JavaScriptCore/" 2>/dev/null || true
+fi
+
 echo ""
 echo "=== Build Summary ==="
 echo "Libraries:"
