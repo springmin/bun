@@ -112,9 +112,11 @@ fi
 # Copy WTF headers from source (patched) - use lowercase 'wtf' to match #include <wtf/...>
 cp -r "$WEBKIT_SOURCE/Source/WTF/wtf/." "$WEBKIT_SOURCE/WebKitBuild/Release/Headers/wtf/"
 
-# Copy all JavaScriptCore header files recursively (API, runtime, parser, jit, etc.)
-# Uses rsync to copy only header files and preserve directory structure.
-rsync -av --prune-empty-dirs --include="*/" --include="*.h" --include="*.hpp" --include="*.def" --include="*.inc" --exclude="*" "$WEBKIT_SOURCE/Source/JavaScriptCore/" "$WEBKIT_SOURCE/WebKitBuild/Release/Headers/JavaScriptCore/"
+# Copy all JavaScriptCore header files, flattening the directory structure.
+# This ensures headers like JSCJSValue.h (from runtime/) end up directly under Headers/JavaScriptCore/,
+# which matches the expected include path <JavaScriptCore/JSCJSValue.h>.
+mkdir -p "$WEBKIT_SOURCE/WebKitBuild/Release/Headers/JavaScriptCore"
+find "$WEBKIT_SOURCE/Source/JavaScriptCore" -type f \( -name "*.h" -o -name "*.hpp" -o -name "*.def" -o -name "*.inc" \) -exec cp {} "$WEBKIT_SOURCE/WebKitBuild/Release/Headers/JavaScriptCore/" \;
 
 # Copy bmalloc headers from the build output (generated headers, e.g., BPlatform.h)
 # These are placed in ../../bmalloc/Headers/bmalloc relative to the build directory.
