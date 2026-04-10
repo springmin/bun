@@ -171,6 +171,11 @@ if [ -d "$WEBKIT_SOURCE/Source/JavaScriptCore/internal" ]; then
     cp -r "$WEBKIT_SOURCE/Source/JavaScriptCore/internal/." "$WEBKIT_SOURCE/WebKitBuild/Release/Headers/JavaScriptCore/" 2>/dev/null || true
 fi
 
+if [ -d "$WEBKIT_SOURCE/WebKitBuild/Release/Headers/wtf/glib" ]; then
+    echo "Removing wtf/glib headers (requires system glib)"
+    rm -rf "$WEBKIT_SOURCE/WebKitBuild/Release/Headers/wtf/glib"
+fi
+
 echo ""
 echo "=== Build Summary ==="
 echo "Libraries:"
