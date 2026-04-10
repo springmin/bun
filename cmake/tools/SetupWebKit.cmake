@@ -296,18 +296,20 @@ list(APPEND JSC_CMAKE_ARGS
     )
   endif()
 
-  include_directories(
-    ${WEBKIT_PATH}
-    # New artifact layout (2026-04-07): Headers/ contains wtf/, JavaScriptCore/ subdirs
-    ${WEBKIT_PATH}/Headers
-    # Backward compatibility with old artifact layout
-    ${WEBKIT_PATH}/JavaScriptCore/Headers
-    ${WEBKIT_PATH}/JavaScriptCore/Headers/JavaScriptCore
-    ${WEBKIT_PATH}/JavaScriptCore/PrivateHeaders
-    ${WEBKIT_PATH}/bmalloc/Headers
-    ${WEBKIT_PATH}/WTF/Headers
-    ${WEBKIT_PATH}/JavaScriptCore/PrivateHeaders/JavaScriptCore
-  )
+   include_directories(
+     ${WEBKIT_PATH}
+     # New artifact layout (2026-04-07): Headers/ contains wtf/, JavaScriptCore/ subdirs
+     ${WEBKIT_PATH}/Headers
+     # New layout: PrivateHeaders inside Headers/JavaScriptCore/
+     ${WEBKIT_PATH}/Headers/JavaScriptCore/PrivateHeaders
+     # Backward compatibility with old artifact layout
+     ${WEBKIT_PATH}/JavaScriptCore/Headers
+     ${WEBKIT_PATH}/JavaScriptCore/Headers/JavaScriptCore
+     ${WEBKIT_PATH}/JavaScriptCore/PrivateHeaders
+     ${WEBKIT_PATH}/bmalloc/Headers
+     ${WEBKIT_PATH}/WTF/Headers
+     ${WEBKIT_PATH}/JavaScriptCore/PrivateHeaders/JavaScriptCore
+   )
 
   # On Windows, add ICU headers from the local ICU build
   if(WIN32)
