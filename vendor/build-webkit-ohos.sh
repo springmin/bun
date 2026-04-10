@@ -154,7 +154,19 @@ mkdir -p "$WEBKIT_SOURCE/WebKitBuild/Release/JavaScriptCore"
 mkdir -p "$WEBKIT_SOURCE/WebKitBuild/Release/JavaScriptCore/PrivateHeaders"
 if [ -d "$BUILD_DIR/JavaScriptCore/PrivateHeaders" ]; then
     cp -r "$BUILD_DIR/JavaScriptCore/PrivateHeaders/." "$WEBKIT_SOURCE/WebKitBuild/Release/JavaScriptCore/PrivateHeaders/"
-fi
+    else
+        echo "WARNING: $BUILD_DIR/JavaScriptCore/PrivateHeaders does not exist"
+        echo "Searching for generated JavaScriptCore headers (Bytecodes.h, OpcodeSize.h) in build directory..."
+        for header in Bytecodes.h OpcodeSize.h; do
+            found=$(find "$BUILD_DIR" -name "$header" | head -n1)
+            if [ -n "$found" ]; then
+                echo "Found $header at: $found"
+                cp "$found" "$WEBKIT_SOURCE/WebKitBuild/Release/Headers/JavaScriptCore/"
+            else
+                echo "WARNING: $header not found!"
+            fi
+        done
+    fi
 
 # Headers contains some additional generated headers (if any)
 if [ -d "$BUILD_DIR/JavaScriptCore/Headers" ]; then
