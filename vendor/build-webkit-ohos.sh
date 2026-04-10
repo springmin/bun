@@ -151,4 +151,5 @@ echo "Libraries:"
 ls -lh "$WEBKIT_SOURCE/WebKitBuild/Release/lib/"
 echo "Headers:"
 ls -lh "$WEBKIT_SOURCE/WebKitBuild/Release/Headers/wtf/" | head -5
+ls -lh "$WEBKIT_SOURCE/WebKitBuild/Release/Headers/bmalloc/" | head -5
 ls -lh "$WEBKIT_SOURCE/WebKitBuild/Release/Headers/JavaScriptCore/" | head -5

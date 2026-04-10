@@ -34,9 +34,9 @@ if(WEBKIT_PREBUILT)
 
    include_directories(
       ${WEBKIT_PATH_ABS}
-      # New artifact layout (2026-04-07): Headers/ contains wtf/, JavaScriptCore/ subdirs
+      # New artifact layout (2026-04-07): Headers/ contains wtf/, bmalloc/, JavaScriptCore/ subdirs
       ${WEBKIT_PATH_ABS}/Headers
-      # Backward compatibility with old artifact layout
+      # Backward compatibility with old artifact layout (pre-2026-04-07)
       ${WEBKIT_PATH_ABS}/JavaScriptCore/Headers
       ${WEBKIT_PATH_ABS}/JavaScriptCore/Headers/JavaScriptCore
       ${WEBKIT_PATH_ABS}/JavaScriptCore/PrivateHeaders
