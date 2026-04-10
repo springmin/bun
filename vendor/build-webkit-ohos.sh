@@ -149,6 +149,9 @@ fi
 
 # Copy generated JavaScriptCore headers from build directory
 # PrivateHeaders contains headers like Bytecodes.h, OpcodeSize.h, etc.
+# Ensure destination parent directory exists.
+mkdir -p "$WEBKIT_SOURCE/WebKitBuild/Release/JavaScriptCore"
+mkdir -p "$WEBKIT_SOURCE/WebKitBuild/Release/JavaScriptCore/PrivateHeaders"
 if [ -d "$BUILD_DIR/JavaScriptCore/PrivateHeaders" ]; then
     cp -r "$BUILD_DIR/JavaScriptCore/PrivateHeaders/." "$WEBKIT_SOURCE/WebKitBuild/Release/JavaScriptCore/PrivateHeaders/"
 fi
