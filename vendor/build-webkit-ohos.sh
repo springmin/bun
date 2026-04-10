@@ -158,17 +158,16 @@ else
     echo "WARNING: $BUILD_DIR/JavaScriptCore/PrivateHeaders does not exist"
 fi
 
-for header in Bytecodes.h OpcodeSize.h WasmOps.h; do
-    if [ ! -f "$WEBKIT_SOURCE/WebKitBuild/Release/Headers/JavaScriptCore/$header" ]; then
-        found=$(find "$BUILD_DIR" -name "$header" | head -n1)
-        if [ -n "$found" ]; then
-            echo "Copying $header from $found to Headers/JavaScriptCore/"
-            cp "$found" "$WEBKIT_SOURCE/WebKitBuild/Release/Headers/JavaScriptCore/"
-        else
-            echo "WARNING: $header not found anywhere in build directory!"
+echo "Copying any remaining JavaScriptCore headers from build..."
+find "$BUILD_DIR/JavaScriptCore" -type f \( -name '*.h' -o -name '*.hpp' -o -name '*.def' -o -name '*.inc' \) -exec sh -c '
+    for f; do
+        bn=$(basename "$f")
+        if [ ! -f "$WEBKIT_SOURCE/WebKitBuild/Release/Headers/JavaScriptCore/$bn" ]; then
+            echo "Copying $bn from $f"
+            cp "$f" "$WEBKIT_SOURCE/WebKitBuild/Release/Headers/JavaScriptCore/"
         fi
-    fi
-done
+    done
+' sh {} +
 
 # Headers contains some additional generated headers (if any)
 if [ -d "$BUILD_DIR/JavaScriptCore/Headers" ]; then
