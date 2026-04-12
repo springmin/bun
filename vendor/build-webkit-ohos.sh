@@ -64,10 +64,14 @@ echo ""
 
 echo ""
    echo ""
-   echo "=== Configuring WebKit ==="
-   
-   
-    cmake -B "$BUILD_DIR" \
+    echo "=== Configuring WebKit ==="
+    
+    echo "Removing inspector/remote/glib source (requires GLIB)"
+    rm -rf "$WEBKIT_SOURCE/Source/JavaScriptCore/inspector/remote/glib" 2>/dev/null || true
+    echo "Removing wtf/glib source (requires GLIB)"
+    rm -rf "$WEBKIT_SOURCE/Source/WTF/wtf/glib" 2>/dev/null || true
+    
+     cmake -B "$BUILD_DIR" \
      -S "$WEBKIT_SOURCE" \
      -G Ninja \
      -DCMAKE_BUILD_TYPE=Release \
@@ -172,10 +176,10 @@ if [ -d "$WEBKIT_SOURCE/Source/JavaScriptCore/internal" ]; then
     cp -r "$WEBKIT_SOURCE/Source/JavaScriptCore/internal/." "$WEBKIT_SOURCE/WebKitBuild/Release/Headers/JavaScriptCore/" 2>/dev/null || true
 fi
 
-if [ -d "$WEBKIT_SOURCE/WebKitBuild/Release/Headers/wtf/glib" ]; then
-    echo "Removing wtf/glib headers (requires system glib)"
-    rm -rf "$WEBKIT_SOURCE/WebKitBuild/Release/Headers/wtf/glib"
-fi
+ echo "Removing inspector/remote/glib headers (require system glib)"
+ rm -rf "$WEBKIT_SOURCE/WebKitBuild/Release/Headers/JavaScriptCore/inspector/remote/glib" 2>/dev/null || true
+ echo "Removing wtf/GLib headers (require system glib)"
+ rm -rf "$WEBKIT_SOURCE/WebKitBuild/Release/Headers/wtf/GLib" 2>/dev/null || true
 
 echo ""
 echo "=== Build Summary ==="
