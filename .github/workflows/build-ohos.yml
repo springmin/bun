@@ -117,6 +117,11 @@ jobs:
         run: |
           # Download prebuilt WebKit from GitHub Release instead of building from source
           # This avoids C++20 compatibility issues between WebKit and OHOS SDK libc++
+           # Remove glib headers if present (defensive)
+           if [ -d "vendor/WebKit/WebKitBuild/Headers/wtf/glib" ]; then
+             echo "Removing wtf/glib headers (require system glib, not available on OHOS)"
+             rm -rf vendor/WebKit/WebKitBuild/Headers/wtf/glib
+           fi
           # The tarball also includes ICU headers from vendor/icu-ohos
           mkdir -p vendor/WebKit/WebKitBuild
           wget -q -O /tmp/webkit-ohos-aarch64-Release.tar.gz \
