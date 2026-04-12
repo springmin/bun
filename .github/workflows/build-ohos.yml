@@ -3,8 +3,26 @@ name: Build OHOS
 on:
   push:
     branches: [ohos]
+    paths-ignore:
+      - "vendor/WebKit/**"
+      - "vendor/icu-ohos/**"
+      - ".github/ohos-patches/**"
+      - "cmake/tools/SetupWebKit.cmake"
+      - "cmake/targets/BuildBun.cmake"
+      - "cmake/toolchains/ohos-aarch64.cmake"
+      - ".github/workflows/build-webkit-ohos.yml"
+      - "scripts/build/deps/webkit.ts"
   pull_request:
     branches: [ohos]
+    paths-ignore:
+      - "vendor/WebKit/**"
+      - "vendor/icu-ohos/**"
+      - ".github/ohos-patches/**"
+      - "cmake/tools/SetupWebKit.cmake"
+      - "cmake/targets/BuildBun.cmake"
+      - "cmake/toolchains/ohos-aarch64.cmake"
+      - ".github/workflows/build-webkit-ohos.yml"
+      - "scripts/build/deps/webkit.ts"
   workflow_dispatch:
     inputs:
       build_type:
@@ -195,7 +213,7 @@ jobs:
             -DCMAKE_BUILD_TYPE=${{ env.CMAKE_BUILD_TYPE }} \
             -DENABLE_LTO=ON \
             -DWEBKIT_PREBUILT=ON \
-            -DWEBKIT_PATH=vendor/WebKit/WebKitBuild
+            -DWEBKIT_PATH=vendor/WebKit/WebKitBuild/Release
 
       - name: Build Bun
         run: ninja -C build/ohos-release bun

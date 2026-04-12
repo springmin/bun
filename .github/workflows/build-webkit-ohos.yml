@@ -1,20 +1,29 @@
 name: Build WebKit for OHOS
 
 on:
-  workflow_dispatch:
-    inputs:
-      build_type:
-        description: "Build type"
-        required: true
-        default: "Release"
-        type: choice
-        options:
-          - Release
-          - Debug
   push:
     branches: [ohos]
+    paths:
+      - "vendor/WebKit/**"
+      - "vendor/icu-ohos/**"
+      - ".github/ohos-patches/**"
+      - "cmake/tools/SetupWebKit.cmake"
+      - "cmake/targets/BuildBun.cmake"
+      - "cmake/toolchains/ohos-aarch64.cmake"
+      - ".github/workflows/build-webkit-ohos.yml"
+      - "scripts/build/deps/webkit.ts"
   pull_request:
     branches: [ohos]
+    paths:
+      - "vendor/WebKit/**"
+      - "vendor/icu-ohos/**"
+      - ".github/ohos-patches/**"
+      - "cmake/tools/SetupWebKit.cmake"
+      - "cmake/targets/BuildBun.cmake"
+      - "cmake/toolchains/ohos-aarch64.cmake"
+      - ".github/workflows/build-webkit-ohos.yml"
+      - "scripts/build/deps/webkit.ts"
+  workflow_dispatch:
 
 env:
   CMAKE_BUILD_TYPE: ${{ github.event.inputs.build_type || 'Release' }}
@@ -172,7 +181,7 @@ jobs:
       - name: Download WebKit source
         run: |
           # Use fixed commit for reproducibility and faster download (shallow fetch)
-          WEBKIT_COMMIT="c2010c47d12c525d36adabe3a17b2eb6ec850960"
+          WEBKIT_COMMIT="fc9f2fa7272fec64905df6a9c78e15d7912f14ca"
           if [ ! -d "vendor/WebKit/.git" ]; then
             echo "=== Downloading WebKit source at commit $WEBKIT_COMMIT ==="
             mkdir -p vendor/WebKit
