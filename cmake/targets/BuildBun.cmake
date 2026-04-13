@@ -972,8 +972,8 @@ target_compile_definitions(${bun} PRIVATE
 
 if(OHOS_BUILD)
 target_compile_definitions(${bun} PRIVATE __OHOS__)
-# OHOS uses LLVM libc++ instead of libstdc++
-target_compile_options(${bun} PUBLIC -stdlib=libc++)
+# OHOS uses LLVM libc++ instead of libstdc++ (C++ only, not C)
+target_compile_options(${bun} PUBLIC $<$<COMPILE_LANGUAGE:CXX>:-stdlib=libc++>)
 endif()
 
 if(DEBUG AND NOT CI)
