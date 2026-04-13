@@ -71,24 +71,24 @@ echo ""
     echo "Removing wtf/glib source (requires GLIB)"
     rm -rf "$WEBKIT_SOURCE/Source/WTF/wtf/glib" 2>/dev/null || true
     
-     cmake -B "$BUILD_DIR" \
-     -S "$WEBKIT_SOURCE" \
-     -G Ninja \
-     -DCMAKE_BUILD_TYPE=Release \
-     -DOHOS_BUILD=ON \
-     -DCMAKE_TOOLCHAIN_FILE="${BUN_ROOT}/cmake/toolchains/ohos-aarch64.cmake" \
-     -DPORT=JSCOnly \
-     -DJavaScriptCore_EXPORT_PRIVATE_SYMBOLS=OFF \
-     -DUSE_SYSTEM_MALLOC=OFF \
-     -DENABLE_STATIC_JSC=ON \
-     -DUSE_BUN_JSC_ADDITIONS=ON \
-     -DUSE_THIN_ARCHIVES=OFF \
-     -DENABLE_REMOTE_INSPECTOR=ON \
-     -DUSE_GLIB=OFF \
-     -DICU_ROOT="$ICU_ROOT" \
-     -DICU_INCLUDE_DIR="$ICU_ROOT/include" \
-     -DICU_LIBRARY_DIR="$ICU_ROOT/lib" \
-     -DCMAKE_INSTALL_PREFIX="$WEBKIT_SOURCE/WebKitBuild/Release"
+    cmake -B "$BUILD_DIR" \
+      -S "$WEBKIT_SOURCE" \
+      -G Ninja \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DOHOS_BUILD=ON \
+      -DCMAKE_TOOLCHAIN_FILE="${BUN_ROOT}/cmake/toolchains/ohos-aarch64.cmake" \
+      -DPORT=JSCOnly \
+      -DJavaScriptCore_EXPORT_PRIVATE_SYMBOLS=OFF \
+      -DUSE_SYSTEM_MALLOC=OFF \
+      -DENABLE_STATIC_JSC=ON \
+      -DUSE_BUN_JSC_ADDITIONS=ON \
+      -DUSE_THIN_ARCHIVES=OFF \
+      -DENABLE_REMOTE_INSPECTOR=OFF \
+      -DUSE_GLIB=OFF \
+      -DICU_ROOT="$ICU_ROOT" \
+      -DICU_INCLUDE_DIR="$ICU_ROOT/include" \
+      -DICU_LIBRARY_DIR="$ICU_ROOT/lib" \
+      -DCMAKE_INSTALL_PREFIX="$WEBKIT_SOURCE/WebKitBuild/Release"
 
 
 # Build
