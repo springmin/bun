@@ -17,6 +17,7 @@ pub const isPosix = !isWindows and !isWasm;
 pub const isDebug = builtin.mode == .Debug;
 pub const isTest = builtin.is_test;
 pub const isLinux = builtin.target.os.tag == .linux;
+pub const isOhos = builtin.target.abi == .ohos;
 pub const isAarch64 = builtin.target.cpu.arch.isAARCH64();
 pub const isX86 = builtin.target.cpu.arch.isX86();
 pub const isX64 = builtin.target.cpu.arch == .x86_64;
@@ -71,6 +72,8 @@ pub const OperatingSystem = enum {
     windows,
     // wAsM is nOt aN oPeRaTiNg SyStEm
     wasm,
+    /// OpenHarmony / HarmonyOS
+    ohos,
 
     pub const names = bun.ComptimeStringMap(OperatingSystem, &.{
         .{ "windows", .windows },
@@ -87,6 +90,9 @@ pub const OperatingSystem = enum {
         .{ "Linux", .linux },
         .{ "linux-gnu", .linux },
         .{ "gnu/linux", .linux },
+        .{ "ohos", .ohos },
+        .{ "openharmony", .ohos },
+        .{ "harmonyos", .ohos },
         .{ "wasm", .wasm },
     });
 
@@ -97,6 +103,7 @@ pub const OperatingSystem = enum {
             .linux => "Linux",
             .windows => "Windows",
             .wasm => "WASM",
+            .ohos => "OHOS",
         };
     }
 
@@ -107,6 +114,7 @@ pub const OperatingSystem = enum {
             .linux => "linux",
             .windows => "win32",
             .wasm => "wasm",
+            .ohos => "linux", // OHOS is Linux-based for process.platform
         };
     }
 
@@ -116,6 +124,7 @@ pub const OperatingSystem = enum {
             .linux => .linux,
             .windows => .windows,
             .wasm => unreachable,
+            .ohos => .linux, // OHOS uses Linux kernel
         };
     }
 
@@ -126,14 +135,17 @@ pub const OperatingSystem = enum {
             .linux => "linux",
             .windows => "windows",
             .wasm => "wasm",
+            .ohos => "linux", // OHOS uses linux npm package
         };
     }
 };
 
 pub const os: OperatingSystem = if (isMac)
     .mac
-else if (isLinux)
+else if (isLinux and !isOhos)
     .linux
+else if (isOhos)
+    .ohos
 else if (isWindows)
     .windows
 else if (isWasm)

@@ -116,6 +116,9 @@ pub fn getOSVersionMin(os: OperatingSystem) ?Target.Query.OsVersion {
             .windows = .win10_rs5,
         },
 
+        // OHOS doesn't have a specific version requirement
+        .ohos => null,
+
         else => null,
     };
 }
@@ -125,13 +128,16 @@ pub fn getOSGlibCVersion(os: OperatingSystem) ?Version {
         // Compiling with a newer glibc than this will break certain cloud environments. See symbols.test.ts.
         .linux => .{ .major = 2, .minor = 26, .patch = 0 },
 
+        // OHOS uses musl, not glibc
+        .ohos => null,
+
         else => null,
     };
 }
 
 pub fn getCpuModel(os: OperatingSystem, arch: Arch) ?Target.Query.CpuModel {
     // https://github.com/oven-sh/bun/issues/12076
-    if (os == .linux and arch == .aarch64) {
+    if ((os == .linux or os == .ohos) and arch == .aarch64) {
         return .{ .explicit = &Target.aarch64.cpu.cortex_a35 };
     }
 
@@ -163,7 +169,13 @@ pub fn build(b: *Build) !void {
             .wasm
         else switch (temp_resolved.result.os.tag) {
             .macos => .mac,
-            .linux => .linux,
+            .linux => blk: {
+                // Check for OHOS (OpenHarmony/HarmonyOS) - uses Linux kernel but musl libc
+                if (temp_resolved.result.abi == .ohos or temp_resolved.result.abi == .ohoseabi) {
+                    break :blk .ohos;
+                }
+                break :blk .linux;
+            },
             .windows => .windows,
             else => |t| std.debug.panic("Unsupported OS tag {}", .{t}),
         };

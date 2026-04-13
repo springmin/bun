@@ -972,6 +972,8 @@ target_compile_definitions(${bun} PRIVATE
 
 if(OHOS_BUILD)
 target_compile_definitions(${bun} PRIVATE __OHOS__)
+# OHOS uses LLVM libc++ instead of libstdc++
+target_compile_options(${bun} PUBLIC -stdlib=libc++)
 endif()
 
 if(DEBUG AND NOT CI)
@@ -1186,9 +1188,15 @@ target_link_options(${bun} PUBLIC
     -static-libgcc
 )
 elseif(OHOS_BUILD)
-# OHOS uses LLVM libc++ and clang_rt.builtins instead of libstdc++ and libgcc
+# OHOS uses LLVM libc++ instead of libstdc++
+# OHOS SDK provides libc++_static, libc++abi, and libunwind
+set(OHOS_SDK_NATIVE "$ENV{HOME}/hmos-tools/sdk/default/openharmony/native")
 target_link_options(${bun} PUBLIC
-    -lstdc++
+-static
+-L${OHOS_SDK_NATIVE}/llvm/lib/aarch64-linux-ohos
+-lc++_static
+-lc++abi
+-lunwind
 )
 else()
 target_link_options(${bun} PUBLIC
