@@ -88,13 +88,14 @@ jobs:
       - name: Setup vendor/zig
         run: |
           # vendor/zig is not tracked in git, must be downloaded for CI
-          # Download official Zig 0.15.2 stable release (matches Bun's declared version)
+          # Download Bun's fork of Zig (autobuild version for compatibility)
           mkdir -p vendor/zig
           cd vendor/zig
-          wget -q "https://github.com/ziglang/zig/releases/download/0.15.2/zig-linux-x86_64-0.15.2.tar.xz" -O zig.tar.xz
-          tar xf zig.tar.xz
-          # Contents are already at root level
-          rm -f zig.tar.xz
+          wget -q "https://github.com/oven-sh/zig/releases/download/autobuild-f6231adad307ef52dc390eb3aa6db844d1b261a3/bootstrap-x86_64-linux-musl.zip" -O zig.zip
+          unzip -q zig.zip
+          # Move contents to root level
+          mv bootstrap-x86_64-linux-musl/* .
+          rm -rf bootstrap-x86_64-linux-musl zig.zip
           chmod +x zig
           ./zig version
           ls -la lib/
