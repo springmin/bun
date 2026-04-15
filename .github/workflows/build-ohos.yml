@@ -7,22 +7,8 @@ on:
       - "vendor/WebKit/**"
       - "vendor/icu-ohos/**"
       - ".github/ohos-patches/**"
-      - "cmake/tools/SetupWebKit.cmake"
-      - "cmake/targets/BuildBun.cmake"
-      - "cmake/toolchains/ohos-aarch64.cmake"
-      - ".github/workflows/build-webkit-ohos.yml"
-      - "scripts/build/deps/webkit.ts"
+
   pull_request:
-    branches: [ohos]
-    paths-ignore:
-      - "vendor/WebKit/**"
-      - "vendor/icu-ohos/**"
-      - ".github/ohos-patches/**"
-      - "cmake/tools/SetupWebKit.cmake"
-      - "cmake/targets/BuildBun.cmake"
-      - "cmake/toolchains/ohos-aarch64.cmake"
-      - ".github/workflows/build-webkit-ohos.yml"
-      - "scripts/build/deps/webkit.ts"
   workflow_dispatch:
     inputs:
       build_type:
