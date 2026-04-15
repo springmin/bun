@@ -88,10 +88,10 @@ jobs:
       - name: Setup vendor/zig
         run: |
           # vendor/zig is not tracked in git, must be downloaded for CI
-          # Download prebuilt Zig from our release (same version as local: 0.15.2)
+          # Download official Zig (same version as local: 0.16.0-dev.2877+627f03af9)
           mkdir -p vendor/zig
           cd vendor/zig
-          wget -q "https://github.com/springmin/bun/releases/download/webkit-ohos-prebuilt/zig-x86_64-linux-0.15.2-custom.tar.xz" -O zig.tar.xz
+          wget -q "https://github.com/ziglang/zig/releases/download/0.16.0-dev.2877/zig-linux-x86_64-0.16.0-dev.2877.tar.xz" -O zig.tar.xz
           tar xf zig.tar.xz
           # Contents are already at root level
           rm -f zig.tar.xz
