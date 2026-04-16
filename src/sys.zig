@@ -1933,7 +1933,7 @@ pub fn pread(fd: bun.FileDescriptor, buf: []u8, offset: i64) Maybe(usize) {
     }
 }
 
-const pwrite_sym = if (builtin.os.tag == .linux and builtin.link_libc and !bun.Environment.isMusl)
+const pwrite_sym = if (builtin.os.tag == .linux and builtin.link_libc and !bun.Environment.isMusl and !bun.Environment.isOhos)
     libc.pwrite64
 else
     syscall.pwrite;

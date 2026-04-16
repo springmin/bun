@@ -351,7 +351,7 @@ pub fn crashHandler(
                     const desired_begin_addr = begin_addr orelse @returnAddress();
                     std.debug.captureStackTrace(desired_begin_addr, &trace_buf);
 
-                    if (comptime bun.Environment.isLinux and !bun.Environment.isMusl) {
+                    if (comptime bun.Environment.isLinux and !bun.Environment.isMusl and !bun.Environment.isOhos) {
                         var addr_buf_libc: [20]usize = undefined;
                         var trace_buf_libc: std.builtin.StackTrace = .{
                             .index = 0,
@@ -964,7 +964,7 @@ pub fn printMetadata(writer: anytype) !void {
     {
         const platform = bun.analytics.GenerateHeader.GeneratePlatform.forOS();
         const cpu_features = CPUFeatures.get();
-        if (bun.Environment.isLinux and !bun.Environment.isMusl) {
+        if (bun.Environment.isLinux and !bun.Environment.isMusl and !bun.Environment.isOhos) {
             const version = gnu_get_libc_version() orelse "";
             const kernel_version = bun.analytics.GenerateHeader.GeneratePlatform.kernelVersion();
             if (platform.os == .wsl) {
@@ -972,7 +972,7 @@ pub fn printMetadata(writer: anytype) !void {
             } else {
                 try writer.print("Linux Kernel v{d}.{d}.{d} | glibc v{s}\n", .{ kernel_version.major, kernel_version.minor, kernel_version.patch, bun.sliceTo(version, 0) });
             }
-        } else if (bun.Environment.isLinux and bun.Environment.isMusl) {
+        } else if (bun.Environment.isLinux and (bun.Environment.isMusl or bun.Environment.isOhos)) {
             const kernel_version = bun.analytics.GenerateHeader.GeneratePlatform.kernelVersion();
             try writer.print("Linux Kernel v{d}.{d}.{d} | musl\n", .{ kernel_version.major, kernel_version.minor, kernel_version.patch });
         } else if (bun.Environment.isMac) {

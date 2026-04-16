@@ -66,7 +66,7 @@ pub fn setThreadName(name: [:0]const u8) void {
     if (Environment.isLinux) {
         // OHOS/musl: Skip prctl SET_NAME on musl-based systems
         // The system call may have parameter compatibility issues on OHOS
-        if (!Environment.isMusl) {
+        if (!Environment.isMusl and !Environment.isOhos) {
             _ = std.posix.prctl(.SET_NAME, .{@intFromPtr(name.ptr)}) catch 0;
         }
     } else if (Environment.isMac) {

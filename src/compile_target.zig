@@ -14,7 +14,7 @@ version: bun.Semver.Version = .{
     .minor = @truncate(Environment.version.minor),
     .patch = @truncate(Environment.version.patch),
 },
-libc: Libc = if (!Environment.isMusl) .default else .musl,
+libc: Libc = if (!Environment.isMusl and !Environment.isOhos) .default else .musl,
 
 const Libc = enum {
     /// The default libc for the target
