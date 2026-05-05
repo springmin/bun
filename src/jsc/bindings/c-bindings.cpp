@@ -522,7 +522,7 @@ extern "C" void bun_initialize_process()
     setvbuf(stdout, nullptr, _IONBF, 0);
     setvbuf(stderr, nullptr, _IONBF, 0);
 
-#if OS(LINUX)
+#if OS(LINUX) && !defined(__OHOS__)
     // Prevent leaking inherited file descriptors on Linux
     // This is less of an issue for macOS due to posix_spawn
     // This is best effort, not all linux kernels support close_range or CLOSE_RANGE_CLOEXEC

@@ -109,7 +109,8 @@ typedef struct bun_spawn_request_t {
 // as _exit() may try to acquire locks held by threads that don't exist in the child.
 static inline void rawExit(int status)
 {
-#if OS(LINUX)
+// On OHOS: use _exit() (not exit_group) because vfork child must not kill parent.
+#if OS(LINUX) && !defined(__OHOS__)
     syscall(__NR_exit_group, status);
 #else
     _exit(status);
@@ -145,7 +146,7 @@ extern "C" ssize_t posix_spawn_bun(
     pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &cs);
 #endif
 
-#if OS(LINUX)
+#if OS(LINUX) && !defined(__OHOS__)
     // On Linux, use vfork() for performance. The parent is suspended until
     // the child calls exec or _exit, so we can detect exec failure via the
     // child's exit status without needing the self-pipe trick.
@@ -156,7 +157,8 @@ extern "C" ssize_t posix_spawn_bun(
     pid_t child = vfork();
 #else
     // On macOS, we must use fork() because vfork() is more strictly enforced.
-    // This code path should only be used for PTY spawns on macOS.
+    // On OHOS, vfork() may hang in static binaries (seccomp blocks clone).
+    // This code path uses fork() for compatibility.
     pid_t child = fork();
 #endif
 
@@ -188,12 +190,14 @@ extern "C" ssize_t posix_spawn_bun(
     const auto startChild = [&]() -> ssize_t {
         sigset_t childmask = oldmask;
 
-        // Reset signals
+        // Reset signals (skipped on OHOS: sigaction loop may hit blocked syscalls)
+#if !defined(__OHOS__)
         struct sigaction sa = { 0 };
         sa.sa_handler = SIG_DFL;
         for (int i = 0; i < NSIG; i++) {
             sigaction(i, &sa, 0);
         }
+#endif
 
         // Make "detached" work, or set up PTY as controlling terminal
         if (request->detached || request->pty_slave_fd >= 0) {
