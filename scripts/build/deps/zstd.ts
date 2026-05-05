@@ -46,6 +46,7 @@ export const zstd: Dependency = {
     const defines: Record<string, number | true> = {
       ZSTD_MULTITHREAD: true,
       ZSTD_LEGACY_SUPPORT: 0,
+
     };
 
     // Upstream's if(MSVC) block sets these for the static target.
