@@ -57,6 +57,11 @@ export const cpuTargetFlags: Flag[] = [
     desc: "ARM64 Windows: clang-cl prefix required (/clang: passes to clang)",
   },
   {
+    flag: ["-march=armv8-a", "-mtune=cortex-a53"],
+    when: c => c.ohos && c.arm64,
+    desc: "OHOS aarch64: ARMv8.0 baseline (no crypto, no SVE, no dotprod, no LSE)",
+  },
+  {
     flag: "-march=nehalem",
     when: c => c.x64 && c.baseline,
     desc: "x64 baseline: Nehalem (2008) — no AVX, broadest compatibility",
@@ -139,6 +144,35 @@ export const globalFlags: Flag[] = [
     flag: "-D__BSD_VISIBLE=1",
     when: c => c.freebsd,
     desc: "FreeBSD: expose BSD typedefs (u_long etc.) in <sys/types.h>",
+  },
+
+  // ─── OHOS cross-compilation ───
+  {
+    flag: c => [`--target=aarch64-linux-ohos`, `--sysroot=${c.ohosSysroot!}`, `-D__MUSL__`, `-mbranch-protection=none`, `-mno-outline-atomics`],
+    when: c => c.ohos && c.arm64,
+    desc: "OHOS target triple + sysroot + musl libc (no PAC/BTI/outline-atomics for OHOS device compat)",
+  },
+  {
+    flag: "-Wno-macro-redefined",
+    when: c => c.ohos,
+    desc: "OHOS: suppress WebKit cmakeconfig vs PlatformHave.h HAVE_INT128_T conflict",
+  },
+  {
+    flag: c => [`-nostdinc++`, `-I${c.ohosCrossLibs!}/libcxx/include/v1`, `-I${c.ohosCrossLibs!}/libcxxabi/include`],
+    when: c => c.ohos,
+    lang: "cxx",
+    desc: "OHOS: use musl-compatible LLVM 22 libc++ headers",
+  },
+  {
+    flag: c => [`-I${c.ohosIcuDir!}/include`, `-DU_DISABLE_RENAMING=1`],
+    when: c => c.ohos && !!c.ohosIcuDir,
+    desc: "OHOS: use cross-compiled ICU headers (sysroot ICU is incomplete)",
+  },
+  {
+    flag: "-fno-c++-static-destructors",
+    when: c => c.ohos,
+    lang: "cxx",
+    desc: "OHOS: match libc++ build config",
   },
 
   // ─── CPU target ───
@@ -809,6 +843,56 @@ export const linkerFlags: Flag[] = [
     flag: c => ["-dead_strip", "-dead_strip_dylibs", `-Wl,-map,${c.buildDir}/${bunExeName(c)}.linker-map`],
     when: c => c.darwin && c.release,
     desc: "Dead-code strip + emit linker map",
+  },
+
+  // ─── OHOS ───
+  {
+    flag: c => [`--target=aarch64-linux-ohos`, `--sysroot=${c.ohosSysroot!}`],
+    when: c => c.ohos,
+    desc: "OHOS target triple + sysroot at link time",
+  },
+  {
+    flag: "-Wl,--allow-multiple-definition",
+    when: c => c.ohos,
+    desc: "OHOS: allow iostream stub duplicate; mimalloc override disabled",
+  },
+  {
+    flag: c => [
+      `-L${c.ohosCrossLibs!}/libcxx/lib`,
+      `-L${c.ohosCrossLibs!}/libcxxabi/lib`,
+      `-L${c.ohosCrossLibs!}/libunwind/lib`,
+      c.ohosIcuDir ? `-L${c.ohosIcuDir}/lib` : "",
+      "-lc++",
+      "-lc++abi",
+      "-lunwind",
+    ].filter(f => f !== ""),
+    when: c => c.ohos,
+    desc: "OHOS: link LLVM 22 libc++ + libc++abi + libunwind",
+  },
+  {
+    flag: [
+      "-Wl,--as-needed",
+      "-Wl,-z,stack-size=8192000",
+      "-Wl,--compress-debug-sections=zlib",
+      "-Wl,-z,lazy",
+      "-Wl,-z,norelro",
+      "-Wl,-O2",
+      "-Wl,--sort-section=name",
+      "-Wl,--hash-style=both",
+      "-Wl,--build-id=sha1",
+    ],
+    when: c => c.ohos,
+    desc: "OHOS linker tuning: 8MB stack, compressed debug",
+  },
+  {
+    flag: "-static",
+    when: c => c.ohos,
+    desc: "OHOS: must use static linking (dynamic fails with R_AARCH64_LDST64_ABS_LO12_NC alignment error from LLD)",
+  },
+  {
+    flag: "-Wl,--noinhibit-exec",
+    when: c => c.ohos,
+    desc: "OHOS: LLD stderr alignment errors are harmless on aarch64 (SCTLR_EL1.A is 0 by default)",
   },
 
   // ─── Linux ───
