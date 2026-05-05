@@ -96,6 +96,7 @@ export function zigTarget(cfg: Config): string {
     assert(cfg.freebsdVersion !== undefined, "freebsd build missing version");
     return `${arch}-freebsd.${cfg.freebsdVersion}-none`;
   }
+  if (cfg.ohos) return `${arch}-linux-musl`;
   // linux: abi is always set (resolveConfig asserts)
   assert(cfg.abi !== undefined, "linux build missing abi");
   if (cfg.abi === "android") {
@@ -194,6 +195,7 @@ export function zigCpu(cfg: Config): string {
   if (cfg.arm64) {
     if (cfg.darwin) return "apple_m1";
     if (cfg.windows) return "cortex_a76";
+    if (cfg.ohos) return "neoverse_v1+bti+complxnum+dit+dotprod+flagm+fullfp16+jsconv+lse+pauth+rcpc+rdm+sb+sha2";
     return "native";
   }
   // x64
