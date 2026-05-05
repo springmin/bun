@@ -294,6 +294,24 @@ export const webkit: Dependency = {
             CMAKE_FIND_ROOT_PATH_MODE_INCLUDE: "BOTH",
           }
         : {}),
+      ...(cfg.ohos
+        ? {
+            CMAKE_SYSTEM_NAME: "Linux",
+            CMAKE_SYSTEM_PROCESSOR: "aarch64",
+            CMAKE_C_COMPILER: cfg.cc,
+            CMAKE_CXX_COMPILER: cfg.cxx,
+            CMAKE_TRY_COMPILE_TARGET_TYPE: "STATIC_LIBRARY",
+            CMAKE_FIND_ROOT_PATH: cfg.ohosSysroot,
+            CMAKE_PREFIX_PATH: cfg.ohosIcuDir,
+            ICU_ROOT: cfg.ohosIcuDir,
+            CMAKE_THREAD_LIBS_INIT: "-lpthread",
+            CMAKE_HAVE_THREADS_LIBRARY: "1",
+            CMAKE_DL_LIBS: "",
+            CMAKE_FIND_ROOT_PATH_MODE_PACKAGE: "BOTH",
+            CMAKE_FIND_ROOT_PATH_MODE_LIBRARY: "BOTH",
+            CMAKE_FIND_ROOT_PATH_MODE_INCLUDE: "BOTH",
+          }
+        : {}),
       PORT: "JSCOnly",
       ENABLE_STATIC_JSC: "ON",
       USE_THIN_ARCHIVES: "OFF",
@@ -351,6 +369,35 @@ export const webkit: Dependency = {
         cwd: srcDir,
         outputs: localIcuLibs(cfg),
       };
+    }
+
+    if (cfg.ohos) {
+      const { ohosSysroot, ohosCrossLibs, ohosIcuDir, cc, cxx } = cfg;
+      const targetFlag = `--target=aarch64-linux-ohos`;
+      const sysrootFlag = ohosSysroot ? `--sysroot=${ohosSysroot}` : "";
+      const icuInclude = ohosIcuDir ? `-I${ohosIcuDir}/include` : "";
+      if (ohosCrossLibs) {
+        args.CMAKE_CXX_FLAGS = [
+          optFlagStr, targetFlag, sysrootFlag, "-D__MUSL__",
+          `-nostdinc++ -I${ohosCrossLibs}/libcxx/include/v1`,
+          `-I${ohosCrossLibs}/libcxxabi/include`,
+          icuInclude,
+          "-fno-c++-static-destructors",
+        ].filter(Boolean).join(" ");
+        args.CMAKE_C_FLAGS = [
+          optFlagStr, targetFlag, sysrootFlag, "-D__MUSL__",
+          icuInclude,
+        ].filter(Boolean).join(" ");
+      }
+      args.CMAKE_EXE_LINKER_FLAGS = `-L${ohosCrossLibs}/libcxx/lib -L${ohosCrossLibs}/libcxxabi/lib -L${ohosCrossLibs}/libunwind/lib -lc++ -lc++abi -lunwind`;
+      args.CMAKE_SHARED_LINKER_FLAGS = `-L${ohosCrossLibs}/libcxx/lib -L${ohosCrossLibs}/libcxxabi/lib -L${ohosCrossLibs}/libunwind/lib -lc++ -lc++abi -lunwind`;
+      if (ohosIcuDir) {
+        const hostBin = resolve(ohosIcuDir, "..", "..", "ohos-icu", "host", "bin");
+        args.ICU_GENDATA_EXECUTABLE = resolve(hostBin, "genrb");
+        args.ICU_GENCCODE_EXECUTABLE = resolve(hostBin, "genccode");
+        args.ICU_GENCMN_EXECUTABLE = resolve(hostBin, "gencmn");
+        args.ICU_PKGDATA_EXECUTABLE = resolve(hostBin, "pkgdata");
+      }
     }
 
     return spec;

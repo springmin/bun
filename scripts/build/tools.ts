@@ -267,7 +267,9 @@ export function findTool(spec: ToolSpec): FoundTool | undefined {
 export const LLVM_VERSION = "21.1.8";
 const LLVM_MAJOR = "21";
 const LLVM_MINOR = "1";
-const LLVM_VERSION_RANGE = `>=${LLVM_MAJOR}.${LLVM_MINOR}.0 <${LLVM_MAJOR}.${LLVM_MINOR}.99`;
+// OHOS needs LLVM 22+ (musl-compatible libc++). The range is
+// deliberately wide (>21 <23) so both LLVM 21 and LLVM 22 work.
+const LLVM_VERSION_RANGE = ">=21.1.0 <23.0.0";
 
 /**
  * Known LLVM install locations per platform. Call ONCE from

@@ -497,9 +497,9 @@ export const bunOnlyFlags: Flag[] = [
   // Not in globalFlags because deps set their own standard.
   {
     flag: "-std=gnu++23",
-    when: c => c.linux || c.freebsd,
+    when: c => c.linux || c.freebsd || c.ohos,
     lang: "cxx",
-    desc: "C++23 with GNU extensions (required to match WebKit's ABI on Linux/FreeBSD)",
+    desc: "C++23 with GNU extensions (required to match WebKit's ABI on Linux/FreeBSD/OHOS)",
   },
   {
     flag: "-std=c++23",
