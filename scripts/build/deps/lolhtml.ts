@@ -34,6 +34,10 @@ export const lolhtml: Dependency = {
     commit: LOLHTML_COMMIT,
   }),
 
+  // OHOS: cdylib links as .so which fails with OHOS cross-linker (no -lgcc on target).
+  // Remove cdylib so only staticlib (.a) is produced.
+  patches: ["patches/lolhtml/crate-type.patch"],
+
   build: cfg => {
     const spec: CargoBuild = {
       kind: "cargo",
@@ -69,6 +73,12 @@ export const lolhtml: Dependency = {
     // required regardless of release/debug.
     if (cfg.freebsd && cfg.arm64) {
       spec.buildStd = true;
+    }
+
+    // OHOS: cross-compile for aarch64-linux-ohos (musl-based).
+    // Requires rustup target: rustup target add aarch64-unknown-linux-ohos
+    if (cfg.ohos) {
+      spec.rustTarget = "aarch64-unknown-linux-ohos";
     }
 
     // -Cpanic=abort alone still links the *precompiled* std, whose
