@@ -55,6 +55,7 @@ export const ZIG_COMMIT = "04e7f6ac1e009525bc00934f20199c68f04e0a24";
 function codegenThreads(cfg: Config): number {
   if (cfg.windows) return 1;
   if (cfg.lto) return 1;
+  if (cfg.ohos) return 8; // OHOS: more shards = smaller per-shard, less peak memory
   if (cfg.ci) {
     // ASAN is a test-only build (not shipped), so cross-shard IPO loss is
     // fine and the speedup is worth it. The count is FIXED so zig-only and

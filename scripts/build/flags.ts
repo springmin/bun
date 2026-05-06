@@ -164,9 +164,9 @@ export const globalFlags: Flag[] = [
     desc: "OHOS: use musl-compatible LLVM 22 libc++ headers",
   },
   {
-    flag: c => [`-I${c.ohosIcuDir!}/include`, `-DU_DISABLE_RENAMING=1`],
+    flag: c => [`-I${c.ohosIcuDir!}/include`],
     when: c => c.ohos && !!c.ohosIcuDir,
-    desc: "OHOS: use cross-compiled ICU headers (sysroot ICU is incomplete)",
+    desc: "OHOS: use cross-compiled ICU headers (sysroot ICU is incomplete); no U_DISABLE_RENAMING to match ICU lib symbol versions",
   },
   {
     flag: "-fno-c++-static-destructors",
@@ -497,9 +497,15 @@ export const bunOnlyFlags: Flag[] = [
   // Not in globalFlags because deps set their own standard.
   {
     flag: "-std=gnu++23",
-    when: c => c.linux || c.freebsd || c.ohos,
+    when: c => c.linux || c.freebsd,
     lang: "cxx",
-    desc: "C++23 with GNU extensions (required to match WebKit's ABI on Linux/FreeBSD/OHOS)",
+    desc: "C++23 with GNU extensions (required to match WebKit's ABI on Linux/FreeBSD)",
+  },
+  {
+    flag: "-std=gnu++23",
+    when: c => c.ohos,
+    lang: "cxx",
+    desc: "C++23 with GNU extensions (match new WebKit prebuilt ABI for OHOS compat)",
   },
   {
     flag: "-std=c++23",

@@ -383,6 +383,7 @@ export const webkit: Dependency = {
           `-I${ohosCrossLibs}/libcxxabi/include`,
           icuInclude,
           "-fno-c++-static-destructors",
+          "-std=gnu++23",
         ].filter(Boolean).join(" ");
         args.CMAKE_C_FLAGS = [
           optFlagStr, targetFlag, sysrootFlag, "-D__MUSL__",
