@@ -1,0 +1,195 @@
+# Bun OHOS Cross-Compilation CI
+#
+# Builds Bun for HarmonyOS (OHOS) on aarch64 using WebKit local build.
+# Requires a self-hosted runner with OHOS SDK pre-installed.
+#
+# Required runner environment:
+#   - OHOS SDK at /home/user/setup-ohos-sdk/
+#   - LLVM 22 toolchain (musl-compatible)
+#   - Cross-compiled ICU at bun/build/ohos-icu/
+#   - Cross-compiled libc++ at bun/build/ohos-cross-libs/
+#
+# Trigger paths:
+#   - Changes to Bun's OHOS build config (scripts/build/)
+#   - Changes to Bun's OHOS runtime code (src/runtime/)
+#   - Changes to Bun's OHOS JSC bindings (src/jsc/bindings/)
+#   - Changes to WebKit fork (any file in vendor/WebKit/)
+#   - Manual trigger (workflow_dispatch)
+
+name: OHOS Build
+on:
+  push:
+    branches:
+      - ohos-aarch64
+      - claude/ohos-*
+    paths:
+      - 'scripts/build/**'
+      - 'src/runtime/**'
+      - 'src/jsc/bindings/**'
+      - 'vendor/WebKit/Source/**'
+      - '.github/workflows/ohos-build.yml'
+  pull_request:
+    branches:
+      - ohos-aarch64
+    paths:
+      - 'scripts/build/**'
+      - 'src/runtime/**'
+      - 'src/jsc/bindings/**'
+  workflow_dispatch:
+    inputs:
+      webkit_ref:
+        description: 'WebKit fork branch/tag to build against'
+        required: false
+        default: 'ohos-aarch64'
+        type: string
+
+concurrency:
+  group: ohos-build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # OHOS SDK paths (self-hosted runner)
+  OHOS_SDK_ROOT: /home/user/setup-ohos-sdk
+  OHOS_SYSROOT: /home/user/setup-ohos-sdk/ohos/native/sysroot
+  OHOS_CROSS_LIBS: /home/user/sources/bun/build/ohos-cross-libs
+  OHOS_ICU_DIR: /home/user/sources/bun/build/ohos-icu/target
+  # Build parallelism
+  NINJA_JOBS: 2
+  # WebKit fork
+  WEBKIT_FORK: springmin/WebKit
+  WEBKIT_REF: ohos-aarch64
+
+jobs:
+  build:
+    name: Build Bun for OHOS (aarch64)
+    runs-on: [self-hosted, ohos, aarch64]
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout Bun source
+        uses: actions/checkout@v4
+        with:
+          repository: springmin/bun
+          ref: ohos-aarch64
+          path: bun
+          fetch-depth: 0
+
+      - name: Checkout WebKit fork
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.WEBKIT_FORK }}
+          ref: ${{ inputs.webkit_ref || env.WEBKIT_REF }}
+          path: bun/vendor/WebKit
+          fetch-depth: 1
+
+      - name: Setup environment
+        run: |
+          echo "OHOS_SDK_ROOT=${{ env.OHOS_SDK_ROOT }}" >> $GITHUB_ENV
+          echo "OHOS_SYSROOT=${{ env.OHOS_SYSROOT }}" >> $GITHUB_ENV
+          echo "OHOS_CROSS_LIBS=${{ env.OHOS_CROSS_LIBS }}" >> $GITHUB_ENV
+          echo "OHOS_ICU_DIR=${{ env.OHOS_ICU_DIR }}" >> $GITHUB_ENV
+          # Verify SDK
+          test -d "$OHOS_SDK_ROOT" || { echo "OHOS SDK not found"; exit 1; }
+          test -d "$OHOS_CROSS_LIBS" || { echo "Cross libs not found"; exit 1; }
+          test -d "$OHOS_ICU_DIR" || { echo "ICU dir not found"; exit 1; }
+
+      - name: Cache WebKit build
+        uses: actions/cache@v4
+        id: webkit-cache
+        with:
+          path: bun/build/release/deps/WebKit
+          key: webkit-ohos-${{ hashFiles('bun/vendor/WebKit/Source/**', 'bun/scripts/build/deps/webkit.ts') }}
+
+      - name: Configure Bun build
+        working-directory: bun
+        run: |
+          bun run build:release \
+            --os=ohos \
+            --arch=aarch64 \
+            --webkit=local \
+            --ohos-sysroot=$OHOS_SYSROOT \
+            --configure-only
+        env:
+          CI: true
+
+      - name: Build WebKit
+        if: steps.webkit-cache.outputs.cache-hit != 'true'
+        working-directory: bun
+        run: |
+          ninja -C build/release configure-WebKit -j1
+          ninja -C build/release/deps/WebKit jsc -j$NINJA_JOBS
+
+      - name: Build Bun
+        working-directory: bun
+        run: |
+          ninja -C build/release bun -j$NINJA_JOBS
+
+      - name: Verify binary
+        working-directory: bun
+        run: |
+          file build/release/bun
+          ls -lh build/release/bun
+          # Check it's a valid static ARM64 ELF
+          file build/release/bun | grep -q "ELF.*ARM aarch64.*statically linked" || {
+            echo "ERROR: Binary validation failed"
+            file build/release/bun
+            exit 1
+          }
+
+      - name: Package binary
+        working-directory: bun
+        run: |
+          VERSION=$(build/release/bun --version 2>/dev/null || echo "1.3.14")
+          COMMIT=$(git rev-parse --short HEAD)
+          DATE=$(date +%Y%m%d_%H%M%S)
+          NAME="bun-ohos-aarch64-${VERSION}-${COMMIT}-${DATE}"
+          mkdir -p /tmp/bun-release/${NAME}
+          cp build/release/bun /tmp/bun-release/${NAME}/bun
+          cat > /tmp/bun-release/${NAME}/README.md << 'EOF'
+          # Bun for HarmonyOS (OHOS)
+          Build from CI. See springmin/bun on GitHub for details.
+          EOF
+          cd /tmp/bun-release
+          tar czf ${NAME}.tar.gz ${NAME}/
+          echo "artifact_name=${NAME}" >> $GITHUB_ENV
+          echo "artifact_path=/tmp/bun-release/${NAME}.tar.gz" >> $GITHUB_ENV
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.artifact_name }}
+          path: ${{ env.artifact_path }}
+          retention-days: 30
+
+      - name: Upload binary (raw)
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.artifact_name }}.bun
+          path: bun/build/release/bun
+          retention-days: 30
+
+  webkit-update-check:
+    name: Check WebKit updates
+    runs-on: ubuntu-latest
+    outputs:
+      updated: ${{ steps.check.outputs.updated }}
+    steps:
+      - name: Check latest WebKit commit
+        id: check
+        run: |
+          CURRENT=$(gh api repos/springmin/WebKit/branches/ohos-aarch64 --jq '.commit.sha' 2>/dev/null || echo "unknown")
+          LATEST=$(gh api repos/oven-sh/WebKit/commits/ohos-aarch64 --jq '.sha' 2>/dev/null || echo "unknown")
+          if [ "$CURRENT" != "$LATEST" ] && [ "$LATEST" != "unknown" ]; then
+            echo "updated=true" >> $GITHUB_OUTPUT
+            echo "new_sha=$LATEST" >> $GITHUB_OUTPUT
+          else
+            echo "updated=false" >> $GITHUB_OUTPUT
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+  trigger-build-on-webkit-update:
+    needs: webkit-update-check
+    if: needs.webkit-update-check.outputs.updated == 'true'
+    uses: ./.github/workflows/ohos-build.yml
+    secrets: inherit
