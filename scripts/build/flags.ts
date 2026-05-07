@@ -898,7 +898,7 @@ export const linkerFlags: Flag[] = [
     desc: "OHOS PIE: position-independent executable for spawn compatibility",
   },
   {
-    flag: ["-pie", "-Wl,-dynamic-linker=/system/bin/linker64"],
+    flag: ["-pie", "-Wl,-dynamic-linker=/system/lib/ld-musl-aarch64.so.1"],
     when: c => c.ohos,
     desc: "OHOS PIE: dynamic linking (allows fork/clone through seccomp)",
   },

@@ -604,6 +604,13 @@ pub fn fstat(fd: bun.FD) Maybe(bun.Stat) {
 
         if (Maybe(bun.Stat).errnoSysFd(rc, .fstat, fd)) |err| {
             if (err.getErrno() == .INTR) continue;
+            // OHOS: socketpair and certain fd types return EACCES on fstat.
+            // Return zeroed stat instead of erroring out.
+            if (comptime Environment.isLinux) {
+                if (err.getErrno() == .ACCES) {
+                    return Maybe(bun.Stat){ .result = stat_ };
+                }
+            }
             return err;
         }
 

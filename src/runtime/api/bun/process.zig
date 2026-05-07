@@ -2544,7 +2544,9 @@ pub const sync = struct {
         if (comptime Environment.isLinux) {
             for (process.memfds[1..], &out, out_fds) |memfd, *bytes, out_fd| {
                 if (memfd) {
-                    bytes.* = bun.sys.File.from(out_fd).readToEnd(bun.default_allocator).bytes;
+                    // Use readToEndSmall to avoid fstat() on pipe fds,
+                    // which is blocked by OHOS security policy.
+                    bytes.* = bun.sys.File.from(out_fd).readToEndSmall(bun.default_allocator).bytes;
                 }
             }
         }

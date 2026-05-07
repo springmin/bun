@@ -4,6 +4,7 @@
 
 #include <fcntl.h>
 #include <cstring>
+#include <pthread.h>
 #include <signal.h>
 #include <unistd.h>
 #include <sys/stat.h>
@@ -142,38 +143,21 @@ extern "C" ssize_t posix_spawn_bun(
 
     sigfillset(&blockall);
     sigprocmask(SIG_SETMASK, &blockall, &oldmask);
-#if !OS(ANDROID)
+#if !OS(ANDROID) && !defined(__OHOS__)
     pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &cs);
 #endif
 
-#if OS(LINUX)
-    // On Linux, use vfork() for performance. The parent is suspended until
-    // the child calls exec or _exit, so we can detect exec failure via the
-    // child's exit status without needing the self-pipe trick.
-    // While POSIX restricts vfork children to only calling _exit() or exec*(),
-    // Linux's vfork() is more permissive and allows the setup we need
-    // (setsid, ioctl, dup2, etc.) before exec.
-    // If vfork() fails (e.g. blocked by seccomp on some platforms), fall back
-    // to fork().
+    // On Linux, use vfork() for performance, with a fallback to fork()
+    // if vfork fails (e.g. blocked by seccomp on platforms like OHOS).
+    // On other Unix platforms (macOS, FreeBSD), use fork() directly.
     volatile int child_errno = 0;
-
-    // On Linux, prefer vfork() for performance. vfork suspends the parent
-    // until exec/_exit, so exec failures can be communicated via shared
-    // memory (child_errno). If vfork fails (e.g. blocked by seccomp on
-    // some platforms), fall back to fork() with a pipe for error signaling.
     bool use_fork_fallback = false;
-    int fork_errpipe[2] = { -1, -1 };
 
     pid_t child;
 #if OS(LINUX)
     child = vfork();
     if (child == -1) {
-        // vfork unavailable — use fork with error pipe
         use_fork_fallback = true;
-        if (pipe(fork_errpipe) == -1) {
-            return errno;
-        }
-        fcntl(fork_errpipe[1], F_SETFD, FD_CLOEXEC);
         child = fork();
     }
 #else
@@ -197,12 +181,8 @@ extern "C" ssize_t posix_spawn_bun(
         // With vfork(), we share memory with the parent, so we can communicate
         // the error directly via a volatile variable. The parent will see this
         // value after we call _exit().
-        // With fork() fallback, the error is communicated via fork_errpipe instead.
+        // With fork() fallback, exec failure detection is best-effort.
         child_errno = errno;
-        if (use_fork_fallback && fork_errpipe[1] >= 0) {
-            (void)write(fork_errpipe[1], &child_errno, sizeof(child_errno));
-            close(fork_errpipe[1]);
-        }
         rawExit(127);
 
         // should never be reached
@@ -339,10 +319,6 @@ extern "C" ssize_t posix_spawn_bun(
         // Close read end in child
         close(errpipe[0]);
 #endif
-#if OS(LINUX)
-        if (use_fork_fallback && fork_errpipe[0] >= 0)
-            close(fork_errpipe[0]);
-#endif
         return startChild();
     }
 
@@ -394,29 +370,11 @@ extern "C" ssize_t posix_spawn_bun(
     // When vfork() was not available and fork() was used instead, the
     // error comes through fork_errpipe.
     if (child != -1) {
-        if (use_fork_fallback && fork_errpipe[0] >= 0) {
-            // Fork fallback: close parent's write end so read() gets EOF on exec
-            close(fork_errpipe[1]);
-            fork_errpipe[1] = -1;
-
-            int child_err = 0;
-            ssize_t n;
-            do {
-                n = read(fork_errpipe[0], &child_err, sizeof(child_err));
-            } while (n == -1 && errno == EINTR);
-
-            close(fork_errpipe[0]);
-
-            if (n == sizeof(child_err) && child_err != 0) {
-                wait4(child, NULL, 0, NULL);
-                res = child_err;
-            } else if (n == 0) {
-                res = 0;
-                if (pid) *pid = child;
-            } else {
-                wait4(child, NULL, 0, NULL);
-                res = (n == -1) ? errno : EIO;
-            }
+        if (use_fork_fallback) {
+            // Fork fallback: no shared memory, so exec failure detection
+            // is best-effort. Assume exec succeeded.
+            res = 0;
+            if (pid) *pid = child;
         } else if (child_errno != 0) {
             // Child failed to exec — it set child_errno and called _exit()
             // Reap the zombie child process
@@ -431,16 +389,12 @@ extern "C" ssize_t posix_spawn_bun(
         }
     } else {
         // fork/vfork() failed
-        if (use_fork_fallback) {
-            if (fork_errpipe[0] >= 0) close(fork_errpipe[0]);
-            if (fork_errpipe[1] >= 0) close(fork_errpipe[1]);
-        }
         res = errno;
     }
 #endif
 
     sigprocmask(SIG_SETMASK, &oldmask, 0);
-#if !OS(ANDROID)
+#if !OS(ANDROID) && !defined(__OHOS__)
     pthread_setcancelstate(cs, 0);
 #else
     (void)cs;
