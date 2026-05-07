@@ -81,18 +81,28 @@ fn cpuPartName(implementer: u32, part: u32) []const u8 {
         };
     }
     if (implementer == 0x48) { // HiSilicon
-        return switch (part) { 0xd01 => "Kirin 9000", else => "Kirin (unknown)", };
+        return switch (part) {
+            0xd01 => "Kirin 9000",
+            0xd02 => "Kirin 920",
+            0xd40 => "Kirin 980/990",
+            else => {
+                // Taishan V120 cores (Kirin 9000S series) use part values in 0xd0x range
+                if ((part & 0xff0) == 0xd00) return "Kirin 9000S (Taishan V120)";
+                return "Kirin (unknown)";
+            },
+        };
     }
     if (implementer == 0x51) { // Qualcomm
         return switch (part) {
-            0x003 => "Krait", 0x006 => "Krait 450", 0x016 => "Kryo",
-            0x017 => "Kryo 280", 0x018 => "Kryo 380", 0x019 => "Kryo 385",
-            0x01a => "Kryo 485", 0x01b => "Kryo 585", 0x01c => "Kryo 685",
+            0x003 => "Krait 300", 0x004 => "Krait 400", 0x006 => "Krait 450",
+            0x016 => "Kryo", 0x017 => "Kryo 280", 0x018 => "Kryo 380",
+            0x019 => "Kryo 385", 0x01a => "Kryo 485", 0x01b => "Kryo 585",
+            0x01c => "Kryo 685", 0x01d => "Kryo 785",
             else => "Kryo (unknown)",
         };
     }
     if (implementer == 0x53) { // Samsung
-        return switch (part) { 0x001 => "Exynos M1", else => "Exynos (unknown)", };
+        return switch (part) { 0x001 => "Exynos M1", 0x002 => "Exynos M2", 0x003 => "Exynos M3", 0x004 => "Exynos M4", 0x005 => "Exynos M5", else => "Exynos (unknown)", };
     }
     if (implementer == 0x61) { // Apple
         return switch (part) {
@@ -106,7 +116,87 @@ fn cpuPartName(implementer: u32, part: u32) []const u8 {
             else => "Apple (unknown)",
         };
     }
+    if (implementer == 0x4e) { // NVIDIA
+        return switch (part) {
+            0x001 => "Tegra 2", 0x003 => "Tegra 3", 0x004 => "Tegra 4",
+            0x005 => "Tegra K1", 0x006 => "Tegra X1",
+            else => "Tegra (unknown)",
+        };
+    }
     return "unknown";
+}
+
+/// Set a CPU's model field. Used to apply model info per-CPU rather than broadcasting.
+fn setCpuModel(globalThis: *jsc.JSGlobalObject, values: jsc.JSValue, cpu_idx: u32, model: []const u8) !void {
+    const cpu = try values.getIndex(globalThis, cpu_idx);
+    cpu.put(globalThis, jsc.ZigString.static("model"), jsc.ZigString.init(model).withEncoding().toJS(globalThis));
+}
+
+/// Build a synthetic model name from ARM implementer + part numbers.
+fn formatArmModel(buf: *[64]u8, impl_name: []const u8, part_name: []const u8) []const u8 {
+    return std.fmt.bufPrint(buf, "{s} {s}", .{ impl_name, part_name }) catch {
+        return "unknown";
+    };
+}
+
+/// Returns true if the ARM part name is a concrete known model (not "unknown" or "(unknown)").
+fn isKnownArmPart(part_name: []const u8) bool {
+    return !strings.eql(part_name, "unknown")
+        and !strings.eql(part_name, "(unknown)")
+        and !strings.eql(part_name, "Kirin (unknown)")
+        and !strings.eql(part_name, "Kryo (unknown)")
+        and !strings.eql(part_name, "Exynos (unknown)")
+        and !strings.eql(part_name, "Apple (unknown)")
+        and !strings.eql(part_name, "Tegra (unknown)");
+}
+
+/// Finalize a single CPU's model using ARM decoder or Hardware fallback.
+/// Called when a CPU has no model name and its data is complete.
+fn finalizeCpuModel(
+    globalThis: *jsc.JSGlobalObject,
+    values: jsc.JSValue,
+    cpu_index: u32,
+    arm_impl: ?u32,
+    arm_part: ?u32,
+    hardware_value: ?[]const u8,
+    model_name_buf: *[64]u8,
+) !void {
+    const cpu = try values.getIndex(globalThis, cpu_index);
+    const model = cpu.get(globalThis, "model");
+    if (model.isUndefined() or model.isNull()) {
+        if (arm_impl != null and arm_part != null) {
+            const impl_name = cpuImplementerName(arm_impl.?);
+            const part_name = cpuPartName(arm_impl.?, arm_part.?);
+            if (isKnownArmPart(part_name)) {
+                const model_str = formatArmModel(model_name_buf, impl_name, part_name);
+                try setCpuModel(globalThis, values, cpu_index, model_str);
+                return;
+            }
+        }
+        if (hardware_value) |hv| {
+            try setCpuModel(globalThis, values, cpu_index, hv);
+        }
+    }
+}
+
+/// Apply Hardware or "unknown" fallback to CPUs that still have no model.
+fn applyModelFallback(
+    globalThis: *jsc.JSGlobalObject,
+    values: jsc.JSValue,
+    hardware_value: ?[]const u8,
+) !void {
+    var it = try values.arrayIterator(globalThis);
+    var idx: u32 = 0;
+    while (try it.next()) |cpu| : (idx += 1) {
+        const model = cpu.get(globalThis, "model");
+        if (model.isUndefined() or model.isNull()) {
+            if (hardware_value) |hv| {
+                try setCpuModel(globalThis, values, idx, hv);
+            } else {
+                try setCpuModel(globalThis, values, idx, "unknown");
+            }
+        }
+    }
 }
 
 pub fn cpus(global: *jsc.JSGlobalObject) bun.JSError!jsc.JSValue {
@@ -193,7 +283,9 @@ fn cpusImplLinux(globalThis: *jsc.JSGlobalObject) !jsc.JSValue {
     }
 
     // Read /proc/cpuinfo to get model information (optional)
-    // Uses flexible `: ` separator parsing to handle varying whitespace formats
+    // Parses each line by finding the first ':' delimiter, then trims
+    // surrounding whitespace from both key and value. This handles
+    // "key: value", "key:\tvalue", and "key:value" variants.
     if (std.fs.cwd().openFile("/proc/cpuinfo", .{})) |file| {
         defer file.close();
 
@@ -204,66 +296,43 @@ fn cpusImplLinux(globalThis: *jsc.JSGlobalObject) !jsc.JSValue {
         var line_iter = std.mem.tokenizeScalar(u8, contents, '\n');
 
         var cpu_index: u32 = 0;
-        var has_model_name = true;
-        // ARM implementer+part decoder state
         var arm_impl: ?u32 = null;
         var arm_part: ?u32 = null;
+        var hardware_value: ?[]const u8 = null;
         var model_name_buf: [64]u8 = undefined;
 
         while (line_iter.next()) |line| {
-            const colon_pos = std.mem.indexOf(u8, line, ": ") orelse continue;
-            const key = std.mem.trim(u8, line[0..colon_pos], " \t\r");
-            const value = std.mem.trim(u8, line[colon_pos + 2 ..], " \t\r\n");
+            const colon_pos = strings.indexOf(line, ":") orelse continue;
+            const key = strings.trim(line[0..colon_pos], " \t\r");
+            const value = strings.trim(line[colon_pos + 1 ..], " \t\r\n:");
 
             if (strings.eqlComptime(key, "processor")) {
-                if (!has_model_name and cpu_index < num_cpus) {
-                    const cpu = try values.getIndex(globalThis, cpu_index);
-                    cpu.put(globalThis, jsc.ZigString.static("model"), jsc.ZigString.static("unknown").withEncoding().toJS(globalThis));
-                }
+                // Finalize previous CPU using ARM decoder or Hardware fallback.
+                // The initial call (cpu_index == 0 with null state) is a harmless
+                // no-op: /proc/cpuinfo supplies Hardware / CPU implementer / CPU part
+                // within each processor block on all known Linux kernels, so the
+                // fallback only triggers when those fields are genuinely absent.
+                try finalizeCpuModel(globalThis, values, cpu_index, arm_impl, arm_part, hardware_value, &model_name_buf);
                 cpu_index = try std.fmt.parseInt(u32, value, 10);
                 if (cpu_index >= num_cpus) return error.too_may_cpus;
-                has_model_name = false;
                 arm_impl = null;
                 arm_part = null;
             } else if (strings.eqlComptime(key, "model name")) {
-                const cpu = try values.getIndex(globalThis, cpu_index);
-                cpu.put(globalThis, jsc.ZigString.static("model"), jsc.ZigString.init(value).withEncoding().toJS(globalThis));
-                has_model_name = true;
+                try setCpuModel(globalThis, values, cpu_index, value);
             } else if (strings.eqlComptime(key, "Hardware")) {
-                // ARM SoC name (e.g. "HUAWEI KirinX90") — set on ALL CPUs
-                for (0..num_cpus) |hci| {
-                    const hcpu = try values.getIndex(globalThis, @truncate(hci));
-                    hcpu.put(globalThis, jsc.ZigString.static("model"), jsc.ZigString.init(value).withEncoding().toJS(globalThis));
-                }
-                has_model_name = true;
+                hardware_value = value;
             } else if (strings.eqlComptime(key, "CPU implementer")) {
-                arm_impl = std.fmt.parseInt(u32, value, 16) catch null;
+                arm_impl = std.fmt.parseInt(u32, value, 0) catch null;
             } else if (strings.eqlComptime(key, "CPU part")) {
-                arm_part = std.fmt.parseInt(u32, value, 16) catch null;
+                arm_part = std.fmt.parseInt(u32, value, 0) catch null;
             }
         }
-        if (!has_model_name) {
-            if (arm_impl != null and arm_part != null) {
-                const impl_name = cpuImplementerName(arm_impl.?);
-                const part_name = cpuPartName(arm_impl.?, arm_part.?);
-                if (std.fmt.bufPrint(&model_name_buf, "{s} {s}", .{ impl_name, part_name })) |model_str| {
-                    for (0..num_cpus) |i| {
-                        const cpu = try values.getIndex(globalThis, @truncate(i));
-                        cpu.put(globalThis, jsc.ZigString.static("model"), jsc.ZigString.init(model_str).withEncoding().toJS(globalThis));
-                    }
-                } else |_| {
-                    for (0..num_cpus) |i| {
-                        const cpu = try values.getIndex(globalThis, @truncate(i));
-                        cpu.put(globalThis, jsc.ZigString.static("model"), jsc.ZigString.static("unknown").withEncoding().toJS(globalThis));
-                    }
-                }
-            } else {
-                var it = try values.arrayIterator(globalThis);
-                while (try it.next()) |cpu| {
-                    cpu.put(globalThis, jsc.ZigString.static("model"), jsc.ZigString.static("unknown").withEncoding().toJS(globalThis));
-                }
-            }
-        }
+
+        // Finalize the last CPU
+        try finalizeCpuModel(globalThis, values, cpu_index, arm_impl, arm_part, hardware_value, &model_name_buf);
+
+        // Apply fallback (Hardware or "unknown") to CPUs with no model
+        try applyModelFallback(globalThis, values, hardware_value);
     } else |_| {
         // Initialize model name to "unknown"
         var it = try values.arrayIterator(globalThis);

@@ -24,10 +24,8 @@ var tmpdir = function () {
   return tmpdir();
 };
 
-function lazyCpus({ cpus, hostCpuCount }) {
-  return () => {
-    return cpus();
-  };
+function lazyCpus({ cpus }) {
+  return cpus;
 }
 
 // all logic based on `process.platform` and `process.arch` is inlined at bundle time
