@@ -571,7 +571,7 @@ export const bunOnlyFlags: Flag[] = [
   },
   {
     flag: ["-fno-pic", "-fno-pie"],
-    when: c => c.unix && c.abi !== "android",
+    when: c => c.unix && c.abi !== "android" && !c.ohos,
     desc: "No position-independent code (we're a final executable)",
   },
   {
@@ -890,15 +890,22 @@ export const linkerFlags: Flag[] = [
     when: c => c.ohos,
     desc: "OHOS linker tuning: 8MB stack, compressed debug",
   },
+  // ─── OHOS PIE (experimental) ───
   {
-    flag: "-static",
+    flag: "-fPIE",
     when: c => c.ohos,
-    desc: "OHOS: must use static linking (dynamic fails with R_AARCH64_LDST64_ABS_LO12_NC alignment error from LLD)",
+    lang: "cxx",
+    desc: "OHOS PIE: position-independent executable for spawn compatibility",
+  },
+  {
+    flag: ["-pie", "-Wl,-dynamic-linker=/system/bin/linker64"],
+    when: c => c.ohos,
+    desc: "OHOS PIE: dynamic linking (allows fork/clone through seccomp)",
   },
   {
     flag: "-Wl,--noinhibit-exec",
     when: c => c.ohos,
-    desc: "OHOS: LLD stderr alignment errors are harmless on aarch64 (SCTLR_EL1.A is 0 by default)",
+    desc: "OHOS: LLD alignment warnings → ignore (SCTLR_EL1.A is 0 on aarch64)",
   },
 
   // ─── Linux ───
@@ -966,7 +973,7 @@ export const linkerFlags: Flag[] = [
   },
   {
     flag: ["-fno-pic", "-Wl,-no-pie"],
-    when: c => c.linux && c.abi !== "android",
+    when: c => c.linux && c.abi !== "android" && !c.ohos,
     desc: "No PIE (we don't need ASLR; simpler codegen)",
   },
   {
