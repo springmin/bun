@@ -26,6 +26,9 @@ on:
       - 'scripts/build/**'
       - 'src/runtime/**'
       - 'src/jsc/bindings/**'
+      - 'src/sys/**'
+      - 'src/js/**'
+      - 'patches/**'
       - 'vendor/WebKit/Source/**'
       - '.github/workflows/ohos-build.yml'
   pull_request:
@@ -35,6 +38,9 @@ on:
       - 'scripts/build/**'
       - 'src/runtime/**'
       - 'src/jsc/bindings/**'
+      - 'src/sys/**'
+      - 'src/js/**'
+      - 'patches/**'
   workflow_dispatch:
     inputs:
       webkit_ref:
