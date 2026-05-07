@@ -109,12 +109,12 @@ typedef struct bun_spawn_request_t {
 // as _exit() may try to acquire locks held by threads that don't exist in the child.
 static inline void rawExit(int status)
 {
-// On OHOS: use _exit() (not exit_group) because vfork child must not kill parent.
-#if OS(LINUX) && !defined(__OHOS__)
-    syscall(__NR_exit_group, status);
-#else
-    _exit(status);
+#if defined(__NR_exit_group)
+    // Best-effort: try exit_group first (faster for multi-threaded processes).
+    // If the syscall fails (e.g. blocked by seccomp), fall through to _exit().
+    (void)syscall(__NR_exit_group, status);
 #endif
+    _exit(status);
 }
 
 extern "C" ssize_t posix_spawn_bun(
@@ -127,9 +127,11 @@ extern "C" ssize_t posix_spawn_bun(
     sigset_t blockall, oldmask;
     int res = 0, cs = 0;
 
-#if OS(DARWIN) || OS(FREEBSD) || defined(__OHOS__)
-    // On macOS and OHOS, we use fork() which requires a self-pipe trick to
-    // detect exec failures. Create a pipe for child-to-parent communication.
+#if OS(DARWIN) || OS(FREEBSD)
+    // On macOS, we use fork() which requires a self-pipe trick to detect exec failures.
+    // Create a pipe for child-to-parent error communication.
+    // The write end has O_CLOEXEC so it's automatically closed on successful exec.
+    // If exec fails, child writes errno to the pipe.
     int errpipe[2];
     if (pipe(errpipe) == -1) {
         return errno;
@@ -140,27 +142,45 @@ extern "C" ssize_t posix_spawn_bun(
 
     sigfillset(&blockall);
     sigprocmask(SIG_SETMASK, &blockall, &oldmask);
-#if !OS(ANDROID) && !defined(__OHOS__)
+#if !OS(ANDROID)
     pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &cs);
 #endif
 
-#if OS(LINUX) && !defined(__OHOS__)
+#if OS(LINUX)
     // On Linux, use vfork() for performance. The parent is suspended until
     // the child calls exec or _exit, so we can detect exec failure via the
     // child's exit status without needing the self-pipe trick.
     // While POSIX restricts vfork children to only calling _exit() or exec*(),
     // Linux's vfork() is more permissive and allows the setup we need
     // (setsid, ioctl, dup2, etc.) before exec.
+    // If vfork() fails (e.g. blocked by seccomp on some platforms), fall back
+    // to fork().
     volatile int child_errno = 0;
-    pid_t child = vfork();
+
+    // On Linux, prefer vfork() for performance. vfork suspends the parent
+    // until exec/_exit, so exec failures can be communicated via shared
+    // memory (child_errno). If vfork fails (e.g. blocked by seccomp on
+    // some platforms), fall back to fork() with a pipe for error signaling.
+    bool use_fork_fallback = false;
+    int fork_errpipe[2] = { -1, -1 };
+
+    pid_t child;
+#if OS(LINUX)
+    child = vfork();
+    if (child == -1) {
+        // vfork unavailable — use fork with error pipe
+        use_fork_fallback = true;
+        if (pipe(fork_errpipe) == -1) {
+            return errno;
+        }
+        fcntl(fork_errpipe[1], F_SETFD, FD_CLOEXEC);
+        child = fork();
+    }
 #else
-    // On macOS, we must use fork() because vfork() is more strictly enforced.
-    // On OHOS, vfork() may hang in static binaries (seccomp blocks clone).
-    // This code path uses fork() for compatibility.
-    pid_t child = fork();
+    child = fork();
 #endif
 
-#if OS(DARWIN) || OS(FREEBSD) || defined(__OHOS__)
+#if OS(DARWIN) || OS(FREEBSD)
     const auto childFailed = [&]() -> ssize_t {
         int err = errno;
         // Write errno to pipe so parent can read it
@@ -177,7 +197,12 @@ extern "C" ssize_t posix_spawn_bun(
         // With vfork(), we share memory with the parent, so we can communicate
         // the error directly via a volatile variable. The parent will see this
         // value after we call _exit().
+        // With fork() fallback, the error is communicated via fork_errpipe instead.
         child_errno = errno;
+        if (use_fork_fallback && fork_errpipe[1] >= 0) {
+            (void)write(fork_errpipe[1], &child_errno, sizeof(child_errno));
+            close(fork_errpipe[1]);
+        }
         rawExit(127);
 
         // should never be reached
@@ -188,14 +213,12 @@ extern "C" ssize_t posix_spawn_bun(
     const auto startChild = [&]() -> ssize_t {
         sigset_t childmask = oldmask;
 
-        // Reset signals (skipped on OHOS: sigaction loop may hit blocked syscalls)
-#if !defined(__OHOS__)
+        // Reset signals
         struct sigaction sa = { 0 };
         sa.sa_handler = SIG_DFL;
         for (int i = 0; i < NSIG; i++) {
             sigaction(i, &sa, 0);
         }
-#endif
 
         // Make "detached" work, or set up PTY as controlling terminal
         if (request->detached || request->pty_slave_fd >= 0) {
@@ -316,11 +339,15 @@ extern "C" ssize_t posix_spawn_bun(
         // Close read end in child
         close(errpipe[0]);
 #endif
+#if OS(LINUX)
+        if (use_fork_fallback && fork_errpipe[0] >= 0)
+            close(fork_errpipe[0]);
+#endif
         return startChild();
     }
 
-#if OS(DARWIN) || OS(FREEBSD) || defined(__OHOS__)
-    // macOS/OHOS fork() path: use self-pipe trick to detect exec failure
+#if OS(DARWIN) || OS(FREEBSD)
+    // macOS fork() path: use self-pipe trick to detect exec failure
     // Parent: close write end
     close(errpipe[1]);
 
@@ -361,12 +388,37 @@ extern "C" ssize_t posix_spawn_bun(
         close(errpipe[0]);
         res = errno;
     }
-#elif OS(LINUX) && !defined(__OHOS__)
+#else
     // Linux vfork() path: parent resumes after child calls exec or _exit
-    // We can detect exec failure via the volatile child_errno variable
+    // We can detect exec failure via the volatile child_errno variable.
+    // When vfork() was not available and fork() was used instead, the
+    // error comes through fork_errpipe.
     if (child != -1) {
-        if (child_errno != 0) {
-            // Child failed to exec - it set child_errno and called _exit()
+        if (use_fork_fallback && fork_errpipe[0] >= 0) {
+            // Fork fallback: close parent's write end so read() gets EOF on exec
+            close(fork_errpipe[1]);
+            fork_errpipe[1] = -1;
+
+            int child_err = 0;
+            ssize_t n;
+            do {
+                n = read(fork_errpipe[0], &child_err, sizeof(child_err));
+            } while (n == -1 && errno == EINTR);
+
+            close(fork_errpipe[0]);
+
+            if (n == sizeof(child_err) && child_err != 0) {
+                wait4(child, NULL, 0, NULL);
+                res = child_err;
+            } else if (n == 0) {
+                res = 0;
+                if (pid) *pid = child;
+            } else {
+                wait4(child, NULL, 0, NULL);
+                res = (n == -1) ? errno : EIO;
+            }
+        } else if (child_errno != 0) {
+            // Child failed to exec — it set child_errno and called _exit()
             // Reap the zombie child process
             wait4(child, NULL, 0, NULL);
             res = child_errno;
@@ -378,13 +430,17 @@ extern "C" ssize_t posix_spawn_bun(
             }
         }
     } else {
-        // vfork() failed
+        // fork/vfork() failed
+        if (use_fork_fallback) {
+            if (fork_errpipe[0] >= 0) close(fork_errpipe[0]);
+            if (fork_errpipe[1] >= 0) close(fork_errpipe[1]);
+        }
         res = errno;
     }
 #endif
 
     sigprocmask(SIG_SETMASK, &oldmask, 0);
-#if !OS(ANDROID) && !defined(__OHOS__)
+#if !OS(ANDROID)
     pthread_setcancelstate(cs, 0);
 #else
     (void)cs;
