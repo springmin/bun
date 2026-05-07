@@ -162,8 +162,8 @@ fn finalizeCpuModel(
     model_name_buf: *[64]u8,
 ) !void {
     const cpu = try values.getIndex(globalThis, cpu_index);
-    const model = cpu.get(globalThis, "model");
-    if (model.isUndefined() or model.isNull()) {
+    const model = try cpu.get(globalThis, "model");
+    if (model == null or model.?.isUndefined() or model.?.isNull()) {
         if (arm_impl != null and arm_part != null) {
             const impl_name = cpuImplementerName(arm_impl.?);
             const part_name = cpuPartName(arm_impl.?, arm_part.?);
@@ -188,8 +188,8 @@ fn applyModelFallback(
     var it = try values.arrayIterator(globalThis);
     var idx: u32 = 0;
     while (try it.next()) |cpu| : (idx += 1) {
-        const model = cpu.get(globalThis, "model");
-        if (model.isUndefined() or model.isNull()) {
+        const model = try cpu.get(globalThis, "model");
+        if (model == null or model.?.isUndefined() or model.?.isNull()) {
             if (hardware_value) |hv| {
                 try setCpuModel(globalThis, values, idx, hv);
             } else {
