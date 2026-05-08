@@ -41,11 +41,16 @@ export const zstd: Dependency = {
     commit: ZSTD_COMMIT,
   }),
 
+  patches: [
+    "patches/zstd/ohos-qsort-r.patch",
+  ],
+
   build: cfg => {
     const sources = [...SOURCES];
     const defines: Record<string, number | true> = {
       ZSTD_MULTITHREAD: true,
       ZSTD_LEGACY_SUPPORT: 0,
+
     };
 
     // Upstream's if(MSVC) block sets these for the static target.
