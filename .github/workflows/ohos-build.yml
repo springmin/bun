@@ -80,6 +80,12 @@ jobs:
           path: bun
           fetch-depth: 0
 
+      - name: Cleanup stale WebKit checkout
+        run: |
+          # WebKit is huge and a cancelled run leaves the checkout in a broken
+          # shallow state. Fresh clone is faster than recovering a partial one.
+          rm -rf bun/vendor/WebKit
+
       - name: Checkout WebKit fork
         uses: actions/checkout@v4
         with:
