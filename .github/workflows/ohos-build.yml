@@ -173,29 +173,3 @@ jobs:
           name: ${{ env.artifact_name }}.bun
           path: bun/build/release/bun
           retention-days: 30
-
-  webkit-update-check:
-    name: Check WebKit updates
-    runs-on: ubuntu-latest
-    outputs:
-      updated: ${{ steps.check.outputs.updated }}
-    steps:
-      - name: Check latest WebKit commit
-        id: check
-        run: |
-          CURRENT=$(gh api repos/springmin/WebKit/branches/ohos-aarch64 --jq '.commit.sha' 2>/dev/null || echo "unknown")
-          LATEST=$(gh api repos/oven-sh/WebKit/commits/ohos-aarch64 --jq '.sha' 2>/dev/null || echo "unknown")
-          if [ "$CURRENT" != "$LATEST" ] && [ "$LATEST" != "unknown" ]; then
-            echo "updated=true" >> $GITHUB_OUTPUT
-            echo "new_sha=$LATEST" >> $GITHUB_OUTPUT
-          else
-            echo "updated=false" >> $GITHUB_OUTPUT
-          fi
-        env:
-          GH_TOKEN: ${{ github.token }}
-
-  trigger-build-on-webkit-update:
-    needs: webkit-update-check
-    if: needs.webkit-update-check.outputs.updated == 'true'
-    uses: ./.github/workflows/ohos-build.yml
-    secrets: inherit
