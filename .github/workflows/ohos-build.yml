@@ -80,11 +80,18 @@ jobs:
           path: bun
           fetch-depth: 0
 
+      - name: Cache WebKit source checkout
+        id: webkit-source-cache
+        uses: actions/cache@v4
+        with:
+          path: bun/vendor/WebKit
+          # Invalidate when the WebKit ref changes; restore-keys keeps
+          # previous checkouts around so incremental fetch is fast.
+          key: webkit-source-${{ env.WEBKIT_FORK }}-${{ inputs.webkit_ref || env.WEBKIT_REF }}
+
       - name: Cleanup stale WebKit checkout
-        run: |
-          # WebKit is huge and a cancelled run leaves the checkout in a broken
-          # shallow state. Fresh clone is faster than recovering a partial one.
-          rm -rf bun/vendor/WebKit
+        if: steps.webkit-source-cache.outputs.cache-hit != 'true'
+        run: rm -rf bun/vendor/WebKit
 
       - name: Checkout WebKit fork
         uses: actions/checkout@v4
