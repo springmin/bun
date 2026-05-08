@@ -60,7 +60,7 @@ env:
   OHOS_CROSS_LIBS: /home/user/sources/bun/build/ohos-cross-libs
   OHOS_ICU_DIR: /home/user/sources/bun/build/ohos-icu/target
   # Build parallelism
-  NINJA_JOBS: 2
+  NINJA_JOBS: 8
   # WebKit fork
   WEBKIT_FORK: springmin/WebKit
   WEBKIT_REF: ohos-aarch64
@@ -69,7 +69,7 @@ jobs:
   build:
     name: Build Bun for OHOS (aarch64)
     runs-on: [self-hosted, Linux, ARM64]
-    timeout-minutes: 120
+    timeout-minutes: 360
 
     steps:
       - name: Checkout Bun source
