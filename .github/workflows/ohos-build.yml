@@ -96,8 +96,12 @@ jobs:
           echo "OHOS_ICU_DIR=${{ env.OHOS_ICU_DIR }}" >> $GITHUB_ENV
           # Verify SDK
           test -d "$OHOS_SDK_ROOT" || { echo "OHOS SDK not found"; exit 1; }
-          test -d "$OHOS_CROSS_LIBS" || { echo "Cross libs not found"; exit 1; }
-          test -d "$OHOS_ICU_DIR" || { echo "ICU dir not found"; exit 1; }
+          # Symlink cross-libs and ICU into workspace (they're not in git)
+          mkdir -p bun/build
+          ln -sfn ${{ env.OHOS_CROSS_LIBS }} bun/build/ohos-cross-libs
+          ln -sfn $(dirname ${{ env.OHOS_ICU_DIR }}) bun/build/ohos-icu
+          test -d bun/build/ohos-cross-libs/libcxx/lib || { echo "Cross libs not found at ${{ env.OHOS_CROSS_LIBS }}"; exit 1; }
+          test -d bun/build/ohos-icu/target/lib || { echo "ICU not found at ${{ env.OHOS_ICU_DIR }}"; exit 1; }
 
       - name: Cache WebKit build
         uses: actions/cache@v4
