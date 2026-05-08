@@ -20,7 +20,7 @@ name: OHOS Build
 on:
   push:
     branches:
-      - ohos-aarch64
+      - ohos-aarm64
       - claude/ohos-*
     paths:
       - 'scripts/build/**'
@@ -33,7 +33,7 @@ on:
       - '.github/workflows/ohos-build.yml'
   pull_request:
     branches:
-      - ohos-aarch64
+      - ohos-aarm64
     paths:
       - 'scripts/build/**'
       - 'src/runtime/**'
