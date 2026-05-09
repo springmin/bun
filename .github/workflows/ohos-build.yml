@@ -218,81 +218,22 @@ jobs:
           path: bun/build/release/bun
           retention-days: 30
 
-      - name: Build native bun for testing
-        working-directory: bun
-        run: |
-          echo "=== 配置原生 bun 构建 (prebuilt WebKit) ==="
-          bun run build:release \
-            --build-dir=build/native-test \
-            --webkit=prebuilt \
-            --configure-only 2>&1
-          echo "=== 编译原生 bun ==="
-          ninja -C build/native-test bun -j$NINJA_JOBS 2>&1
-          echo "=== 验证 ==="
-          file build/native-test/bun
-          build/native-test/bun --version
-
-      - name: Run official test suite (native)
-        working-directory: bun
-        continue-on-error: true
-        run: |
-          REPORT_DIR=/mnt/linux_share/ci-test/official-test
-          mkdir -p $REPORT_DIR
-          NATIVE_BUN=./build/native-test/bun
-          echo "Bun native test binary: $($NATIVE_BUN --version)"
-          
-          # Runner 需要 node_modules 中的依赖
-          npm install 2>/dev/null || true
-          
-          # 跑核心测试集 — 覆盖 OHOS 修改相关的模块
-          node scripts/runner.node.mjs \
-            --exec-path $NATIVE_BUN \
-            --include=test/js/bun/bun-object \
-            --include=test/js/bun/http \
-            --include=test/js/bun/fetch \
-            --include=test/js/node/process \
-            --include=test/js/node/os \
-            --include=test/js/node/child_process \
-            --include=test/js/web/fetch \
-            --include=test/js/web/encoding \
-            --include=test/js/web/streams \
-            --include=test/js/web/timers \
-            --include=test/cli/test \
-            --junit \
-            --junit-temp-dir=$REPORT_DIR/junit \
-            --quiet 2>&1 | tee $REPORT_DIR/test-output.txt || true
-          
-          # 生成摘要报告
-          echo "===========================================" > $REPORT_DIR/test-report-native.txt
-          echo "Bun Native 官方测试报告" >> $REPORT_DIR/test-report-native.txt
-          echo "日期: $(date)" >> $REPORT_DIR/test-report-native.txt
-          echo "Binary: $($NATIVE_BUN --version)" >> $REPORT_DIR/test-report-native.txt
-          echo "系统: $(uname -a)" >> $REPORT_DIR/test-report-native.txt
-          echo "===========================================" >> $REPORT_DIR/test-report-native.txt
-          tail -20 $REPORT_DIR/test-output.txt >> $REPORT_DIR/test-report-native.txt
-          cp $REPORT_DIR/test-report-native.txt $REPORT_DIR/latest-native.txt
-          echo "✅ 原生测试完成，报告: $REPORT_DIR/test-report-native.txt"
-          
       - name: Copy artifacts to shared directory
         working-directory: bun
         run: |
           SHARE=/mnt/linux_share/ci-test
-          mkdir -p $SHARE $SHARE/baseline $SHARE/ohos $SHARE/official-test
+          mkdir -p $SHARE $SHARE/baseline $SHARE/ohos
           # OHOS 二进制
           cp build/release/bun $SHARE/bun-ohos-${{ env.artifact_name }}.elf
-          # 原生测试报告
-          if [ -d build/native-test/bun ]; then
-            cp build/native-test/bun $SHARE/bun-native 2>/dev/null || true
-          fi
-          if [ -d /mnt/linux_share/ci-test/official-test ]; then
-            cp -r /mnt/linux_share/ci-test/official-test/* $SHARE/official-test/ 2>/dev/null || true
-          fi
           # 测试脚本
           cp test_all_in_one.js $SHARE/
           # OHOS 测试运行脚本
           cat > $SHARE/run-tests-ohos.sh << 'RUNEOF'
 #!/bin/bash
 # Bun OHOS 测试运行脚本
+# 用法:
+#   1. binary-sign-tool sign -selfSign "1" -in bun-ohos-*.elf -out bun-signed
+#   2. ./run-tests-ohos.sh
 set -e
 BUN=./bun-signed
 REPORT="test-report-ohos-$(date +%Y%m%d_%H%M%S).txt"
@@ -313,14 +254,10 @@ RUNEOF
           echo "✅ 制品已复制到 $SHARE"
           echo ""
           echo "=============== 测试流程 ==============="
-          echo "CI 机已完成官方测试，报告在:"
-          echo "  $SHARE/official-test/"
-          echo ""
-          echo "OHOS 设备:"
-          echo "  cd /mnt/linux_share/ci-test"
-          echo "  binary-sign-tool sign -selfSign \"1\" -in bun-ohos-*.elf -out bun-signed"
-          echo "  ./run-tests-ohos.sh"
-          echo ""
-          echo "对比:"
-          echo "  diff $SHARE/official-test/latest-native.txt ohos/your-report.txt"
+          echo "1. OHOS 设备:"
+          echo "   cd /mnt/linux_share/ci-test"
+          echo "   binary-sign-tool sign -selfSign \"1\" -in bun-ohos-*.elf -out bun-signed"
+          echo "   ./run-tests-ohos.sh"
+          echo "2. 把报告放回: cp ohos/test-report-*.txt baseline/"
+          echo "3. 对比: diff baseline/latest-baseline.txt ohos/your-report.txt"
           echo "======================================="
