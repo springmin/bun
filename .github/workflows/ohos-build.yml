@@ -134,7 +134,10 @@ jobs:
         id: webkit-cache
         with:
           path: bun/build/release/deps/WebKit
-          key: webkit-ohos-${{ hashFiles('bun/vendor/WebKit/Source/**', 'bun/scripts/build/deps/webkit.ts') }}
+          # Use the WebKit ref + scripts hash as key. hashFiles on the full
+          # WebKit source tree is too expensive (hundreds of thousands of
+          # files) and times out after 120s.
+          key: webkit-ohos-${{ inputs.webkit_ref || env.WEBKIT_REF }}-${{ hashFiles('bun/scripts/build/deps/webkit.ts') }}
 
       - name: Configure Bun build
         working-directory: bun
