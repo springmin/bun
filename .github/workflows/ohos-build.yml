@@ -222,12 +222,12 @@ jobs:
         working-directory: bun
         run: |
           SHARE=/mnt/linux_share/ci-test
-          mkdir -p $SHARE
-          # OHOS binary
+          mkdir -p $SHARE $SHARE/baseline $SHARE/ohos
+          # OHOS 二进制
           cp build/release/bun $SHARE/bun-ohos-${{ env.artifact_name }}.elf
-          # Test scripts
+          # 测试脚本
           cp test_all_in_one.js $SHARE/
-          # OHOS test runner script
+          # OHOS 测试运行脚本
           cat > $SHARE/run-tests-ohos.sh << 'RUNEOF'
 #!/bin/bash
 # Bun OHOS 测试运行脚本
@@ -242,40 +242,22 @@ echo "Bun OHOS Test Report" | tee -a $REPORT
 echo "Date: $(date)" | tee -a $REPORT
 echo "Binary: $($BUN --version 2>/dev/null || echo 'unknown')" | tee -a $REPORT
 echo "===========================================" | tee -a $REPORT
-# 跑全量综合测试
 $BUN test_all_in_one.js 2>&1 | tee -a $REPORT
 echo "===========================================" | tee -a $REPORT
-echo "报告已保存: $REPORT" | tee -a $REPORT
-echo "请将此报告传回 CI 执行机对比基线:"
-echo "  cp $REPORT /mnt/linux_share/ci-test/ohos/"
+echo "报告已保存: $REPORT"
+echo "请传回对比: cp $REPORT /mnt/linux_share/ci-test/ohos/"
 RUNEOF
           chmod +x $SHARE/run-tests-ohos.sh
-          # 也复制到共享目录根路径方便取用
+          # 根路径快捷方式
           cp build/release/bun /mnt/linux_share/bun-ci.elf 2>/dev/null || true
           cp test_all_in_one.js /mnt/linux_share/ 2>/dev/null || true
           echo "✅ 制品已复制到 $SHARE"
-
-      - name: Run baseline test (native system bun)
-        working-directory: bun
-        run: |
-          BASELINE_DIR=/mnt/linux_share/ci-test/baseline
-          mkdir -p $BASELINE_DIR
-          REPORT="$BASELINE_DIR/test-report-baseline-$(date +%Y%m%d_%H%M%S).txt"
-          echo "===========================================" | tee $REPORT
-          echo "Bun 基线测试报告 (系统原生 bun)" | tee -a $REPORT
-          echo "日期: $(date)" | tee -a $REPORT
-          echo "系统: $(uname -a)" | tee -a $REPORT
-          echo "Binary: $(bun --version)" | tee -a $REPORT
-          echo "===========================================" | tee -a $REPORT
-          # 跑相同的测试集
-          bun test_all_in_one.js 2>&1 | tee -a $REPORT
-          echo "===========================================" | tee -a $REPORT
-          echo "基线报告已保存: $REPORT" | tee -a $REPORT
-          # 保留最新报告到固定路径便于对比
-          cp $REPORT $BASELINE_DIR/latest-baseline.txt
           echo ""
-          echo "=============== 对比指引 ==============="
-          echo "1. OHOS 设备: cd /mnt/linux_share/ci-test && ./run-tests-ohos.sh"
-          echo "2. 把 OHOS 报告放到: /mnt/linux_share/ci-test/ohos/"
-          echo "3. 对比: diff $BASELINE_DIR/latest-baseline.txt /mnt/linux_share/ci-test/ohos/latest-ohos.txt"
+          echo "=============== 测试流程 ==============="
+          echo "1. OHOS 设备:"
+          echo "   cd /mnt/linux_share/ci-test"
+          echo "   binary-sign-tool sign -selfSign \"1\" -in bun-ohos-*.elf -out bun-signed"
+          echo "   ./run-tests-ohos.sh"
+          echo "2. 把报告放回: cp ohos/test-report-*.txt baseline/"
+          echo "3. 对比: diff baseline/latest-baseline.txt ohos/your-report.txt"
           echo "======================================="
