@@ -60,7 +60,7 @@ env:
   OHOS_CROSS_LIBS: /home/user/sources/bun/build/ohos-cross-libs
   OHOS_ICU_DIR: /home/user/sources/bun/build/ohos-icu/target
   # Build parallelism
-  NINJA_JOBS: 8
+  NINJA_JOBS: 2
   # WebKit fork
   WEBKIT_FORK: springmin/WebKit
   WEBKIT_REF: ohos-aarch64
@@ -69,7 +69,7 @@ jobs:
   build:
     name: Build Bun for OHOS (aarch64)
     runs-on: [self-hosted, Linux, ARM64]
-    timeout-minutes: 360
+    timeout-minutes: 120
 
     steps:
       - name: Checkout Bun source
@@ -152,12 +152,21 @@ jobs:
         run: |
           file build/release/bun
           ls -lh build/release/bun
-          # Check it's a valid static ARM64 ELF
-          file build/release/bun | grep -q "ELF.*ARM aarch64.*statically linked" || {
-            echo "ERROR: Binary validation failed"
+          # OHOS PIE binaries always show "dynamically linked" because they
+          # have PT_INTERP (interpreter). The static linking is confirmed by
+          # the absence of NEEDED entries in readelf.
+          file build/release/bun | grep -q "ELF.*ARM aarch64" || {
+            echo "ERROR: Not an ARM64 ELF binary"
             file build/release/bun
             exit 1
           }
+          # Verify no dynamic library dependencies (true static link)
+          readelf -d build/release/bun | grep -q "NEEDED" && {
+            echo "ERROR: Binary has dynamic library dependencies"
+            readelf -d build/release/bun | grep "NEEDED"
+            exit 1
+          } || true
+          echo "✅ Binary validation passed"
 
       - name: Package binary
         working-directory: bun
