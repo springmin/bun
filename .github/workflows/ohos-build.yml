@@ -278,36 +278,48 @@ jobs:
         run: |
           SHARE=/mnt/linux_share/ci-test
           mkdir -p $SHARE $SHARE/baseline $SHARE/ohos $SHARE/official-test
-          # OHOS 二进制
           cp build/release/bun $SHARE/bun-ohos-${{ env.artifact_name }}.elf
-          # 原生测试报告
-          if [ -d build/native-test/bun ]; then
+          if [ -f build/native-test/bun ]; then
             cp build/native-test/bun $SHARE/bun-native 2>/dev/null || true
           fi
           if [ -d /mnt/linux_share/ci-test/official-test ]; then
             cp -r /mnt/linux_share/ci-test/official-test/* $SHARE/official-test/ 2>/dev/null || true
           fi
-          # 测试脚本
           cp test_all_in_one.js $SHARE/
-          # OHOS 测试运行脚本
-          cat > $SHARE/run-tests-ohos.sh << 'RUNEOF'
-#!/bin/bash
-# Bun OHOS 测试运行脚本
-set -e
-BUN=./bun-signed
-REPORT="test-report-ohos-$(date +%Y%m%d_%H%M%S).txt"
-echo "===========================================" | tee -a $REPORT
-echo "Bun OHOS Test Report" | tee -a $REPORT
-echo "Date: $(date)" | tee -a $REPORT
-echo "Binary: $($BUN --version 2>/dev/null || echo 'unknown')" | tee -a $REPORT
-echo "===========================================" | tee -a $REPORT
-$BUN test_all_in_one.js 2>&1 | tee -a $REPORT
-echo "===========================================" | tee -a $REPORT
-echo "报告已保存: $REPORT"
-echo "请传回对比: cp $REPORT /mnt/linux_share/ci-test/ohos/"
-RUNEOF
-          chmod +x $SHARE/run-tests-ohos.sh
-          # 根路径快捷方式
+          # Write test runner line by line (avoids YAML block indent issues)
+          rm -f $SHARE/run-tests-ohos.sh
+          echo '#!/bin/bash' >> $SHARE/run-tests-ohos.sh
+          echo '# Bun OHOS test runner' >> $SHARE/run-tests-ohos.sh
+          echo 'set -e' >> $SHARE/run-tests-ohos.sh
+          echo 'BUN=./bun-signed' >> $SHARE/run-tests-ohos.sh
+          echo 'REPORT="test-report-ohos-$(date +%Y%m%d_%H%M%S).txt"' >> $SHARE/run-tests-ohos.sh
+          echo 'echo "===========================================" | tee -a $REPORT' >> $SHARE/run-tests-ohos.sh
+          echo 'echo "Bun OHOS Test Report" | tee -a $REPORT' >> $SHARE/run-tests-ohos.sh
+          echo 'echo "Date: $(date)" | tee -a $REPORT' >> $SHARE/run-tests-ohos.sh
+          echo 'echo "Binary: $($BUN --version 2>/dev/null || echo unknown)" | tee -a $REPORT' >> $SHARE/run-tests-ohos.sh
+          echo 'echo "===========================================" | tee -a $REPORT' >> $SHARE/run-tests-ohos.sh
+          echo 'echo "" | tee -a $REPORT' >> $SHARE/run-tests-ohos.sh
+          echo 'echo "=== Part 1: test_all_in_one.js ===" | tee -a $REPORT' >> $SHARE/run-tests-ohos.sh
+          echo 'if [ -f test_all_in_one.js ]; then' >> $SHARE/run-tests-ohos.sh
+          echo '  $BUN test_all_in_one.js 2>&1 | tee -a $REPORT' >> $SHARE/run-tests-ohos.sh
+          echo 'else' >> $SHARE/run-tests-ohos.sh
+          echo '  echo "SKIP: test_all_in_one.js not found" | tee -a $REPORT' >> $SHARE/run-tests-ohos.sh
+          echo 'fi' >> $SHARE/run-tests-ohos.sh
+          echo 'echo "" | tee -a $REPORT' >> $SHARE/run-tests-ohos.sh
+          echo 'echo "=== Part 2: Official Test Suite ===" | tee -a $REPORT' >> $SHARE/run-tests-ohos.sh
+          echo 'for path in "${@:-test/js/bun/bun-object test/js/bun/http test/js/bun/fetch test/js/node/process test/js/node/os test/js/node/child_process test/js/web/fetch test/js/web/encoding test/js/web/streams test/js/web/timers}"; do' >> $SHARE/run-tests-ohos.sh
+          echo '  if [ -d "$path" ]; then' >> $SHARE/run-tests-ohos.sh
+          echo '    echo "--- $path ---" | tee -a $REPORT' >> $SHARE/run-tests-ohos.sh
+          echo '    $BUN test $path 2>&1 | tee -a $REPORT || true' >> $SHARE/run-tests-ohos.sh
+          echo '  else' >> $SHARE/run-tests-ohos.sh
+          echo '    echo "SKIP: $path (copy test/ dir first)" | tee -a $REPORT' >> $SHARE/run-tests-ohos.sh
+          echo '  fi' >> $SHARE/run-tests-ohos.sh
+          echo 'done' >> $SHARE/run-tests-ohos.sh
+          echo 'echo "" | tee -a $REPORT' >> $SHARE/run-tests-ohos.sh
+          echo 'echo "===========================================" | tee -a $REPORT' >> $SHARE/run-tests-ohos.sh
+          echo 'echo "报告已保存: $REPORT" | tee -a $REPORT' >> $SHARE/run-tests-ohos.sh
+          echo 'echo "请传回: cp $REPORT /mnt/linux_share/ci-test/ohos/"' >> $SHARE/run-tests-ohos.sh
+          chmod +x $SHARE/run-tests-ohos.sh 2>/dev/null || true
           cp build/release/bun /mnt/linux_share/bun-ci.elf 2>/dev/null || true
           cp test_all_in_one.js /mnt/linux_share/ 2>/dev/null || true
           echo "✅ 制品已复制到 $SHARE"
@@ -316,11 +328,9 @@ RUNEOF
           echo "CI 机已完成官方测试，报告在:"
           echo "  $SHARE/official-test/"
           echo ""
-          echo "OHOS 设备:"
-          echo "  cd /mnt/linux_share/ci-test"
-          echo "  binary-sign-tool sign -selfSign \"1\" -in bun-ohos-*.elf -out bun-signed"
-          echo "  ./run-tests-ohos.sh"
+          echo "OHOS 设备: cd /mnt/linux_share/ci-test"
+          echo "  1. binary-sign-tool sign -selfSign 1 -in bun-ohos-*.elf -out bun-signed"
+          echo "  2. ./run-tests-ohos.sh"
           echo ""
-          echo "对比:"
-          echo "  diff $SHARE/official-test/latest-native.txt ohos/your-report.txt"
+          echo "对比: diff $SHARE/official-test/latest-native.txt ohos/your-report.txt"
           echo "======================================="
