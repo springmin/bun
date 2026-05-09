@@ -221,6 +221,12 @@ jobs:
       - name: Build native bun for testing
         working-directory: bun
         run: |
+          # Fix LLVM 22 libc++ config_site (missing in this installation)
+          if [ ! -f /opt/llvm-22.1.4/include/c++/v1/__config_site ] && [ -f /opt/llvm-22.1.4/include/aarch64-unknown-linux-gnu/c++/v1/__config_site ]; then
+            ln -sfn /opt/llvm-22.1.4/include/aarch64-unknown-linux-gnu/c++/v1/__config_site \
+              /opt/llvm-22.1.4/include/c++/v1/__config_site
+            echo "✅ Fixed LLVM libc++ __config_site"
+          fi
           echo "=== 配置原生 bun 构建 (prebuilt WebKit) ==="
           bun run build:release \
             --build-dir=build/native-test \
