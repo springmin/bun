@@ -78,7 +78,20 @@ jobs:
           repository: springmin/bun
           ref: ohos-aarm64
           path: bun
-          fetch-depth: 0
+          fetch-depth: 1
+
+      - name: Restore zig from local build cache
+        run: |
+          # Zig download from GitHub is slow (~100MB). Use the already-
+          # extracted local copy which is available on the self-hosted
+          # runner at /home/user/sources/bun/vendor/zig/.
+          mkdir -p bun/vendor
+          if [ -d /home/user/sources/bun/vendor/zig ]; then
+            cp -a /home/user/sources/bun/vendor/zig bun/vendor/zig
+            echo "✅ Copied zig from local build"
+          else
+            echo "⚠️  No local zig found, will download during build"
+          fi
 
       - name: Cache WebKit source checkout
         id: webkit-source-cache
