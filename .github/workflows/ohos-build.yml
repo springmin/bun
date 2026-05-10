@@ -74,19 +74,28 @@ jobs:
     timeout-minutes: 300
 
     steps:
-      - name: Checkout Bun source
-        uses: actions/checkout@v4
-        with:
-          repository: springmin/bun
-          ref: ohos-aarm64
-          path: bun
-          fetch-depth: 1
+      - name: Checkout Bun source (incremental)
+        run: |
+          LOCAL=/home/user/sources/bun
+          mkdir -p bun
+          if [ -d "$LOCAL/.git" ]; then
+            # Use local repo objects to avoid download (~5s vs ~30s)
+            git clone --reference "$LOCAL/.git" \
+              https://github.com/springmin/bun.git bun 2>/dev/null || \
+              git clone --depth 1 --branch ohos-aarm64 \
+                https://github.com/springmin/bun.git bun
+            cd bun
+            git fetch origin ohos-aarm64 --depth=1
+            git checkout -f FETCH_HEAD
+            echo "✅ Cloned from local reference"
+          else
+            git clone --depth 1 --branch ohos-aarm64 \
+              https://github.com/springmin/bun.git bun
+            echo "⚠️  Full clone (no local reference)"
+          fi
 
       - name: Restore zig from local build cache
         run: |
-          # Zig download from GitHub is slow (~100MB). Use the already-
-          # extracted local copy which is available on the self-hosted
-          # runner at /home/user/sources/bun/vendor/zig/.
           mkdir -p bun/vendor
           if [ -d /home/user/sources/bun/vendor/zig ]; then
             cp -a /home/user/sources/bun/vendor/zig bun/vendor/zig
@@ -95,26 +104,26 @@ jobs:
             echo "⚠️  No local zig found, will download during build"
           fi
 
-      - name: Cache WebKit source checkout
-        id: webkit-source-cache
-        uses: actions/cache@v4
-        with:
-          path: bun/vendor/WebKit
-          # Invalidate when the WebKit ref changes; restore-keys keeps
-          # previous checkouts around so incremental fetch is fast.
-          key: webkit-source-${{ env.WEBKIT_FORK }}-${{ inputs.webkit_ref || env.WEBKIT_REF }}
-
-      - name: Cleanup stale WebKit checkout
-        if: steps.webkit-source-cache.outputs.cache-hit != 'true'
-        run: rm -rf bun/vendor/WebKit
-
-      - name: Checkout WebKit fork
-        uses: actions/checkout@v4
-        with:
-          repository: ${{ env.WEBKIT_FORK }}
-          ref: ${{ inputs.webkit_ref || env.WEBKIT_REF }}
-          path: bun/vendor/WebKit
-          fetch-depth: 1
+      - name: Checkout WebKit fork (incremental)
+        run: |
+          LOCAL_WK=/home/user/sources/bun/build/release/deps/WebKit
+          WK_REPO=${{ env.WEBKIT_FORK }}
+          WK_REF=${{ inputs.webkit_ref || env.WEBKIT_REF }}
+          rm -rf bun/vendor/WebKit
+          if [ -d "$LOCAL_WK/.git" ]; then
+            git clone --reference "$LOCAL_WK/.git" \
+              "https://github.com/$WK_REPO.git" bun/vendor/WebKit 2>/dev/null || \
+              git clone --depth 1 --branch "$WK_REF" \
+                "https://github.com/$WK_REPO.git" bun/vendor/WebKit
+            cd bun/vendor/WebKit
+            git fetch origin "$WK_REF" --depth=1
+            git checkout -f FETCH_HEAD
+            echo "✅ WebKit cloned from local reference"
+          else
+            git clone --depth 1 --branch "$WK_REF" \
+              "https://github.com/$WK_REPO.git" bun/vendor/WebKit
+            echo "⚠️  Full WebKit clone (no local reference)"
+          fi
 
       - name: Setup environment
         run: |
@@ -122,14 +131,15 @@ jobs:
           echo "OHOS_SYSROOT=${{ env.OHOS_SYSROOT }}" >> $GITHUB_ENV
           echo "OHOS_CROSS_LIBS=${{ env.OHOS_CROSS_LIBS }}" >> $GITHUB_ENV
           echo "OHOS_ICU_DIR=${{ env.OHOS_ICU_DIR }}" >> $GITHUB_ENV
-          # Verify SDK
+          # Verify SDK (fast — just directory check)
           test -d "$OHOS_SDK_ROOT" || { echo "OHOS SDK not found"; exit 1; }
-          # Symlink cross-libs and ICU into workspace (they're not in git)
+          # Symlink cross-libs and ICU (skip if already correct)
           mkdir -p bun/build
-          ln -sfn ${{ env.OHOS_CROSS_LIBS }} bun/build/ohos-cross-libs
-          ln -sfn $(dirname ${{ env.OHOS_ICU_DIR }}) bun/build/ohos-icu
-          test -d bun/build/ohos-cross-libs/libcxx/lib || { echo "Cross libs not found at ${{ env.OHOS_CROSS_LIBS }}"; exit 1; }
-          test -d bun/build/ohos-icu/target/lib || { echo "ICU not found at ${{ env.OHOS_ICU_DIR }}"; exit 1; }
+          [ -L bun/build/ohos-cross-libs ] && [ "$(readlink bun/build/ohos-cross-libs)" = "$OHOS_CROSS_LIBS" ] || ln -sfn "$OHOS_CROSS_LIBS" bun/build/ohos-cross-libs
+          [ -L bun/build/ohos-icu ] && [ "$(readlink bun/build/ohos-icu)" = "$(dirname $OHOS_ICU_DIR)" ] || ln -sfn "$(dirname $OHOS_ICU_DIR)" bun/build/ohos-icu
+          test -d bun/build/ohos-cross-libs/libcxx/lib || { echo "Cross libs not found"; exit 1; }
+          test -d bun/build/ohos-icu/target/lib || { echo "ICU not found"; exit 1; }
+          echo "✅ Environment ready"
 
       - name: Cache WebKit build
         uses: actions/cache@v4
