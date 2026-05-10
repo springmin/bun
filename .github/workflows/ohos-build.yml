@@ -77,7 +77,7 @@ jobs:
       - name: Checkout Bun source (incremental)
         run: |
           LOCAL=/home/user/sources/bun
-          mkdir -p bun
+          rm -rf bun
           if [ -d "$LOCAL/.git" ]; then
             # Use local repo objects to avoid download (~5s vs ~30s)
             git clone --reference "$LOCAL/.git" \
