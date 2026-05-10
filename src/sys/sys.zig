@@ -2396,7 +2396,14 @@ pub fn send(fd: bun.FD, buf: []const u8, flag: u32) Maybe(usize) {
     }
 }
 
+/// OHOS kernel sends uncatchable SIGSYS instead of -ENOSYS for
+/// unimplemented syscalls. Set in c-bindings.cpp based on __OHOS__.
+extern "C" const BUN_OHOS_DISABLE_PIDFD: bool;
+
 pub fn pidfd_open(pid: std.os.linux.pid_t, flags: u32) Maybe(i32) {
+    if (BUN_OHOS_DISABLE_PIDFD) {
+        return .{ .err = bun.sys.Error.fromCode(.NOSYS, .pidfd_open) };
+    }
     while (true) {
         const rc = linux.pidfd_open(pid, flags);
 
