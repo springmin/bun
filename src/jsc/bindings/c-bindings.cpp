@@ -226,7 +226,14 @@ extern "C" void windows_enable_stdio_inheritance()
 // close_range is glibc > 2.33, which is very new
 extern "C" ssize_t bun_close_range(unsigned int start, unsigned int end, unsigned int flags)
 {
+#if defined(__OHOS__)
+    // OHOS kernel sends uncatchable SIGSYS for unimplemented syscalls.
+    // Fall back to the caller's closeRangeLoop.
+    errno = ENOSYS;
+    return -1;
+#else
     return syscall(__NR_close_range, start, end, flags);
+#endif
 }
 #else // OS(FREEBSD)
 // FreeBSD 12.2+ libc has close_range; 14.0+ supports CLOSE_RANGE_CLOEXEC
