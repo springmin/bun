@@ -303,16 +303,10 @@ extern "C" ssize_t posix_spawn_bun(
             envp = environ;
 
         // Close all fds > current_max_fd, preferring cloexec if available.
-        // Ensure stdio fds (0,1,2) are never included — on OHOS, fcntl is
-        // also ignored in vfork children, so clearing CLOEXEC after this
-        // call would not work. The parent fd swap (close+mkstemp before vfork)
-        // requires fd 1/2 to survive execve without CLOEXEC.
+        // On OHOS, fcntl(F_SETFD) is ignored in vfork children, so fd CLOEXEC
+        // must be prevented by excluding stdio fds (0,1,2) from the range.
         if (current_max_fd < 2) current_max_fd = 2;
         closeRangeOrLoop(current_max_fd + 1, INT_MAX, true);
-
-        // [OHOS DEBUG] verify fd 1 is writable before execve
-        const char* dbg = "[OHOS_CHILD] fd1 OK\n";
-        write(STDOUT_FILENO, dbg, strlen(dbg));
 
         if (execve(path, argv, envp) == -1) {
             return childFailed();

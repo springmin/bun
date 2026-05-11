@@ -4,8 +4,6 @@ const log = bun.Output.scoped(.PROCESS, .visible);
 
 extern "C" const BUN_OHOS_DISABLE_PIDFD: bool;
 
-extern "c" fn mkstemp(template: [*:0]u8) c_int;
-
 const win_rusage = struct {
     utime: struct {
         sec: i64 = 0,
@@ -1504,17 +1502,6 @@ pub fn spawnProcessPosix(
                 }
 
                 const fds: [2]bun.FD = brk: {
-                    // OHOS spawnSync: swap parent fd to temp file before vfork.
-                    // vfork child inherits fd table → stdout writes to temp file.
-                    // No dup2/close actions needed (they're ignored on OHOS).
-                    if (BUN_OHOS_DISABLE_PIDFD and options.sync) {
-                        // OHOS sync: don't create pipe/tempfile here.
-                        // The argv wrapping code (below) will handle output capture
-                        // via temp file and shell redirect.
-                        // Keep spawned.stdout null — it'll be set by argv wrapping.
-                        try actions.inherit(fileno);
-                        continue;
-                    }
                     const pair = if (!options.no_sigpipe)
                         try bun.sys.socketpairForShell(
                             std.posix.AF.UNIX,
@@ -1560,14 +1547,11 @@ pub fn spawnProcessPosix(
                     try bun.sys.setNonblocking(fds[0]).unwrap();
                 }
 
-                // OHOS spawnSync: fd 1 already IS the temp file (due to close+open swap).
-                // Skip dup2/close — they'd restore fd 1, undoing the temp file setup.
-                // The vfork child inherits fd 1 = temp file directly.
-                if (!BUN_OHOS_DISABLE_PIDFD or !options.sync) {
-                    try actions.dup2(fds[1], fileno);
-                    if (fds[1] != fileno)
-                        try actions.close(fds[1]);
-                }
+                // OHOS: Open action already redirects stdout/stderr to temp file.
+                // Skip the pipe dup2/close — the file fd is tracked for reading.
+                try actions.dup2(fds[1], fileno);
+                if (fds[1] != fileno)
+                    try actions.close(fds[1]);
 
                 stdio.* = fds[0];
             },
@@ -1630,62 +1614,11 @@ pub fn spawnProcessPosix(
     }
 
     const argv0 = options.argv0 orelse argv[0].?;
-
-    // OHOS sync: wrap argv with shell redirect to temp file.
-    // vfork child cannot dup2/close/open, but shell `>` redirect works
-    // in the new process after execve. Creates argv:
-    //   sh -c 'exec "$@" > /path/XXXXXX 2>&1' -- <original>...
-    const ohos_wrapped_argv = brk: {
-        if (!BUN_OHOS_DISABLE_PIDFD or !options.sync)
-            break :brk @as([]?[*:0]const u8, &.{});
-        // Only wrap if stdout or stderr needs capture
-        if (options.stdout != .buffer and options.stderr != .buffer)
-            break :brk @as([]?[*:0]const u8, &.{});
-
-        // Create temp file
-        const tmpl = "/storage/Users/currentUser/tmp/bun_spawn_XXXXXX";
-        var tmp_buf: [tmpl.len + 1]u8 = undefined;
-        @memcpy(tmp_buf[0..tmpl.len], tmpl);
-        tmp_buf[tmpl.len] = 0;
-        const write_fd = mkstemp(@ptrCast(&tmp_buf));
-        if (write_fd < 0) break :brk @as([]?[*:0]const u8, &.{});
-        const read_fd = switch (bun.sys.open(@ptrCast(&tmp_buf), bun.O.RDONLY, 0)) {
-            .result => |fd| fd,
-            .err => break :brk @as([]?[*:0]const u8, &.{}),
-        };
-        _ = std.posix.unlinkZ(@ptrCast(&tmp_buf)) catch {};
-
-        // Build redirect path string: > /path/XXXXXX 2>&1
-        const redirect_raw = std.fmt.allocPrint(bun.default_allocator, "exec \"$@\" > {s} 2>&1", .{@as([*:0]u8, @ptrCast(&tmp_buf))}) catch break :brk @as([]?[*:0]const u8, &.{});
-        const redirect = (bun.default_allocator.dupeZ(u8, redirect_raw) catch break :brk @as([]?[*:0]const u8, &.{}));
-        bun.default_allocator.free(redirect_raw);
-
-        // Count original argv
-        var argc: usize = 0;
-        while (argc < 1024 and argv[argc] != null) { argc += 1; }
-
-        // Build new argv
-        var new_argv = bun.default_allocator.alloc(?[*:0]const u8, argc + 5) catch break :brk @as([]?[*:0]const u8, &.{});
-        new_argv[0] = "/system/bin/sh";
-        new_argv[1] = "-c";
-        new_argv[2] = redirect.ptr;
-        new_argv[3] = "--";
-        for (0..argc) |i| new_argv[4 + i] = argv[i];
-        new_argv[4 + argc] = null;
-        // Store read fd — parent reads from this after child exits
-        // Must come after all allocations succeed (no early break between here and mkstemp)
-        spawned.stdout = read_fd;
-        spawned.stderr = read_fd;
-        try to_close_at_end.append(read_fd);
-        try to_close_on_error.append(read_fd);
-        break :brk new_argv;
-    };
-
     const spawn_result = PosixSpawn.spawnZ(
         argv0,
         actions,
         attr,
-        if (ohos_wrapped_argv.len > 0) @as([*:null]?[*:0]const u8, @ptrCast(ohos_wrapped_argv.ptr)) else argv,
+        argv,
         envp,
     );
     var failed_after_spawn = false;
