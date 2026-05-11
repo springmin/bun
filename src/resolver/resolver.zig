@@ -2916,7 +2916,7 @@ pub const Resolver = struct {
                         r.dir_cache.markNotFound(queue_top.result);
                         rfs.entries.markNotFound(cached_dir_entry_result);
                         switch (@as(anyerror, err)) {
-                            error.ENOENT, error.FileNotFound => {},
+                            error.ENOENT, error.FileNotFound, error.PermissionDenied => {},
                             else => {
                                 if (comptime enable_logging) {
                                     const pretty = queue_top.unsafe_path;
@@ -3806,7 +3806,7 @@ pub const Resolver = struct {
 
         if (@as(Fs.FileSystem.RealFS.EntriesOption.Tag, dir_entry.*) == .err) {
             switch (dir_entry.err.original_err) {
-                error.ENOENT, error.FileNotFound, error.ENOTDIR, error.NotDir => {},
+                error.ENOENT, error.FileNotFound, error.ENOTDIR, error.NotDir, error.PermissionDenied => {},
                 else => {
                     r.log.addErrorFmt(
                         null,

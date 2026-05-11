@@ -2,6 +2,8 @@ const pid_t = if (Environment.isPosix) std.posix.pid_t else uv.uv_pid_t;
 const fd_t = if (Environment.isPosix) std.posix.fd_t else i32;
 const log = bun.Output.scoped(.PROCESS, .visible);
 
+extern "C" const BUN_OHOS_DISABLE_PIDFD: bool;
+
 const win_rusage = struct {
     utime: struct {
         sec: i64 = 0,
@@ -1479,7 +1481,7 @@ pub fn spawnProcessPosix(
             },
             .buffer => {
                 if (Environment.isLinux) use_memfd: {
-                    if (!options.stream and i > 0 and bun.sys.canUseMemfd()) {
+                    if (!options.stream and i > 0 and bun.sys.canUseMemfd() and !BUN_OHOS_DISABLE_PIDFD) {
                         // use memfd if we can
                         const label = switch (i) {
                             0 => "spawn_stdio_stdin",
@@ -1500,17 +1502,20 @@ pub fn spawnProcessPosix(
                 }
 
                 const fds: [2]bun.FD = brk: {
-                    const pair = if (!options.no_sigpipe) try bun.sys.socketpairForShell(
-                        std.posix.AF.UNIX,
-                        std.posix.SOCK.STREAM,
-                        0,
-                        .blocking,
-                    ).unwrap() else try bun.sys.socketpair(
-                        std.posix.AF.UNIX,
-                        std.posix.SOCK.STREAM,
-                        0,
-                        .blocking,
-                    ).unwrap();
+                    const pair = if (!options.no_sigpipe)
+                        try bun.sys.socketpairForShell(
+                            std.posix.AF.UNIX,
+                            std.posix.SOCK.STREAM,
+                            0,
+                            .blocking,
+                        ).unwrap()
+                    else
+                        try bun.sys.socketpair(
+                            std.posix.AF.UNIX,
+                            std.posix.SOCK.STREAM,
+                            0,
+                            .blocking,
+                        ).unwrap();
                     break :brk .{ pair[if (i == 0) 1 else 0], pair[if (i == 0) 0 else 1] };
                 };
 
@@ -1538,10 +1543,15 @@ pub fn spawnProcessPosix(
                 try to_close_at_end.append(fds[1]);
                 try to_close_on_error.append(fds[0]);
 
-                if (!options.sync) {
+                // OHOS: async sets O_NONBLOCK on pipe read end, which triggers
+                // a different kernel path that allows vfork child's dup2 to work.
+                // Sync also needs this for pipe capture to work on OHOS.
+                if (!options.sync or BUN_OHOS_DISABLE_PIDFD) {
                     try bun.sys.setNonblocking(fds[0]).unwrap();
                 }
 
+                // OHOS: Open action already redirects stdout/stderr to temp file.
+                // Skip the pipe dup2/close — the file fd is tracked for reading.
                 try actions.dup2(fds[1], fileno);
                 if (fds[1] != fileno)
                     try actions.close(fds[1]);

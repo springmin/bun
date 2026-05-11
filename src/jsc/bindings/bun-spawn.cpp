@@ -154,7 +154,7 @@ extern "C" ssize_t posix_spawn_bun(
     bool use_fork_fallback = false;
 
     pid_t child;
-#if OS(LINUX)
+#if OS(LINUX) && !defined(__OHOS__)
     child = vfork();
     if (child == -1) {
         use_fork_fallback = true;
@@ -393,6 +393,7 @@ extern "C" ssize_t posix_spawn_bun(
     }
 #endif
 
+    int debug_res = res;
     sigprocmask(SIG_SETMASK, &oldmask, 0);
 #if !OS(ANDROID) && !defined(__OHOS__)
     pthread_setcancelstate(cs, 0);
