@@ -9,6 +9,12 @@
 #   - Cross-compiled ICU at bun/build/ohos-icu/
 #   - Cross-compiled libc++ at bun/build/ohos-cross-libs/
 #
+# Build directory: build/release-ohos/ (isolated from native release builds)
+#
+# WebKit sync: before building, checks scripts/build/deps/webkit.ts pinned
+#   commit against vendor/WebKit HEAD. If mismatch, fetches fork updates
+#   and fails if the commit still isn't found — prevents silent version drift.
+#
 # Trigger paths:
 #   - Changes to Bun's OHOS build config (scripts/build/)
 #   - Changes to Bun's OHOS runtime code (src/runtime/)
@@ -106,7 +112,7 @@ jobs:
 
       - name: Checkout WebKit fork (incremental)
         run: |
-          LOCAL_WK=/home/user/sources/bun/build/release/deps/WebKit
+          LOCAL_WK=/home/user/sources/bun/build/release-ohos/deps/WebKit
           WK_REPO=${{ env.WEBKIT_FORK }}
           WK_REF=${{ inputs.webkit_ref || env.WEBKIT_REF }}
           rm -rf bun/vendor/WebKit
@@ -123,6 +129,27 @@ jobs:
             git clone --depth 1 --branch "$WK_REF" \
               "https://github.com/$WK_REPO.git" bun/vendor/WebKit
             echo "⚠️  Full WebKit clone (no local reference)"
+          fi
+
+      - name: WebKit version sync check
+        run: |
+          WK_HASH=$(grep "^export const WEBKIT_VERSION" bun/scripts/build/deps/webkit.ts | grep -oE '[a-f0-9]{40}')
+          echo "scripts/build/deps/webkit.ts pins: $WK_HASH"
+          if git -C bun/vendor/WebKit cat-file -e "${WK_HASH}" 2>/dev/null; then
+            echo "✅ vendor/WebKit already contains ${WK_HASH}"
+          else
+            echo "⚠️  vendor/WebKit missing ${WK_HASH} — syncing fork..."
+            cd bun/vendor/WebKit
+            git remote add upstream https://github.com/oven-sh/WebKit.git 2>/dev/null || true
+            git fetch upstream main --depth=100
+            if git cat-file -e "${WK_HASH}" 2>/dev/null; then
+              git push origin origin/main:ohos-aarch64
+              echo "✅ Fork synced to ${WK_HASH}"
+            else
+              echo "❌ Fork does not contain ${WK_HASH}"
+              echo "   Run: cd vendor/WebKit && git fetch origin main && git push origin origin/main:ohos-aarch64"
+              exit 1
+            fi
           fi
 
       - name: Setup environment
@@ -145,7 +172,7 @@ jobs:
         uses: actions/cache@v4
         id: webkit-cache
         with:
-          path: bun/build/release/deps/WebKit
+          path: bun/build/release-ohos/deps/WebKit
           # Use the WebKit ref + scripts hash as key. hashFiles on the full
           # WebKit source tree is too expensive (hundreds of thousands of
           # files) and times out after 120s.
@@ -158,6 +185,7 @@ jobs:
             --os=ohos \
             --arch=aarch64 \
             --webkit=local \
+            --build-dir=build/release-ohos \
             --ohos-sysroot=$OHOS_SYSROOT \
             --configure-only
         env:
@@ -167,31 +195,31 @@ jobs:
         if: steps.webkit-cache.outputs.cache-hit != 'true'
         working-directory: bun
         run: |
-          ninja -C build/release configure-WebKit -j1
-          ninja -C build/release/deps/WebKit jsc -j$NINJA_JOBS
+          ninja -C build/release-ohos configure-WebKit -j1
+          ninja -C build/release-ohos/deps/WebKit jsc -j$NINJA_JOBS
 
       - name: Build Bun
         working-directory: bun
         run: |
-          ninja -C build/release bun -j$NINJA_JOBS
+          ninja -C build/release-ohos bun -j$NINJA_JOBS
 
       - name: Verify binary
         working-directory: bun
         run: |
-          file build/release/bun
-          ls -lh build/release/bun
+          file build/release-ohos/bun
+          ls -lh build/release-ohos/bun
           # OHOS PIE binaries always show "dynamically linked" because they
           # have PT_INTERP (interpreter). The static linking is confirmed by
           # the absence of NEEDED entries in readelf.
-          file build/release/bun | grep -q "ELF.*ARM aarch64" || {
+          file build/release-ohos/bun | grep -q "ELF.*ARM aarch64" || {
             echo "ERROR: Not an ARM64 ELF binary"
-            file build/release/bun
+            file build/release-ohos/bun
             exit 1
           }
           # Verify no dynamic library dependencies (true static link)
-          readelf -d build/release/bun | grep -q "NEEDED" && {
+          readelf -d build/release-ohos/bun | grep -q "NEEDED" && {
             echo "ERROR: Binary has dynamic library dependencies"
-            readelf -d build/release/bun | grep "NEEDED"
+            readelf -d build/release-ohos/bun | grep "NEEDED"
             exit 1
           } || true
           echo "✅ Binary validation passed"
@@ -199,12 +227,12 @@ jobs:
       - name: Package binary
         working-directory: bun
         run: |
-          VERSION=$(build/release/bun --version 2>/dev/null || echo "1.3.14")
+          VERSION=$(build/release-ohos/bun --version 2>/dev/null || echo "1.3.14")
           COMMIT=$(git rev-parse --short HEAD)
           DATE=$(date +%Y%m%d_%H%M%S)
           NAME="bun-ohos-aarch64-${VERSION}-${COMMIT}-${DATE}"
           mkdir -p /tmp/bun-release/${NAME}
-          cp build/release/bun /tmp/bun-release/${NAME}/bun
+          cp build/release-ohos/bun /tmp/bun-release/${NAME}/bun
           cat > /tmp/bun-release/${NAME}/README.md << 'EOF'
           # Bun for HarmonyOS (OHOS)
           Build from CI. See springmin/bun on GitHub for details.
@@ -225,7 +253,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.artifact_name }}.bun
-          path: bun/build/release/bun
+          path: bun/build/release-ohos/bun
           retention-days: 30
 
       - name: Copy artifacts to shared directory
@@ -233,5 +261,5 @@ jobs:
         run: |
           SHARE=/mnt/linux_share/ci-test
           mkdir -p $SHARE
-          cp build/release/bun $SHARE/bun-ohos-${{ env.artifact_name }}.elf
+          cp build/release-ohos/bun $SHARE/bun-ohos-${{ env.artifact_name }}.elf
           echo "✅ 制品已复制到 $SHARE/bun-ohos-${{ env.artifact_name }}.elf"
