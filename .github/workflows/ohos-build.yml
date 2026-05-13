@@ -168,6 +168,32 @@ jobs:
           test -d bun/build/ohos-icu/target/lib || { echo "ICU not found"; exit 1; }
           echo "✅ Environment ready"
 
+      - name: Sync test files to shared directory
+        run: |
+          SHARE=/mnt/linux_share/ci-test/all-tests
+          mkdir -p $SHARE/test
+          rsync -am --delete \
+            --include='*/' \
+            --include='*.test.ts' --include='*.test.tsx' \
+            --include='*.test.js' --include='*.test.jsx' \
+            --include='*.spec.ts' --include='*.spec.tsx' \
+            --include='*.spec.js' --include='*.spec.jsx' \
+            --include='*.test.mjs' --include='*.test.cjs' \
+            --include='*.spec.mjs' --include='*.spec.cjs' \
+            --include='*.ts' --include='*.tsx' --include='*.js' --include='*.jsx' \
+            --include='*.mjs' --include='*.cjs' \
+            --include='*.json' --include='*.toml' \
+            --include='*.html' --include='*.css' \
+            --include='*.snap' \
+            --include='*.txt' --include='*.md' \
+            --include='*.pem' --include='*.cert' --include='*.key' \
+            --include='*.wasm' --include='*.png' --include='*.svg' \
+            --include='*.lock' --include='*.lockb' \
+            --include='bunfig.toml' --include='.bunrc' --include='.gitignore' \
+            --exclude='node_modules/' --exclude='.git/' \
+            bun/test/ $SHARE/test/
+          echo "✅ Test files synced ($(find $SHARE/test -type f | wc -l) files)"
+
       - name: Cache WebKit build
         uses: actions/cache@v4
         id: webkit-cache

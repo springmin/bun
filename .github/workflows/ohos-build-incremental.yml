@@ -113,6 +113,32 @@ jobs:
           test -d build/ohos-cross-libs/libcxx/lib || { echo "Cross libs not found"; exit 1; }
           test -d build/ohos-icu/target/lib || { echo "ICU not found"; exit 1; }
 
+      - name: Sync test files to shared directory
+        run: |
+          SHARE=/mnt/linux_share/ci-test/all-tests
+          mkdir -p $SHARE/test
+          rsync -am --delete \
+            --include='*/' \
+            --include='*.test.ts' --include='*.test.tsx' \
+            --include='*.test.js' --include='*.test.jsx' \
+            --include='*.spec.ts' --include='*.spec.tsx' \
+            --include='*.spec.js' --include='*.spec.jsx' \
+            --include='*.test.mjs' --include='*.test.cjs' \
+            --include='*.spec.mjs' --include='*.spec.cjs' \
+            --include='*.ts' --include='*.tsx' --include='*.js' --include='*.jsx' \
+            --include='*.mjs' --include='*.cjs' \
+            --include='*.json' --include='*.toml' \
+            --include='*.html' --include='*.css' \
+            --include='*.snap' \
+            --include='*.txt' --include='*.md' \
+            --include='*.pem' --include='*.cert' --include='*.key' \
+            --include='*.wasm' --include='*.png' --include='*.svg' \
+            --include='*.lock' --include='*.lockb' \
+            --include='bunfig.toml' --include='.bunrc' --include='.gitignore' \
+            --exclude='node_modules/' --exclude='.git/' \
+            test/ $SHARE/test/
+          echo "✅ Test files synced ($(find $SHARE/test -type f | wc -l) files)"
+
       - name: Restore ccache from persistent storage
         run: |
           CCACHE_DIR="$HOME/.cache/ccache-ohos"
