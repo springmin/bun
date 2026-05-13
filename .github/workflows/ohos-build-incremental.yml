@@ -67,6 +67,8 @@ jobs:
       - name: Checkout/update WebKit fork
         run: |
           if [ -d vendor/WebKit/.git ]; then
+            # Clean stale lock files from cancelled runs
+            rm -f vendor/WebKit/.git/shallow.lock vendor/WebKit/.git/index.lock
             cd vendor/WebKit
             git fetch origin ${{ env.WEBKIT_REF }} --depth=1
             git checkout -f FETCH_HEAD
