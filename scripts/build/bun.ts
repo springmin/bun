@@ -652,7 +652,7 @@ function emitLinkOnly(n: Ninja, cfg: Config): BunOutput {
 function emitSmokeTest(n: Ninja, cfg: Config, exe: string, exeName: string): void {
   // Cross-compiled binaries can't run on the build host. Skip the smoke
   // test entirely — `ninja check` becomes a no-op alias for the exe.
-  if (cfg.crossTarget !== undefined) {
+  if (cfg.crossTarget !== undefined || cfg.ohos) {
     n.phony("check", [exe]);
     return;
   }
