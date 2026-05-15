@@ -2203,7 +2203,11 @@ pub struct Version {
 }
 
 impl Version {
-    pub const ZERO: Self = Self { major: 0, minor: 0, patch: 0 };
+    pub const ZERO: Self = Self {
+        major: 0,
+        minor: 0,
+        patch: 0,
+    };
 
     /// Parse leading `"MAJOR.MINOR.PATCH"` from a byte slice. Per field:
     /// accumulate ASCII digits (wrapping on overflow), stop at the first
@@ -2233,22 +2237,12 @@ impl Version {
                 break;
             }
         }
-        Self { major: nums[0], minor: nums[1], patch: nums[2] }
+        Self {
+            major: nums[0],
+            minor: nums[1],
+            patch: nums[2],
+        }
     }
-}
-
-/// `const`-context decimal `u32` parse of an ASCII byte slice. No sign, no
-/// whitespace, wrapping on overflow; non-digits are accumulated as garbage so
-/// only feed it digit-only build-time literals (e.g. `env!` version components).
-/// `str::parse` isn't `const`, hence this.
-pub const fn const_parse_u32(bytes: &[u8]) -> u32 {
-    let mut i = 0usize;
-    let mut n: u32 = 0;
-    while i < bytes.len() {
-        n = n.wrapping_mul(10).wrapping_add((bytes[i] - b'0') as u32);
-        i += 1;
-    }
-    n
 }
 
 // ─── RacyCell ─────────────────────────────────────────────────────────────
