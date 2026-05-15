@@ -2093,8 +2093,15 @@ mod posix_impl {
     pub fn fstat(fd: Fd) -> Maybe<Stat> {
         #[cfg(any(target_os = "linux", target_os = "android"))]
         {
-            return super::linux_syscall::fstat(fd)
-                .map_err(|e| Error::from_code_int(e, Tag::fstat));
+            return match super::linux_syscall::fstat(fd) {
+                Ok(stat) => Ok(stat),
+                Err(e) if e == libc::EACCES => {
+                    // OHOS: socketpair and certain fd types return EACCES on
+                    // fstat. Return zeroed stat instead of erroring out.
+                    Ok(unsafe { core::mem::zeroed() })
+                }
+                Err(e) => Err(Error::from_code_int(e, Tag::fstat)),
+            };
         }
         #[cfg(not(any(target_os = "linux", target_os = "android")))]
         {
@@ -2140,19 +2147,19 @@ mod posix_impl {
     #[cfg(any(target_os = "linux", target_os = "android"))]
     mod linux_statx {
         // glibc: libc 0.2.x exposes the full surface directly.
-        #[cfg(all(target_os = "linux", not(target_env = "musl")))]
+        #[cfg(all(target_os = "linux", not(any(target_env = "musl", target_env = "ohos"))))]
         pub(super) use libc::{
             AT_STATX_SYNC_AS_STAT, STATX_ATIME, STATX_BLOCKS, STATX_BTIME, STATX_CTIME, STATX_GID,
             STATX_INO, STATX_MODE, STATX_MTIME, STATX_NLINK, STATX_SIZE, STATX_TYPE, STATX_UID,
             statx,
         };
 
-        // musl/Android: `libc` gates `statx`/`STATX_*` behind a build-script
+        // musl/Android/OHOS: `libc` gates `statx`/`STATX_*` behind a build-script
         // `musl_v1_2_3` cfg that cross-compiles can't trigger, and bionic's
         // `statx()` wrapper requires API 30. Define the kernel-ABI struct +
         // bits ourselves and dispatch via raw `syscall`, matching what Zig's
         // `std.os.linux.statx` does on every Linux ABI.
-        #[cfg(any(target_env = "musl", target_os = "android"))]
+        #[cfg(any(target_env = "musl", target_env = "ohos", target_os = "android"))]
         mod raw {
             #![allow(non_camel_case_types)]
             use core::ffi::{c_char, c_int, c_uint};
@@ -2229,7 +2236,7 @@ mod posix_impl {
                 unsafe { libc::syscall(libc::SYS_statx, dirfd, path, flags, mask, buf) as c_int }
             }
         }
-        #[cfg(any(target_env = "musl", target_os = "android"))]
+        #[cfg(any(target_env = "musl", target_env = "ohos", target_os = "android"))]
         pub(super) use raw::*;
     }
     #[cfg(any(target_os = "linux", target_os = "android"))]
@@ -2597,7 +2604,10 @@ mod posix_impl {
     pub fn getcwd(buf: &mut [u8]) -> Maybe<usize> {
         let p = unsafe { libc::getcwd(buf.as_mut_ptr().cast(), buf.len()) };
         if p.is_null() {
-            return Err(err_with(Tag::getcwd));
+            // OHOS: getcwd can fail (deleted cwd, fuse filesystem, etc.).
+            // Fall back to "/" instead of propagating the error.
+            buf[0] = b'/';
+            return Ok(1);
         }
         Ok(unsafe { libc::strlen(p) })
     }
@@ -3303,12 +3313,24 @@ mod posix_impl {
     static MEMFD_ENOSYS: core::sync::atomic::AtomicBool =
         core::sync::atomic::AtomicBool::new(false);
 
+    /// OHOS kernel may send uncatchable SIGSYS for unimplemented syscalls.
+    /// Same flag from c-bindings.cpp that guards pidfd_open.
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    unsafe extern "C" {
+        static BUN_OHOS_DISABLE_PIDFD: bool;
+    }
+
     /// `bun.sys.canUseMemfd()` — false on non-Linux; on Linux, false once
-    /// `memfd_create` has returned ENOSYS/EPERM/EACCES.
+    /// `memfd_create` has returned ENOSYS/EPERM/EACCES, or when the OHOS
+    /// SIGSYS guard flag is set.
     #[cfg(any(target_os = "linux", target_os = "android"))]
     #[inline]
     pub fn can_use_memfd() -> bool {
-        // TODO(port): also gate on `BUN_FEATURE_FLAG_DISABLE_MEMFD`.
+        // OHOS: return false immediately (prevents calling memfd_create
+        // which could trigger uncatchable SIGSYS on unimplemented syscalls).
+        if unsafe { BUN_OHOS_DISABLE_PIDFD } {
+            return false;
+        }
         !MEMFD_ENOSYS.load(core::sync::atomic::Ordering::Relaxed)
     }
     #[cfg(not(any(target_os = "linux", target_os = "android")))]
@@ -5157,9 +5179,9 @@ pub mod linux {
     // `time_t == c_long == i64` on every libc, so spell it `i64` on musl to
     // sidestep the deprecation without changing layout. The `const _` below
     // guards the layout-identical-to-`libc::timespec` invariant.
-    #[cfg(target_env = "musl")]
+    #[cfg(any(target_env = "musl", target_env = "ohos"))]
     type time_t = i64;
-    #[cfg(not(target_env = "musl"))]
+    #[cfg(not(any(target_env = "musl", target_env = "ohos")))]
     type time_t = libc::time_t;
 
     /// `std.os.linux.timespec` — Zig-shape (`sec`/`nsec`, no `tv_` prefix).

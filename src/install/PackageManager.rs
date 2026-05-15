@@ -1287,7 +1287,7 @@ fn ensure_temp_node_gyp_script_run(manager: &mut PackageManager) -> Result<(), E
         "  \"$npm_config_node_gyp\" $@\n",
         "fi\n"
     );
-    #[cfg(target_os = "android")]
+    #[cfg(any(target_os = "android", target_env = "ohos"))]
     const CONTENT: &str = concat!(
         "#!/system/bin/sh\n",
         "if [ \"x$npm_config_node_gyp\" = \"x\" ]; then\n",
