@@ -500,10 +500,8 @@ pub const os_name: &str = if cfg!(target_env = "ohos") {
     "ohos"
 } else if cfg!(target_os = "android") {
     "android"
-} else if cfg!(target_os = "macos") {
-    "darwin"
 } else {
-    "linux"
+    env::OS.name_string()
 };
 pub const os_display: &str = if cfg!(target_env = "ohos") {
     "OHOS"
