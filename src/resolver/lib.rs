@@ -7985,7 +7985,9 @@ pub mod __phase_a_body {
                                 self.dir_cache_mut().mark_not_found(queue_top.result);
                                 rfs!().entries.mark_not_found(cached_dir_entry_result);
                                 if !(err == bun_core::err!("ENOENT")
-                                    || err == bun_core::err!("FileNotFound"))
+                                    || err == bun_core::err!("FileNotFound")
+                                    || err == bun_core::err!("PermissionDenied")
+                                    || err == bun_core::err!("AccessDenied"))
                                 {
                                     if enable_logging {
                                         let pretty = queue_top_unsafe_path;
@@ -9208,7 +9210,9 @@ pub mod __phase_a_body {
                     e if e == bun_core::err!("ENOENT")
                         || e == bun_core::err!("FileNotFound")
                         || e == bun_core::err!("ENOTDIR")
-                        || e == bun_core::err!("NotDir") => {}
+                        || e == bun_core::err!("NotDir")
+                        || e == bun_core::err!("PermissionDenied")
+                        || e == bun_core::err!("AccessDenied") => {}
                     _ => {
                         let _ = self.log_mut().add_error_fmt(
                             None,
@@ -9889,6 +9893,8 @@ pub mod __phase_a_body {
                             let pretty = tsconfigpath;
                             if err == bun_core::err!("ENOENT")
                                 || err == bun_core::err!("FileNotFound")
+                                || err == bun_core::err!("PermissionDenied")
+                                || err == bun_core::err!("AccessDenied")
                             {
                                 let _ = self.log_mut().add_error_fmt(
                                     None,
