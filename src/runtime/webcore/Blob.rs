@@ -3429,6 +3429,9 @@ impl BlobExt for Blob {
                                 jsc::JSType::Array | jsc::JSType::DerivedArray => {
                                     any_arrays = true;
                                     could_have_non_ascii = true;
+                                    // Push item onto stack before breaking so nested
+                                    // arrays are not lost (matching the Zig fix).
+                                    stack.push(item);
                                     break;
                                 }
                                 jsc::JSType::DOMWrapper => {
