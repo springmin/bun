@@ -1,10 +1,10 @@
 --- a/lib/dictBuilder/cover.c	2026-05-08 19:22:53.704000000 +0800
 +++ b/lib/dictBuilder/cover.c	2026-05-08 19:22:53.732000000 +0800
-@@ -29,6 +29,30 @@
+@@ -29,6 +29,35 @@
  #endif
  #endif
  
-+/* OHOS musl lacks qsort_r entirely — implement via selection sort with
++/* OHOS musl lacks qsort_r entirely -- implement via selection sort with
 + * dynamically sized swap buffer (avoids stack overflow for large elements). */
 +#if defined(__OHOS__)
 +#include <stdlib.h>
