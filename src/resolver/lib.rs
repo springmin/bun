@@ -7987,7 +7987,9 @@ pub mod __phase_a_body {
                                 if !(err == bun_core::err!("ENOENT")
                                     || err == bun_core::err!("FileNotFound")
                                     || err == bun_core::err!("PermissionDenied")
-                                    || err == bun_core::err!("AccessDenied"))
+                                    || err == bun_core::err!("AccessDenied")
+                                    || err == bun_core::err!("EPERM")
+                                    || err == bun_core::err!("EACCES"))
                                 {
                                     if enable_logging {
                                         let pretty = queue_top_unsafe_path;
@@ -9212,7 +9214,9 @@ pub mod __phase_a_body {
                         || e == bun_core::err!("ENOTDIR")
                         || e == bun_core::err!("NotDir")
                         || e == bun_core::err!("PermissionDenied")
-                        || e == bun_core::err!("AccessDenied") => {}
+                        || e == bun_core::err!("AccessDenied")
+                        || e == bun_core::err!("EPERM")
+                        || e == bun_core::err!("EACCES") => {}
                     _ => {
                         let _ = self.log_mut().add_error_fmt(
                             None,
@@ -9895,6 +9899,8 @@ pub mod __phase_a_body {
                                 || err == bun_core::err!("FileNotFound")
                                 || err == bun_core::err!("PermissionDenied")
                                 || err == bun_core::err!("AccessDenied")
+                                || err == bun_core::err!("EPERM")
+                                || err == bun_core::err!("EACCES")
                             {
                                 let _ = self.log_mut().add_error_fmt(
                                     None,
