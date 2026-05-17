@@ -1005,14 +1005,14 @@ const WaiterThreadPosix = struct {
         }
 
         if (comptime Environment.isLinux) {
-            var current_mask = std.posix.sigemptyset();
-            std.os.linux.sigaddset(current_mask[0..1], std.posix.SIG.CHLD);
-            const act = std.posix.Sigaction{
+            var current_mask = bun.sys.sigemptyset();
+            bun.sys.sigaddset(&current_mask, std.posix.SIG.CHLD);
+            const act = bun.sys.Sigaction{
                 .handler = .{ .handler = &wakeup },
                 .mask = current_mask,
                 .flags = std.posix.SA.NOCLDSTOP,
             };
-            std.posix.sigaction(std.posix.SIG.CHLD, &act, null);
+            bun.sys.sigaction(std.posix.SIG.CHLD, &act, null);
         }
     }
 
@@ -2928,9 +2928,9 @@ pub const sync = struct {
 };
 
 const std = @import("std");
-const MultiRunProcessHandle = @import("../../../cli/multi_run.zig").ProcessHandle;
-const ProcessHandle = @import("../../../cli/filter_run.zig").ProcessHandle;
-const TestWorkerHandle = @import("../../../cli/test/ParallelRunner.zig").Worker;
+const MultiRunProcessHandle = @import("../../cli/multi_run.zig").ProcessHandle;
+const ProcessHandle = @import("../../cli/filter_run.zig").ProcessHandle;
+const TestWorkerHandle = @import("../../cli/test/ParallelRunner.zig").Worker;
 
 const CronRegisterJob = @import("../cron.zig").CronRegisterJob;
 const CronRemoveJob = @import("../cron.zig").CronRemoveJob;
