@@ -1688,11 +1688,9 @@ impl<'a> PackageInstall<'a> {
                                     }
                                     sys::E::EPERM | sys::E::EACCES => {
                                         // OHOS SELinux blocks hard links; fall back to copy
+                                        // File is RAII (Drop closes FD), no manual cleanup needed
                                         let inf = sys::File::openat(entry.dir, entry.basename.as_bytes(), sys::O::RDONLY, 0)?;
                                         let outf = sys::File::create(destination_dir.fd(), entry.path.as_bytes(), true)?;
-                                        // CloseOnDrop ensures FDs are closed on any early return (e.g. copy failure)
-                                        let _close_inf = sys::CloseOnDrop::file(&inf);
-                                        let _close_outf = sys::CloseOnDrop::file(&outf);
                                         let result = sys::copy_file::copy_file(inf.handle(), outf.handle());
                                         // Preserve source file permissions after copy
                                         if let Ok(stat) = sys::fstat(inf.handle()) {
