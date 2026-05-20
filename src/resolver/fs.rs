@@ -1656,10 +1656,10 @@ impl RealFS {
             // https://github.com/postgres/postgres/blob/fee2b3ea2ecd0da0c88832b37ac0d9f6b3bfb9a9/src/backend/storage/file/fd.c#L1072
             // https://discord.com/channels/876711213126520882/1316342194176790609/1318175562367242271
             let target = {
-                // musl has extremely low defaults, so ensure at least 163840 there.
-                #[cfg(target_env = "musl")]
+                // musl/OHOS have extremely low defaults, so ensure at least 163840 there.
+                #[cfg(any(target_env = "musl", target_env = "ohos"))]
                 let max = lim.max.max(163840);
-                #[cfg(not(target_env = "musl"))]
+                #[cfg(not(any(target_env = "musl", target_env = "ohos")))]
                 let max = lim.max;
                 max.min(1 << 20)
             };
@@ -2127,7 +2127,7 @@ impl RealFS {
             // always `Some` here.
             let entries = entries.expect("caller holds entries_mutex when ENABLE_ENTRY_CACHE");
             let mut get_or_put_result = entries.get_or_put(dir)?;
-            if err == bun_core::err!("ENOENT") || err == bun_core::err!("FileNotFound") {
+            if err == bun_core::err!("ENOENT") || err == bun_core::err!("FileNotFound") || err == bun_core::err!("PermissionDenied") || err == bun_core::err!("AccessDenied") || err == bun_core::err!("EPERM") || err == bun_core::err!("EACCES") {
                 entries.mark_not_found(get_or_put_result);
                 return Ok(TEMP_ENTRIES_OPTION.with_borrow_mut(|slot| {
                     slot.write(EntriesOption::Err(dir_entry::Err {

@@ -390,6 +390,8 @@ function parseArgs(argv: string[]): CliArgs {
     "pgoGenerate",
     "pgoUse",
     "androidNdk",
+    "ohosSysroot",
+    "ohosSdkRoot",
   ]);
 
   for (let i = 0; i < argv.length; i++) {
