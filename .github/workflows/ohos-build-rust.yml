@@ -150,15 +150,15 @@ jobs:
           if git -C bun/vendor/WebKit cat-file -e "${WK_HASH}" 2>/dev/null; then
             echo "✅ vendor/WebKit already contains ${WK_HASH}"
           else
-            echo "⚠️  vendor/WebKit missing ${WK_HASH} — trying to fetch..."
+            echo "⚠️  vendor/WebKit missing ${WK_HASH} — trying upstream..."
             cd bun/vendor/WebKit
             git remote add upstream https://github.com/oven-sh/WebKit.git 2>/dev/null || true
-            git fetch upstream main --depth=100 2>/dev/null || echo "⚠️  Fetch failed (network), continuing anyway"
-            if git cat-file -e "${WK_HASH}" 2>/dev/null; then
-              git push origin origin/main:ohos-aarch64 2>/dev/null || true
-              echo "✅ Fork synced to ${WK_HASH}"
+            if git fetch upstream main --depth=200 2>/dev/null && git cat-file -e "${WK_HASH}" 2>/dev/null; then
+              echo "⚠️  Commit exists upstream but not in fork — try manual merge via:"
+              echo "    gh api repos/springmin/WebKit/merges -X POST -f base=ohos-aarch64 -f head=${WK_HASH}"
+              echo "⚠️  Build will continue without auto-sync (merge preserves OHOS patches)"
             else
-              echo "⚠️  Cannot verify commit ${WK_HASH} in fork. Build will continue."
+              echo "⚠️  Cannot verify commit ${WK_HASH} in upstream. Build will continue."
             fi
           fi
 
@@ -193,12 +193,19 @@ jobs:
             echo "⚠️  No cached build artifacts (full build)"
           fi
 
+      - name: Extract WebKit version for cache key
+        id: webkit-version
+        run: |
+          WK_VER=$(grep "^export const WEBKIT_VERSION" bun/scripts/build/deps/webkit.ts | grep -oE '[a-f0-9]{40}')
+          echo "version=${WK_VER}" >> $GITHUB_OUTPUT
+          echo "Cache key: webkit-ohos-rust-${{ inputs.webkit_ref || env.WEBKIT_REF }}-${WK_VER}"
+
       - name: Cache WebKit build
         uses: actions/cache@v4
         id: webkit-cache
         with:
           path: bun/build/release-ohos/deps/WebKit
-          key: webkit-ohos-rust-${{ inputs.webkit_ref || env.WEBKIT_REF }}-${{ hashFiles('bun/scripts/build/deps/webkit.ts') }}
+          key: webkit-ohos-rust-${{ inputs.webkit_ref || env.WEBKIT_REF }}-${{ steps.webkit-version.outputs.version }}
 
       - name: Configure Bun build
         working-directory: bun
