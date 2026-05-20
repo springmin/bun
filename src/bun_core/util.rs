@@ -1335,6 +1335,26 @@ impl Fd {
         Fd::from_system(fd::windows_current_directory_handle())
     }
 
+    /// Whether this is the process's stdin/stdout/stderr.
+    #[cfg(not(windows))]
+    #[inline]
+    pub const fn is_stdio(self) -> bool {
+        matches!(self.0, 0 | 1 | 2)
+    }
+    #[cfg(windows)]
+    pub fn is_stdio(self) -> bool {
+        // Cache check first (matches `to_uv_index`): the cache reflects what the
+        // process saw at startup, even after `SetStdHandle`/`AllocConsole`.
+        if self == Self::stdin() || self == Self::stdout() || self == Self::stderr() {
+            return true;
+        }
+        // Cache may not be populated yet; fall back to a live `GetStdHandle`.
+        let handle = self.native();
+        fd::is_stdio_handle(fd::STD_INPUT_HANDLE, handle)
+            || fd::is_stdio_handle(fd::STD_OUTPUT_HANDLE, handle)
+            || fd::is_stdio_handle(fd::STD_ERROR_HANDLE, handle)
+    }
+
     // ── Kind tag (Windows: bit 63 = uv/system) ───────────────────────────
     #[cfg(not(windows))]
     #[inline]
@@ -2140,9 +2160,19 @@ pub mod io {
     }
 
     /// In-memory growable sink. Zig: `std.Io.Writer.Allocating`.
-    /// Generic over the allocator so `bun_alloc::ArenaVec<'_, u8>`
-    /// (= `Vec<u8, &MimallocArena>`) gets the same impl as `Vec<u8>`.
     impl<A: core::alloc::Allocator> Write for Vec<u8, A> {
+        #[inline]
+        fn write_all(&mut self, buf: &[u8]) -> Result<(), crate::Error> {
+            self.extend_from_slice(buf);
+            Ok(())
+        }
+        #[inline]
+        fn written_len(&self) -> usize {
+            self.len()
+        }
+    }
+
+    impl<'a> Write for bun_alloc::BabyVec<'a, u8> {
         #[inline]
         fn write_all(&mut self, buf: &[u8]) -> Result<(), crate::Error> {
             self.extend_from_slice(buf);

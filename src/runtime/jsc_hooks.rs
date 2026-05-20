@@ -2076,6 +2076,9 @@ fn transpile_source_code_inner(
             let mut arena: Box<bun_alloc::Arena> =
                 unsafe { (*jsc_vm).module_loader.transpile_source_code_arena.take() }
                     .unwrap_or_else(|| Box::new(bun_alloc::Arena::new()));
+            // Stable heap address (Box interior); survives the move into
+            // `arena_guard` and into the VM slot on give-back.
+            let arena_ptr: *const bun_alloc::Arena = &raw const *arena;
             // Route `AstAlloc` to `arena`'s `mi_heap_t*` (see the
             // `reset_store` note above). `_ast_scope.enter()` already nulled
             // `AST_HEAP`; this rebinds it to the heap that the parser scratch
@@ -2448,7 +2451,9 @@ fn transpile_source_code_inner(
                     }
                 };
                 let parse_options = ParseOptions {
-                    arena: &arena_guard.1,
+                    // SAFETY: `arena_ptr` points at the `Box<Arena>` interior
+                    // held by `arena_guard`; the guard outlives `parse_result`.
+                    arena: unsafe { &*arena_ptr },
                     path: parse_path,
                     loader,
                     dirname_fd: bun_sys::Fd::INVALID,
@@ -2642,7 +2647,7 @@ fn transpile_source_code_inner(
                         // — `Expr` lives in `bun_js_parser` (no JSC dep), so
                         // the JS materialization is the `bun_js_parser_jsc`
                         // extension fn.
-                        let part = parse_result.ast.parts.at(0);
+                        let part = &parse_result.ast.parts[0];
                         // SAFETY: `Part.stmts` is an arena-owned slice; the
                         // arena outlives this call (returned to the VM by the
                         // scopeguard above only after we return).
@@ -3037,15 +3042,12 @@ fn transpile_source_code_inner(
                 let printer: &mut bun_js_printer::BufferPrinter =
                     unsafe { &mut *(*extra).source_code_printer };
                 let written = printer.ctx.get_written();
-                // PORT NOTE: bundler-side `cache.output_code` is
-                // `Option<Box<[u8]>>` (T6's `bun.String` wrapper lives in
-                // `bun_jsc::RuntimeTranspilerCache`); clone into a fresh
-                // `bun.String` either way. Spec :573 hands the `bun.String`
-                // straight through.
-                let source_code = match cache.output_code.take() {
-                    Some(b) => bun_core::String::clone_latin1(&b),
-                    None => bun_core::String::clone_latin1(written),
-                };
+                // The `Jsc` vtable bridge `put()` does not write
+                // `cache.output_code` (only the `r#impl == None` fallback
+                // does, and `r#impl` is `Some(Jsc)` here), so it is always
+                // `None`.
+                debug_assert!(cache.output_code.is_none());
+                let source_code = bun_core::String::clone_latin1(written);
                 if written.len() > 1024 * 1024 * 2 || unsafe { &*jsc_vm }.smol {
                     // PERF(port): spec deinits the printer buffer; Rust drops on
                     // next `reset()`. TODO(port): expose `BufferWriter::deinit`.
@@ -4934,7 +4936,7 @@ unsafe fn resolve_hook(
             specifier_utf8.slice(),
             source_utf8.slice(),
             bun_core::err!("NameTooLong"),
-            import_kind.into(),
+            import_kind,
         );
         let msg = bun_ast::Msg {
             data: bun_ast::range_data(None, bun_ast::Range::NONE, printed),
@@ -5076,13 +5078,13 @@ unsafe fn resolve_hook(
                 specifier_utf8.slice(),
                 source_utf8.slice(),
                 err,
-                import_kind.into(),
+                import_kind,
             );
             bun_ast::Msg {
                 data: bun_ast::range_data(None, bun_ast::Range::NONE, printed.clone()),
                 metadata: bun_ast::Metadata::Resolve(bun_ast::MetadataResolve {
                     specifier: bun_ast::BabyString::r#in(&printed, specifier_utf8.slice()),
-                    import_kind: import_kind.into(),
+                    import_kind,
                     err,
                 }),
                 ..Default::default()
