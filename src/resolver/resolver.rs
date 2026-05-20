@@ -979,7 +979,7 @@ impl<'a> Resolver<'a> {
 
     #[inline]
     pub fn use_package_manager(&self) -> bool {
-        // TODO(@paperclover): make this configurable. the rationale for disabling
+        // TODO: make this configurable. the rationale for disabling
         // auto-install in standalone mode is that such executable must either:
         //
         // - bundle the dependency itself. dynamic `require`/`import` could be
@@ -4340,7 +4340,6 @@ impl<'a> Resolver<'a> {
                                 iterate: true,
                             },
                         )
-                        .map_err(Into::into)
                     };
                     #[cfg(windows)]
                     let open_req: core::result::Result<FD, bun_core::Error> = {
