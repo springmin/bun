@@ -454,27 +454,18 @@ pub unsafe fn copy_file_range(
     }
 }
 
-<<<<<<< HEAD
 /// OHOS kernel sends uncatchable SIGSYS instead of -ENOSYS for
 /// unimplemented syscalls. Set in c-bindings.cpp based on __OHOS__.
 unsafe extern "C" {
     static BUN_OHOS_DISABLE_PIDFD: bool;
-=======
-/// OHOS kernel sends uncatchable SIGSYS for unimplemented syscalls.
-pub(crate) unsafe extern "C" {
-    pub(crate) static BUN_OHOS_DISABLE_PIDFD: bool;
->>>>>>> springmin/pr/ohos-platform-support
 }
 
 /// `pidfd_open(2)` — `Result` shape (caller maps to `bun_sys::Error`).
 #[inline]
 #[cfg(target_os = "linux")]
 pub fn pidfd_open(pid: i32, flags: u32) -> Result<Fd, i32> {
-<<<<<<< HEAD
     // OHOS: return ENOSYS before calling the syscall (which would
     // trigger an uncatchable SIGSYS instead of a clean error code).
-=======
->>>>>>> springmin/pr/ohos-platform-support
     if unsafe { BUN_OHOS_DISABLE_PIDFD } {
         return Err(libc::ENOSYS);
     }
@@ -489,11 +480,8 @@ pub fn pidfd_open(pid: i32, flags: u32) -> Result<Fd, i32> {
 #[inline]
 #[cfg(target_os = "android")]
 pub fn pidfd_open(pid: i32, flags: u32) -> Result<Fd, i32> {
-<<<<<<< HEAD
     // OHOS: return ENOSYS before calling the syscall (which would
     // trigger an uncatchable SIGSYS instead of a clean error code).
-=======
->>>>>>> springmin/pr/ohos-platform-support
     if unsafe { BUN_OHOS_DISABLE_PIDFD } {
         return Err(libc::ENOSYS);
     }
