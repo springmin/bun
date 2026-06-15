@@ -401,6 +401,43 @@ impl ElfFile {
             );
         }
 
+        // OHOS workaround: also write new_vaddr to the .bun_meta section.
+        // OHOS requires all executables to be signed with binary-sign-tool.
+        // The signing process zeroes the original .bun section data (where
+        // BUN_COMPILED.size stores the payload vaddr pointer). However, it
+        // preserves unknown sections like .bun_meta. Writing the pointer to
+        // both locations ensures the runtime can find the payload on OHOS
+        // even after signing. On non-OHOS, .bun_meta is harmless (never read
+        // because BUN_COMPILED.size already has the correct value).
+        // Must happen AFTER the section header table relocation above,
+        // since the shdr table may have been moved by copy_within.
+        // Remove when: OHOS binary-sign-tool preserves .bun section data.
+        {
+            let meta_shnum = ehdr.e_shnum;
+            let meta_shstrndx = ehdr.e_shstrndx;
+            let meta_shstrtab_hdr = self.read_shdr(new_shdr_offset, meta_shstrndx);
+            let meta_strtab_off = meta_shstrtab_hdr.sh_offset;
+            let meta_strtab_size = meta_shstrtab_hdr.sh_size;
+            if (meta_strtab_off + meta_strtab_size) <= self.data.len() as u64 {
+                let meta_strtab = &self.data[usize::try_from(meta_strtab_off).expect("int cast")..]
+                    [..usize::try_from(meta_strtab_size).expect("int cast")];
+                for i in 0..meta_shnum as usize {
+                    let shdr = self.read_shdr(new_shdr_offset, u16::try_from(i).expect("int cast"));
+                    let name_off = shdr.sh_name as usize;
+                    if name_off < meta_strtab.len() {
+                        let sec_name = slice_to_nul(&meta_strtab[name_off..]);
+                        if sec_name == b".bun_meta" {
+                            let meta_offset = shdr.sh_offset as usize;
+                            if meta_offset + 8 <= self.data.len() {
+                                write_u64_le(&mut self.data[meta_offset..][..8], new_vaddr);
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
         // Extend the existing writable PT_LOAD to cover the appended payload.
         // Keep p_offset/p_vaddr/p_paddr/p_align unchanged; only grow filesz
         // and memsz. Equal values are fine — the extension is entirely

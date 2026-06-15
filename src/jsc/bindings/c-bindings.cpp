@@ -1143,8 +1143,24 @@ extern "C" uint64_t* Bun__getStandaloneModuleGraphMachoLength()
 
 extern "C" BlobHeader __attribute__((section(".bun"), aligned(BLOB_HEADER_ALIGNMENT), used)) BUN_COMPILED = { 0 };
 
+// OHOS workaround: binary-sign-tool zeroes BUN_COMPILED.size during signing.
+// Store the payload vaddr in a separate section that the tool doesn't touch.
+// On non-OHOS, this section is harmless (always zero) and unused.
+struct BunCompileMeta {
+    uint64_t payload_vaddr; // non-zero means standalone payload is present
+};
+extern "C" BunCompileMeta __attribute__((section(".bun_meta"), aligned(8), used)) BUN_COMPILE_META = { 0 };
+
 extern "C" uint64_t* Bun__getStandaloneModuleGraphELFVaddr()
 {
+    // On OHOS, binary-sign-tool zeroes BUN_COMPILED.size during signing but
+    // preserves the .bun_meta section. Check .bun_meta first; if the compile
+    // code wrote a non-zero vaddr there, use it. On non-OHOS (or when the
+    // binary was not compiled with --compile), payload_vaddr is always 0,
+    // so we fall through to the original BUN_COMPILED.size path.
+    if (BUN_COMPILE_META.payload_vaddr != 0) {
+        return &BUN_COMPILE_META.payload_vaddr;
+    }
     return &BUN_COMPILED.size;
 }
 

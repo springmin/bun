@@ -353,20 +353,126 @@ mod elf {
         if vaddr == 0 {
             return None;
         }
+
+        // OHOS: due to ASLR, the vaddr stored by the compile code is the
+        // link-time virtual address, which doesn't match the runtime address
+        // (OHOS builds bun as a PIE binary with mandatory ASLR). Instead of
+        // dereferencing the stale vaddr (SIGSEGV), read the payload from the
+        // executable file via /proc/self/exe using pread.
+        // Non-OHOS Linux/macOS: bun is built as non-PIE, so link-time vaddrs
+        // are valid at runtime and the fast path below is used.
+        // Remove when: OHOS provides a way to resolve section vaddrs at
+        // runtime without ASLR interference (e.g., dl_iterate_phdr + offset).
+        #[cfg(target_env = "ohos")]
+        {
+            use bun_sys::FdExt as _;
+            let self_exe = b"/proc/self/exe\0";
+            let zstr = bun_core::ZStr::from_slice_with_nul(self_exe);
+            let fd = match bun_sys::open(zstr, bun_sys::O::RDONLY, 0) {
+                Ok(f) => f,
+                Err(_) => return None,
+            };
+
+            // Read ELF header to find section header table
+            let mut ehdr = [0u8; 64];
+            if bun_sys::pread(fd, &mut ehdr, 0).ok() != Some(64) {
+                fd.close();
+                return None;
+            }
+            let e_shoff = u64::from_le_bytes(ehdr[40..48].try_into().unwrap());
+            let e_shentsize = u16::from_le_bytes(ehdr[58..60].try_into().unwrap()) as u64;
+            let e_shnum = u16::from_le_bytes(ehdr[60..62].try_into().unwrap()) as u64;
+            let e_shstrndx = u16::from_le_bytes(ehdr[62..64].try_into().unwrap()) as u64;
+
+            // Read .shstrtab section header
+            let shstrtab_off = e_shoff + e_shstrndx * e_shentsize;
+            let mut shstrtab_hdr = [0u8; 64];
+            let _ = bun_sys::pread(fd, &mut shstrtab_hdr, shstrtab_off as i64);
+            let strtab_file_off = u64::from_le_bytes(shstrtab_hdr[24..32].try_into().unwrap());
+            let strtab_size = u64::from_le_bytes(shstrtab_hdr[32..40].try_into().unwrap());
+
+            // Read string table
+            let mut strtab = vec![0u8; strtab_size as usize];
+            let _ = bun_sys::pread(fd, &mut strtab, strtab_file_off as i64);
+
+            // Find .bun section
+            let mut bun_offset: u64 = 0;
+            let mut bun_size: u64 = 0;
+            for i in 0..e_shnum {
+                let hdr_off = e_shoff + i * e_shentsize;
+                let mut shdr = [0u8; 64];
+                let _ = bun_sys::pread(fd, &mut shdr, hdr_off as i64);
+                let sh_name = u32::from_le_bytes(shdr[0..4].try_into().unwrap()) as u64;
+                if (sh_name as usize) < strtab.len() {
+                    let name_end = strtab[sh_name as usize..]
+                        .iter()
+                        .position(|&b| b == 0)
+                        .unwrap_or(0);
+                    let name = &strtab[sh_name as usize..sh_name as usize + name_end];
+                    if name == b".bun" {
+                        bun_offset = u64::from_le_bytes(shdr[24..32].try_into().unwrap());
+                        bun_size = u64::from_le_bytes(shdr[32..40].try_into().unwrap());
+                        break;
+                    }
+                }
+            }
+            fd.close();
+
+            if bun_offset == 0 || bun_size < 8 {
+                return None;
+            }
+
+            // Re-open and read the payload from the file.
+            // We need a writable buffer because JSC mutates bytecode in place.
+            let fd2 = match bun_sys::open(zstr, bun_sys::O::RDONLY, 0) {
+                Ok(f) => f,
+                Err(_) => return None,
+            };
+
+            // Read the 8-byte length header first
+            let mut len_buf = [0u8; 8];
+            if bun_sys::pread(fd2, &mut len_buf, bun_offset as i64).ok() != Some(8) {
+                fd2.close();
+                return None;
+            }
+            let payload_len = u64::from_le_bytes(len_buf) as usize;
+            if payload_len < 8 || payload_len as u64 > bun_size {
+                fd2.close();
+                return None;
+            }
+
+            // Allocate a writable buffer and read the full payload.
+            // Use Box<[u8]> for a heap-allocated, properly aligned buffer.
+            let mut buf: Vec<u8> = vec![0u8; payload_len];
+            if bun_sys::pread(fd2, &mut buf, (bun_offset + 8) as i64).ok() != Some(payload_len) {
+                fd2.close();
+                return None;
+            }
+            fd2.close();
+
+            // Intentionally leak the buffer: the standalone module graph must
+            // live for the entire process lifetime (JSC mutates bytecode in
+            // place and holds pointers into this buffer).
+            let leaked = buf.leak();
+            return Some((leaked.as_mut_ptr(), payload_len));
+        }
+
+        // Non-OHOS: the vaddr is a valid runtime address (no ASLR or static binary).
         // BUN_COMPILED.size holds the virtual address of the appended data.
         // The kernel mapped it via PT_LOAD, so we can dereference directly.
         // Format at target: [u64 payload_len][payload bytes]
-        // Synthesize a `*mut u8` directly so the provenance carries write
-        // permission for the in-place bytecode mutation done by JSC.
-        let target = vaddr as *mut u8;
-        // SAFETY: target points to 8-byte little-endian length prefix.
-        let payload_len =
-            u64::from_le_bytes(unsafe { core::ptr::read_unaligned(target.cast::<[u8; 8]>()) });
-        if payload_len < 8 {
-            return None;
+        #[cfg(not(target_env = "ohos"))]
+        {
+            let target = vaddr as *mut u8;
+            // SAFETY: target points to 8-byte little-endian length prefix.
+            let payload_len =
+                u64::from_le_bytes(unsafe { core::ptr::read_unaligned(target.cast::<[u8; 8]>()) });
+            if payload_len < 8 {
+                return None;
+            }
+            // SAFETY: payload_len bytes follow the 8-byte header at `target`.
+            Some((unsafe { target.add(8) }, payload_len as usize))
         }
-        // SAFETY: payload_len bytes follow the 8-byte header at `target`.
-        Some((unsafe { target.add(8) }, payload_len as usize))
     }
 }
 
@@ -1407,13 +1513,26 @@ pub(crate) fn inject(
                 return Fd::INVALID;
             }
 
-            // Write the modified ELF data back to the file
+            // Write the modified ELF data back to the file.
+            // On OHOS, truncate first to break any COW/reflink relationship
+            // that copy_file_range may have created between the source and
+            // temp file. Without this, subsequent writes may silently fail
+            // to update the on-disk data.
+            #[cfg(target_env = "ohos")]
+            let _ = Syscall::ftruncate(cloned_executable_fd, 0);
+
             let write_file = bun_sys::File::borrow(&cloned_executable_fd);
             if let Err(err) = write_file.write_all(&elf_file.data) {
                 bun_core::pretty_errorln!("Error writing ELF file: {}", err);
                 cleanup(zname, cloned_executable_fd);
                 return Fd::INVALID;
             }
+
+            // OHOS: fsync before move, because move_file_z_with_handle may use
+            // copy_file_range (EXDEV fallback) which reads from disk, not the
+            // page cache. Without fsync, the on-disk data may be stale.
+            #[cfg(target_env = "ohos")]
+            unsafe { libc::fsync(cloned_executable_fd.native()); }
             // Truncate the file to the exact size of the modified ELF
             let _ = Syscall::ftruncate(
                 cloned_executable_fd,
@@ -1967,6 +2086,88 @@ pub fn to_executable(
         if fd != Fd::INVALID {
             fd.close();
         }
+
+        // OHOS: sign the compiled binary AFTER moving it to the output path.
+        // OHOS refuses to execute unsigned ELF binaries (exit 126, Permission
+        // denied). The bun binary already contains a pre-allocated .codesign
+        // section (placeholder with zero data). binary-sign-tool's
+        // `display-sign` check may incorrectly report the placeholder as a
+        // valid signature and skip re-signing. We zero the .codesign section
+        // data first to force a fresh signature.
+        //
+        // No post-sign fixup is needed: the .bun_meta section (written by
+        // elf.rs write_bun_section before the file was signed) survives
+        // binary-sign-tool intact, and the runtime reads the payload from
+        // /proc/self/exe rather than dereferencing a vaddr.
+        // Remove when: OHOS no longer requires binary signing for user-built
+        // executables.
+        #[cfg(target_env = "ohos")]
+        {
+            // Construct the full output path for signing.
+            let mut full_path = Vec::new();
+            let mut dir_buf = PathBuffer::uninit();
+            if let Ok(dir_path) = bun_sys::get_fd_path(root_dir, &mut dir_buf) {
+                full_path.extend_from_slice(dir_path);
+                if !dir_path.is_empty() && dir_path[dir_path.len() - 1] != b'/' {
+                    full_path.push(b'/');
+                }
+            }
+            full_path.extend_from_slice(outfile_posix);
+
+            // Sign the output file.
+            full_path.push(0); // NUL-terminate
+            if let Ok(pre_fd) = bun_sys::open(
+                bun_core::ZStr::from_slice_with_nul(&full_path),
+                bun_sys::O::RDWR,
+                0,
+            ) {
+                // Find and zero the .codesign section
+                let mut cs_ehdr = [0u8; 64];
+                let _ = bun_sys::pread(pre_fd, &mut cs_ehdr, 0);
+                let cs_shoff = u64::from_le_bytes(cs_ehdr[40..48].try_into().unwrap());
+                let cs_shentsize = u16::from_le_bytes(cs_ehdr[58..60].try_into().unwrap()) as u64;
+                let cs_shnum = u16::from_le_bytes(cs_ehdr[60..62].try_into().unwrap()) as u64;
+                let cs_shstrndx = u16::from_le_bytes(cs_ehdr[62..64].try_into().unwrap()) as u64;
+                let cs_strtab_off_hdr = cs_shoff + cs_shstrndx * cs_shentsize;
+                let mut cs_strtab_hdr = [0u8; 64];
+                let _ = bun_sys::pread(pre_fd, &mut cs_strtab_hdr, cs_strtab_off_hdr as i64);
+                let cs_strtab_off = u64::from_le_bytes(cs_strtab_hdr[24..32].try_into().unwrap());
+                for i in 0..cs_shnum {
+                    let h = cs_shoff + i * cs_shentsize;
+                    let mut sh = [0u8; 64];
+                    let _ = bun_sys::pread(pre_fd, &mut sh, h as i64);
+                    let sn = u32::from_le_bytes(sh[0..4].try_into().unwrap());
+                    let mut nm = [0u8; 16];
+                    let _ = bun_sys::pread(pre_fd, &mut nm, (cs_strtab_off + sn as u64) as i64);
+                    if &nm[..10] == b".codesign\0" {
+                        let cs_offset = u64::from_le_bytes(sh[24..32].try_into().unwrap());
+                        let cs_size = u64::from_le_bytes(sh[32..40].try_into().unwrap());
+                        if cs_offset > 0 && cs_size > 0 {
+                            let zeros = vec![0u8; cs_size as usize];
+                            let _ = bun_sys::pwrite(pre_fd, &zeros, cs_offset as i64);
+                        }
+                        break;
+                    }
+                }
+                unsafe { libc::fsync(pre_fd.native()); }
+                pre_fd.close();
+            }
+            full_path.pop(); // remove NUL
+            bun_sys::ohos_sign_binary_bytes(&full_path);
+
+            // Ensure execute permission after signing (binary-sign-tool may strip it).
+            full_path.push(0);
+            if let Ok(sign_fd) = bun_sys::open(
+                bun_core::ZStr::from_slice_with_nul(&full_path),
+                bun_sys::O::RDWR,
+                0,
+            ) {
+                unsafe { libc::fchmod(sign_fd.native(), 0o755); }
+                sign_fd.close();
+            }
+            full_path.pop();
+        }
+
         Ok(CompileResult::Success)
     }
 }
