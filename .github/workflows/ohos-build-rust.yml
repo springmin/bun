@@ -241,6 +241,35 @@ jobs:
           ninja -C build/release-ohos configure-WebKit -j1
           ninja -C build/release-ohos/deps/WebKit jsc -j$NINJA_JOBS
 
+      - name: Package WebKit prebuilt
+        working-directory: bun
+        run: |
+          WK_DIR=build/release-ohos/deps/WebKit
+          PKG_DIR=/tmp/webkit-ohos-aarch64
+          mkdir -p "$PKG_DIR"
+          # static libs
+          cp "$WK_DIR/lib/libWTF.a" "$PKG_DIR/" 2>/dev/null || true
+          cp "$WK_DIR/lib/libJavaScriptCore.a" "$PKG_DIR/" 2>/dev/null || true
+          cp "$WK_DIR/lib/libbmalloc.a" "$PKG_DIR/" 2>/dev/null || true
+          # headers (generated during cmake configure)
+          cp -a "$WK_DIR/JavaScriptCore/Headers" "$PKG_DIR/JavaScriptCore-Headers" 2>/dev/null || true
+          cp -a "$WK_DIR/JavaScriptCore/PrivateHeaders" "$PKG_DIR/JavaScriptCore-PrivateHeaders" 2>/dev/null || true
+          cp -a "$WK_DIR/bmalloc/Headers" "$PKG_DIR/bmalloc-Headers" 2>/dev/null || true
+          cp -a "$WK_DIR/WTF/Headers" "$PKG_DIR/WTF-Headers" 2>/dev/null || true
+          # version manifest
+          echo "${{ steps.webkit-version.outputs.version }}" > "$PKG_DIR/VERSION"
+          # package
+          cd /tmp
+          tar czf webkit-ohos-aarch64.tar.gz webkit-ohos-aarch64/
+          echo "webkit_artifact=/tmp/webkit-ohos-aarch64.tar.gz" >> $GITHUB_ENV
+
+      - name: Upload WebKit prebuilt
+        uses: actions/upload-artifact@v4
+        with:
+          name: webkit-ohos-aarch64-${{ steps.webkit-version.outputs.version }}
+          path: ${{ env.webkit_artifact }}
+          retention-days: 90
+
       - name: Build Bun
         working-directory: bun
         run: |
