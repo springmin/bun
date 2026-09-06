@@ -2901,8 +2901,8 @@ mod draft {
             target_os = "freebsd"
         ))]
         {
-            let mut buf = bun_core::PathBuffer::default();
-            let mut buf2 = bun_core::PathBuffer::default();
+            let mut buf = bun_core::PathBuffer::ZEROED;
+            let mut buf2 = bun_core::PathBuffer::ZEROED;
             let Some(path_env) = env_var::PATH::get() else {
                 return;
             };
