@@ -1915,7 +1915,7 @@ impl<'a> PackageInstaller<'a> {
 
             #[cfg(target_env = "ohos")]
             if let package_install::InstallResult::Success = &install_result {
-                let mut fd_path_buf = PathBuffer::uninit();
+                let mut fd_path_buf = bun_paths::path_buffer_pool::get();
                 if let Ok(pkg_path) = Syscall::get_fd_path(destination_dir.fd(), &mut fd_path_buf) {
                     ohos_sign_native_binaries(pkg_path);
                 }

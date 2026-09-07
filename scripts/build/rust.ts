@@ -640,7 +640,7 @@ export function cargoBuildInvocation(cfg: Config): CargoInvocation {
     // (`-Clink-arg=-fuse-ld=lld` is pushed unconditionally above — under LTO
     // it doubles as making rustc's bitcode link go through the LTO-aware
     // linker our final link uses, not BFD `/usr/bin/ld`.)
-    if (!cfg.darwin && !cfg.windows) {
+    if (!cfg.darwin && !cfg.windows && !cfg.ohos) {
       rustflags.push("-Zsplit-lto-unit");
 
 

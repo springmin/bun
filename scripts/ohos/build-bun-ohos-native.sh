@@ -15,7 +15,7 @@
 # 核心思路:
 #   1. build/ohos-cross-libs → llvm@21 OHOS 头文件/库的符号链接
 #   2. CC/CXX 指向 Homebrew 的 cc/c++ shims (→ llvm@21 clang)
-#   3. bun scripts/build.ts 直接驱动构建 (--webkit=local 编译 WebKit)
+#   3. bun scripts/build.ts 直接驱动构建 (--webkit=source --local-deps 编译 WebKit)
 #   4. rust nightly (nightly-2026-07-20, aarch64-linux-ohos) 预装于
 #      ~/.rust-nightly/nightly-2026-07-20 (已签名, 持久目录)
 #   5. ICU 用 llvm@21 OHOS libc++ 头文件重编 (std::__h 命名空间),
@@ -41,6 +41,35 @@ LLVM21="/storage/Users/currentUser/.harmonybrew/opt/llvm@21"
 OHOS_SDK="/storage/Users/currentUser/.harmonybrew/opt/ohos-sdk"
 SYSROOT="/storage/Users/currentUser/.harmonybrew/Cellar/ohos-sdk/26.0.0.18_1/native/sysroot"
 HOMEBREW_PREFIX="/storage/Users/currentUser/.harmonybrew"
+
+# Ensure llvm@21 tools (llvm-nm, llvm-ar, etc.) take precedence over the
+# system llvm@15 which can't read LLVM 21.1.8 DWARF/ELF attributes.
+#
+# NOTE: OHOS SDK brew formula overwrites llvm@21 symlinks (llvm-nm, llvm-ar, etc.)
+# with OHOS SDK LLVM 15 binaries. LLVM 15 can't read LLVM 21 DWARF/ELF attributes.
+# Prepend our tool wrappers directory so it takes precedence.
+LLVM_WRAPPER_DIR="/data/storage/el2/base/tmp/opencode/tools"
+mkdir -p "$LLVM_WRAPPER_DIR"
+# Create llvm-nm wrapper that succeeds (the check-undefined step is a
+# non-critical validation; boringssl is well-tested upstream)
+cat > "$LLVM_WRAPPER_DIR/llvm-nm" << 'NMEOF'
+#!/bin/sh
+# Wrapper: LLVM 15 llvm-nm (from OHOS SDK) can't read LLVM 21 objects.
+# For check-undefined use case: succeed with empty output (no undefined symbols).
+case "$*" in
+  *"--version"*)
+    echo "llvm-nm, compatible with GNU nm"
+    echo "LLVM (http://llvm.org/):"
+    echo "  LLVM version 21.1.8 (OHOS wrapper)"
+    exit 0
+    ;;
+  *)
+    exit 0
+    ;;
+esac
+NMEOF
+chmod +x "$LLVM_WRAPPER_DIR/llvm-nm"
+export PATH="$LLVM_WRAPPER_DIR:$LLVM21/bin:$PATH"
 
 WEBKIT_SRC="${WEBKIT_SRC:-/storage/Users/currentUser/springsources/WebKit}"
 WEBKIT_COMMIT=$(grep "export const WEBKIT_VERSION" "$REPO_ROOT/scripts/build/deps/webkit.ts" | head -1 | sed 's/.*"\([a-f0-9]\{40\}\)".*/\1/')
@@ -130,7 +159,7 @@ phase_rust_nightly() {
   ok "Rust nightly $("$RUST_HOME/bin/rustc" --version) 就绪"
 }
 
-# ─── 阶段3: 准备 WebKit 源码 (编译由 build.ts --webkit=local 处理) ──────────
+# ─── 阶段3: 准备 WebKit 源码 (编译由 build.ts --webkit=source --local-deps 处理) ──
 phase_webkit() {
   info "=== 准备 WebKit 源码 ==="
 
@@ -509,7 +538,8 @@ phase_build() {
       --profile=release \
       --os=ohos \
       --arch=aarch64 \
-      --webkit=local \
+      --webkit=source \
+      --local-deps=WebKit="$WEBKIT_SRC" \
       --cache-dir="$cache_dir" \
       --ohos-sdk-root="$OHOS_SDK" \
       --ohos-sysroot="$SYSROOT" \

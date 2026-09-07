@@ -93,6 +93,11 @@ export const globalFlags: Flag[] = [
     desc: "Cross-compile target triple (clang is inherently a cross-compiler)",
   },
   {
+    flag: "-D__MUSL__=1",
+    when: c => c.ohos,
+    desc: "OHOS uses musl libc — gate musl-specific code paths",
+  },
+  {
     flag: c => `--sysroot=${c.sysroot!}`,
     when: c => c.sysroot !== undefined,
     desc: "Cross-compile sysroot (target libc headers + libs)",
@@ -611,7 +616,7 @@ export const bunOnlyFlags: Flag[] = [
   // accepted syntax and predefined macros, not ABI).
   {
     flag: "-std=gnu++23",
-    when: c => c.linux || c.freebsd,
+    when: c => c.linux || c.freebsd || c.ohos,
     lang: "cxx",
     desc: "C++23 with GNU extensions",
   },

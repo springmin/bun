@@ -11,7 +11,9 @@
 // instead. Not gated on __OHOS__ — any aarch64 host using scalable SVE
 // hits the same missing symbol (same guard as highway_sourcemap.cpp).
 #if defined(__aarch64__)
+#ifndef HWY_DISABLED_TARGETS
 #define HWY_DISABLED_TARGETS (HWY_ALL_SVE)
+#endif
 #endif
 #include <hwy/foreach_target.h>
 #include <hwy/highway.h>

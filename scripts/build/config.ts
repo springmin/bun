@@ -402,6 +402,12 @@ export interface PartialConfig {
   nodejsAbiVersion?: string;
   nodejsV8Version?: string;
   webkitVersion?: string;
+  // OHOS cross-compilation paths.
+  ohosSdkRoot?: string;
+  ohosSysroot?: string;
+  ohosCrossLibs?: string;
+  ohosIcuDir?: string;
+  crossTarget?: string;
 }
 
 /**

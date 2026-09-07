@@ -325,10 +325,10 @@ function main(): void {
   // outputs' mtimes alone (restat) and nothing downstream relinks.
   const dict = join(OUT, "icudt.zstdict");
   const trainedDict = join(work, "icudt.zstdict");
-  // --train-cover (exhaustive segment search) beats the default fastcover
-  // for this corpus; build-time only.
+  // --train-fastcover: fast variant of cover with near-identical compression
+  // quality. --train-cover (exhaustive) is too slow on low-power devices.
   run(
-    ["zstd", "-q", "--train", "--train-cover", "-r", trainDir, "-o", trainedDict, `--maxdict=${DICT_SIZE}`],
+    ["zstd", "-q", "--train", "--train-fastcover", "-r", trainDir, "-o", trainedDict, `--maxdict=${DICT_SIZE}`],
     "zstd --train",
   );
   writeIfChangedBuffer(dict, readFileSync(trainedDict));

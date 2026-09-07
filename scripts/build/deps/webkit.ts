@@ -678,7 +678,7 @@ function webkitSourceIncludes(cfg: Config): string[] {
   // JSCFFIBridge.cpp. Add the Source root so the JavaScriptCore/ prefix
   // resolves. The dep build dir is irrelevant here; bake symlinks for
   // generated headers into the tree root during the source-mode build.
-  if (cfg.ohos) includes.push(wk.SRC);
+  if (cfg.ohos) includes.push(join(wk.W, "Source"));
   return includes;
 }
 

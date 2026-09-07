@@ -442,7 +442,7 @@ mod _impl {
     fn get_cwd(global_object: &JSGlobalObject) -> JsResult<JSValue> {
         // Real syscall (not the resolver's cached top_level_dir): Node's
         // process.cwd() calls uv_cwd() so a deleted cwd must surface here.
-        let mut buf = PathBuffer::uninit();
+        let mut buf = bun_paths::path_buffer_pool::get();
         // OHOS: use process_cwd(), which surfaces a rmdir'd cwd as ENOENT
         // (Node's uv_cwd() contract) instead of the ohos-compat-shim's $HOME
         // fallback. Other platforms use the plain getcwd().

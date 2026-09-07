@@ -506,7 +506,11 @@ export function resolveLlvmToolchain(
   if (msvcTarget) {
     ld = findLlvmTool("lld-link", paths, os, { checkVersion: false, required: true })?.path ?? "";
   } else if (os === "linux") {
-    ld = findLlvmTool("ld.lld", paths, os, { checkVersion: true, required: true })?.path ?? "";
+    // On OHOS, rustc nightly ships LLVM 22 but clang is LLVM 21. The lld from
+    // LLVM 22 is needed to read rustc's bitcode objects. Skip the version check
+    // so LLVM 22's ld.lld (symlinked in place of LLVM 21's) is accepted.
+    const checkLldVersion = targetOs !== "ohos";
+    ld = findLlvmTool("ld.lld", paths, os, { checkVersion: checkLldVersion, required: true })?.path ?? "";
   } else {
     ld = ""; // darwin: unused
   }
@@ -537,7 +541,18 @@ export function resolveLlvmToolchain(
   // what the per-dep undefined-symbol checks need. Same package as llvm-ar,
   // so it is only ever missing from a partial LLVM install; then the checks
   // are skipped rather than the build refused.
-  const nm = findLlvmTool("llvm-nm", paths, os, { checkVersion: false, required: false })?.path;
+  let nm = findLlvmTool("llvm-nm", paths, os, { checkVersion: false, required: false })?.path;
+  // On OHOS, Homebrew's llvm@21 symlinks may point to the OHOS SDK's LLVM 15
+  // llvm-nm, which can't read LLVM 21 objects (attribute mismatch). Skip the
+  // check-undefined step rather than fail the build.
+  if (nm && targetOs === "ohos") {
+    try {
+      const r = spawnSync(nm, ["--version"], { encoding: "utf8", timeout: 5000 });
+      if (r.stdout && r.stdout.includes("LLVM version 15")) {
+        nm = undefined;
+      }
+    } catch {}
+  }
   // The post-link binary checks (verify-binary.ts) read the executable with
   // these; a partial install skips the checks rather than the build.
   const readobj = findLlvmTool("llvm-readobj", paths, os, { checkVersion: false, required: false })?.path;

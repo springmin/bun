@@ -606,18 +606,18 @@ impl RunCommand {
             // Runtime-resolved dir: OHOS places the shim dir under $TMPDIR
             // (/tmp is read-only there); other platforms use the const.
             let node_dir = RunCommand::bun_node_dir_bytes();
-            let mut dir_buf = bun_paths::PathBuffer::uninit();
+            let mut dir_buf = bun_paths::path_buffer_pool::get();
             dir_buf[..node_dir.len()].copy_from_slice(node_dir);
             dir_buf[node_dir.len()] = 0;
             // SAFETY: NUL-terminated above; `dir_buf` outlives the call.
             let dir_z = unsafe { ZStr::from_raw_mut(dir_buf.as_mut_ptr(), node_dir.len()) };
-            let mut node_buf = bun_paths::PathBuffer::uninit();
+            let mut node_buf = bun_paths::path_buffer_pool::get();
             node_buf[..node_dir.len()].copy_from_slice(node_dir);
             node_buf[node_dir.len()..node_dir.len() + 5].copy_from_slice(b"/node");
             node_buf[node_dir.len() + 5] = 0;
             // SAFETY: NUL-terminated above; `node_buf` outlives the call.
             let node_link = unsafe { ZStr::from_raw_mut(node_buf.as_mut_ptr(), node_dir.len() + 5) };
-            let mut bun_buf = bun_paths::PathBuffer::uninit();
+            let mut bun_buf = bun_paths::path_buffer_pool::get();
             bun_buf[..node_dir.len()].copy_from_slice(node_dir);
             bun_buf[node_dir.len()..node_dir.len() + 4].copy_from_slice(b"/bun");
             bun_buf[node_dir.len() + 4] = 0;
