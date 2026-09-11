@@ -275,6 +275,14 @@ export const webkit: Dependency = {
     if (cfg.freebsd && cfg.crossTarget !== undefined) {
       optFlags.push(`--target=${cfg.crossTarget}`, `--sysroot=${cfg.sysroot!}`);
     }
+    if (cfg.ohos && cfg.crossTarget !== undefined) {
+      // OHOS SDK ICU utypes.h omits the automatic #include "unicode/utf.h",
+      // so U16_LENGTH / U_IS_BMP / etc. are not pulled in. Force-include it.
+      const icuInc = (cfg as any).ohosIcuDir as string | undefined;
+      optFlags.push(`--target=${cfg.crossTarget}`, `--sysroot=${cfg.sysroot!}`);
+      if (icuInc) optFlags.push(`-isystem`, join(icuInc, "include"));
+      optFlags.push(`-include`, `unicode/utf.h`);
+    }
     const optFlagStr = optFlags.join(" ");
     let cxxOptFlagStr = optFlagStr;
     if (cfg.abi === "android") {
@@ -284,6 +292,16 @@ export const webkit: Dependency = {
     } else if (cfg.freebsd && cfg.sysroot !== undefined) {
       const inc = join(cfg.sysroot, "usr", "include");
       cxxOptFlagStr += ` -nostdlibinc -isystem ${join(inc, "c++", "v1")} -isystem ${inc}`;
+    } else if (cfg.ohos && cfg.sysroot !== undefined) {
+      const inc = join(cfg.sysroot, "usr", "include");
+      const archInc = cfg.arm64 ? join(inc, "aarch64-linux-ohos") : join(inc, "x86_64-linux-ohos");
+      // OHOS uses custom-built libc++ from ohos-cross-libs, not the sysroot
+      const crossLibs = (cfg as any).ohosCrossLibs as string | undefined;
+      const cxxInc = crossLibs ? join(crossLibs, "libcxx", "include", "v1") : join(inc, "c++", "v1");
+      // Cross-compiled ICU headers (full set including ucsdet.h)
+      const icuInc = (cfg as any).ohosIcuDir as string | undefined;
+      const icuFlag = icuInc ? ` -isystem ${join(icuInc, "include")}` : "";
+      cxxOptFlagStr += ` -nostdlibinc -isystem ${archInc} -isystem ${cxxInc} -isystem ${inc}${icuFlag}`;
     }
     const args: Record<string, string> = {
       CMAKE_C_FLAGS: optFlagStr,
@@ -316,6 +334,27 @@ export const webkit: Dependency = {
             CMAKE_FIND_ROOT_PATH_MODE_PACKAGE: "BOTH",
             CMAKE_FIND_ROOT_PATH_MODE_LIBRARY: "BOTH",
             CMAKE_FIND_ROOT_PATH_MODE_INCLUDE: "BOTH",
+          }
+        : {}),
+      ...(cfg.ohos && cfg.crossTarget !== undefined
+        ? {
+            // CMake doesn't recognize HarmonyOS; treat as Linux cross-compile
+            CMAKE_SYSTEM_NAME: "Linux",
+            CMAKE_SYSTEM_PROCESSOR: cfg.arm64 ? "aarch64" : "x86_64",
+            CMAKE_SYSROOT: cfg.sysroot!,
+            CMAKE_FIND_ROOT_PATH_MODE_PACKAGE: "BOTH",
+            CMAKE_FIND_ROOT_PATH_MODE_LIBRARY: "BOTH",
+            CMAKE_FIND_ROOT_PATH_MODE_INCLUDE: "BOTH",
+            // OHOS SDK ICU is stripped-down; point at the full cross-built ICU
+            ...(((cfg as any).ohosIcuDir as string | undefined)
+              ? {
+                  ICU_ROOT: (cfg as any).ohosIcuDir,
+                  ICU_INCLUDE_DIR: join((cfg as any).ohosIcuDir, "include"),
+                }
+              : {}),
+            // LLD aarch64 relocation alignment fix: --no-relax prevents
+            // R_AARCH64_LDST64_ABS_LO12_NC alignment errors during linking
+            CMAKE_EXE_LINKER_FLAGS: "--no-relax",
           }
         : {}),
       // Match bun's -fno-pic: WebKit's CMake defaults POSITION_INDEPENDENT_CODE
