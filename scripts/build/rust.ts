@@ -698,7 +698,13 @@ export function cargoBuildInvocation(cfg: Config): CargoInvocation {
     // `lld-link.exe` (`cfg.ld`); both speak the `/X` dialect rustc emits.
     [`CARGO_TARGET_${triple.toUpperCase().replace(/-/g, "_")}_LINKER`]: cfg.windows
       ? (cfg.msvcLinker ?? cfg.ld)
-      : cfg.cxx,
+      : cfg.ohos
+        ? resolve(cfg.cwd, "scripts/ohos/sign-linker.sh")
+        : cfg.cxx,
+    // OHOS: rustc links host build scripts and proc-macro dylibs through the
+    // wrapper above, which signs the linked ELF (the kernel refuses to exec or
+    // dlopen an unsigned one). The wrapper drives this compiler.
+    ...(cfg.ohos ? { OHOS_REAL_CXX: cfg.cxx } : {}),
   };
   if (cfg.cargoHome !== undefined) env.CARGO_HOME = cfg.cargoHome;
   if (cfg.rustupHome !== undefined) env.RUSTUP_HOME = cfg.rustupHome;

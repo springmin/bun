@@ -86,6 +86,17 @@ function systemLibs(cfg: Config): string[] {
     }
   }
 
+  if (cfg.ohos) {
+    // Cross-built static ICU (build/ohos-icu/target/lib). The device's system
+    // ICU is 72; WebKit and bun's ICU usage reference the `_78`-suffixed
+    // symbols only the cross-built 78.3 libraries provide, so link them
+    // statically.
+    libs.push("-lc", "-lpthread", "-ldl");
+    if (cfg.ohosIcuDir) {
+      libs.push(`-L${resolve(cfg.ohosIcuDir, "lib")}`, "-licudata", "-licui18n", "-licuuc");
+    }
+  }
+
   if (cfg.darwin) {
     // icucore: system ICU framework.
     // resolv: DNS resolution (getaddrinfo et al).

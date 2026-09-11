@@ -11,7 +11,7 @@
  * that apply uniformly to bun's own C/C++ sources.
  */
 
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { bunExeName, type Config } from "./config.ts";
 import { quote, slash } from "./shell.ts";
 import { ucrtServicingLibDir } from "./winsysroot.ts";
@@ -300,12 +300,14 @@ export const globalFlags: Flag[] = [
   {
     // Nix LLVM doesn't support zstd — but we target standard distros.
     // Nix users can override via profile if needed.
-    flag: ["-g3", "-gz=zstd"],
+    // OHOS: the host lld is not built with zstd, so it cannot read
+    // zstd-compressed input objects at link time; keep debug info uncompressed.
+    flag: c => (c.ohos ? ["-g3"] : ["-g3", "-gz=zstd"]),
     when: c => c.unix && c.debug,
     desc: "Full debug info, zstd-compressed",
   },
   {
-    flag: ["-g", "-gz=zstd"],
+    flag: c => (c.ohos ? ["-g"] : ["-g", "-gz=zstd"]),
     when: c => c.unix && c.release && !c.lto,
     desc: "Full debug info (types and variables) where no LTO link has to carry it: local release, asan, the non-LTO CI lanes",
   },
@@ -712,6 +714,20 @@ export const bunOnlyFlags: Flag[] = [
     ],
     when: c => c.windows,
     desc: "Suppress noisy warnings from system/dependency headers",
+  },
+  {
+    // The OHOS SDK's ICU utypes.h omits the default `#include <unicode/utf.h>`
+    // that WebKit's headers rely on for the U16_*/U_IS_BMP macros, and bun's
+    // C++ must compile against the same cross-built ICU WebKit links.
+    // C++ only: the `-include` would be parsed as assembly in the `.S` objects.
+    flag: c => [
+      ...(c.ohosIcuDir ? ["-isystem", join(c.ohosIcuDir, "include")] : []),
+      "-include",
+      "unicode/utf.h",
+    ],
+    when: c => c.ohos,
+    lang: "cxx",
+    desc: "OHOS: cross-built ICU headers + force unicode/utf.h (SDK utypes.h omits it)",
   },
 ];
 
@@ -1240,7 +1256,7 @@ export const linkerFlags: Flag[] = [
     // for clone(CLONE_FS) during that window (the --watch reload). Behavioral,
     // not a version pin, so it applies to every Linux libc.
     flag: ["-Wl,--wrap=execve", "-Wl,--wrap=pthread_create"],
-    when: c => c.linux,
+    when: c => c.linux || c.ohos,
     desc: "Retry pthread_create EAGAIN caused by an in-flight execve",
   },
   {
@@ -1490,8 +1506,10 @@ export const linkerFlags: Flag[] = [
         // SDK's libc++_shared.so at link time; the runtime loads it via
         // DT_NEEDED alongside bun's statically-linked `__h` libc++ (the two
         // namespaces are disjoint, so they coexist).
-        ...(c.ohosIcuDir && c.ohosSdkRoot
-          ? [join(c.ohosSdkRoot!, "native/llvm/lib/aarch64-linux-ohos/libc++_shared.so")]
+        // The SDK root can be either `<root>/native/...` or `<root>/ohos/native/...`,
+        // so resolve the sibling `llvm/` dir from the sysroot itself.
+        ...(c.ohosSysroot
+          ? [join(dirname(c.ohosSysroot), "llvm/lib/aarch64-linux-ohos/libc++_shared.so")]
           : []),
         "-lc",
       ].filter(f => f !== ""),

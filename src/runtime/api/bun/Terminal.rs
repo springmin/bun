@@ -1491,7 +1491,7 @@ impl Terminal {
         // The write side is gone, so queuing these bytes would only re-root the
         // wrapper below for a drain that cannot come.
         if self.flags.get().contains(Flags::WRITER_DONE) {
-            return Ok(JSValue::js_number(input_len as f64));
+            return Ok(JSValue::js_number(bytes.len() as f64));
         }
 
         // Suppress drain firing from the synchronous on_write calls that

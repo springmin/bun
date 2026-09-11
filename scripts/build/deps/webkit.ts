@@ -352,9 +352,11 @@ export const webkit: Dependency = {
                   ICU_INCLUDE_DIR: join((cfg as any).ohosIcuDir, "include"),
                 }
               : {}),
-            // LLD aarch64 relocation alignment fix: --no-relax prevents
-            // R_AARCH64_LDST64_ABS_LO12_NC alignment errors during linking
-            CMAKE_EXE_LINKER_FLAGS: "--no-relax",
+            // LLD reports the R_AARCH64_LDST64_ABS_LO12_NC alignment mismatch
+            // as an error but still produces a usable jsc; the kernel does not
+            // enforce ELF alignment (SCTLR_EL1.A is 0). Same flag bun's own
+            // OHOS link uses (scripts/build/flags.ts).
+            CMAKE_EXE_LINKER_FLAGS: "-Wl,--noinhibit-exec",
           }
         : {}),
       // Match bun's -fno-pic: WebKit's CMake defaults POSITION_INDEPENDENT_CODE
