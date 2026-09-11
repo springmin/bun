@@ -1514,7 +1514,6 @@ pub trait AutoInstaller {
 pub trait PackageJsonView {
     fn name(&self) -> &[u8];
     fn version(&self) -> &[u8];
-    fn source_path(&self) -> &[u8];
     /// Backing string-bytes buffer the dependency `SemverString`s slice into.
     fn dependency_source_buf(&self) -> &[u8];
     fn arch(&self) -> Architecture;
