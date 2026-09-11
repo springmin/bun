@@ -245,12 +245,15 @@ export const webkit: Dependency = {
     // -fno-pic: match bun's own C++ (flags.ts) so JSC/WTF const-pointer
     // tables land in .rodata instead of .data.rel.ro. We link -no-pie, so
     // PIC codegen here is pure overhead (GOT indirections + ~550 KB of
-    // RW-segment vtables that would otherwise be shared RO). Android stays
-    // PIC because bionic mandates PIE.
+    // RW-segment vtables that would otherwise be shared RO). Android and
+    // OHOS stay PIC because their loaders mandate PIE, and with -fno-pic the
+    // OHOS link emits R_AARCH64_COPY relocations for libc data
+    // (stdout/stderr/environ) that OHOS musl leaves NULL.
     // -no-pie rides along in CMAKE_C_FLAGS so try_compile() probes link on
     // PIE-default distros — without it the driver still passes -pie and the
     // -fno-pic probe object fails R_X86_64_32S relocation, killing FindThreads.
-    if (cfg.unix && cfg.abi !== "android") optFlags.push("-fno-pic", "-fno-pie", "-no-pie");
+    if (cfg.unix && cfg.abi !== "android" && !cfg.ohos) optFlags.push("-fno-pic", "-fno-pie", "-no-pie");
+    if (cfg.ohos) optFlags.push("-fPIC");
     if (cfg.lto) optFlags.push("-flto=thin");
     if (cfg.pgoGenerate) optFlags.push(`-fprofile-generate=${cfg.pgoGenerate}`);
     if (cfg.pgoUse) {

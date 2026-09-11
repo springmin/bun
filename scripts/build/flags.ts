@@ -667,13 +667,18 @@ export const bunOnlyFlags: Flag[] = [
   },
   {
     flag: ["-fno-pic", "-fno-pie"],
-    when: c => c.unix && c.abi !== "android",
+    when: c => c.unix && c.abi !== "android" && !c.ohos,
     desc: "No position-independent code (we're a final executable)",
   },
   {
+    // Android and OHOS link PIE and their loaders reject non-PIE. OHOS was
+    // built with -fno-pic, which made the linker emit R_AARCH64_COPY
+    // relocations for libc data (stdout/stderr/environ); OHOS musl does not
+    // populate them, leaving the symbols NULL (setvbuf(stdout, ...) then hits
+    // its "parameter is null" fatal abort). PIC references them via the GOT.
     flag: "-fPIC",
-    when: c => c.abi === "android",
-    desc: "Android requires PIE since API 21; bionic's loader rejects non-PIE",
+    when: c => c.abi === "android" || c.ohos,
+    desc: "Android/OHOS require PIE since their loaders reject non-PIE",
   },
 
   // ─── Warnings-as-errors (unix) ───
