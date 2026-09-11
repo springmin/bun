@@ -15,7 +15,7 @@
 # 核心思路:
 #   1. build/ohos-cross-libs → llvm@21 OHOS 头文件/库的符号链接
 #   2. CC/CXX 指向 Homebrew 的 cc/c++ shims (→ llvm@21 clang)
-#   3. bun scripts/build.ts 直接驱动构建 (--webkit=source --local-deps 编译 WebKit)
+#   3. bun scripts/build.ts 直接驱动构建 (--webkit=local + $BUN_WEBKIT_PATH 编译 WebKit)
 #   4. rust nightly (nightly-2026-07-20, aarch64-linux-ohos) 预装于
 #      ~/.rust-nightly/nightly-2026-07-20 (已签名, 持久目录)
 #   5. ICU 用 llvm@21 OHOS libc++ 头文件重编 (std::__h 命名空间),
@@ -159,7 +159,7 @@ phase_rust_nightly() {
   ok "Rust nightly $("$RUST_HOME/bin/rustc" --version) 就绪"
 }
 
-# ─── 阶段3: 准备 WebKit 源码 (编译由 build.ts --webkit=source --local-deps 处理) ──
+# ─── 阶段3: 准备 WebKit 源码 (编译由 build.ts --webkit=local + $BUN_WEBKIT_PATH 处理) ──
 phase_webkit() {
   info "=== 准备 WebKit 源码 ==="
 
@@ -538,8 +538,7 @@ phase_build() {
       --profile=release \
       --os=ohos \
       --arch=aarch64 \
-      --webkit=source \
-      --local-deps=WebKit="$WEBKIT_SRC" \
+      --webkit=local \
       --cache-dir="$cache_dir" \
       --ohos-sdk-root="$OHOS_SDK" \
       --ohos-sysroot="$SYSROOT" \
