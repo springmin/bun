@@ -1536,6 +1536,13 @@ export const linkerFlags: Flag[] = [
     desc: "OHOS linker tuning: 8MB stack (debug compression skipped — host LLVM lacks zlib)",
   },
   {
+    // Matches the linux/freebsd release links; the pre-merge release linked
+    // with it as well. Recovers a few MB of unreferenced sections.
+    flag: "-Wl,--gc-sections",
+    when: c => c.ohos && c.release,
+    desc: "OHOS release: garbage-collect unused sections",
+  },
+  {
     flag: ["-pie", "-Wl,-dynamic-linker=/system/lib/ld-musl-aarch64.so.1"],
     when: c => c.ohos,
     desc: "OHOS PIE: dynamic linking (allows fork/clone through seccomp)",
