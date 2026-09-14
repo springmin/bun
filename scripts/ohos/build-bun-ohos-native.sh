@@ -39,37 +39,21 @@ BUN="${BUN:-/storage/Users/currentUser/.bun/bun}"
 
 LLVM21="/storage/Users/currentUser/.harmonybrew/opt/llvm@21"
 OHOS_SDK="/storage/Users/currentUser/.harmonybrew/opt/ohos-sdk"
-SYSROOT="/storage/Users/currentUser/.harmonybrew/Cellar/ohos-sdk/26.0.0.18_1/native/sysroot"
 HOMEBREW_PREFIX="/storage/Users/currentUser/.harmonybrew"
+# Use the stable `opt/` symlink, not a versioned Cellar path: upgrading
+# ohos-sdk re-points opt/ and removes the old version dir, which broke every
+# baked path when 26.0.0.18_1 -> _2 happened mid-build. An explicit
+# OHOS_SYSROOT still wins, but a stale value that no longer exists falls back
+# to the symlink instead of failing the configure.
+SYSROOT="${OHOS_SYSROOT:-$HOMEBREW_PREFIX/opt/ohos-sdk/native/sysroot}"
+[ -d "$SYSROOT/usr/include" ] || SYSROOT="$HOMEBREW_PREFIX/opt/ohos-sdk/native/sysroot"
 
-# Ensure llvm@21 tools (llvm-nm, llvm-ar, etc.) take precedence over the
-# system llvm@15 which can't read LLVM 21.1.8 DWARF/ELF attributes.
-#
-# NOTE: OHOS SDK brew formula overwrites llvm@21 symlinks (llvm-nm, llvm-ar, etc.)
-# with OHOS SDK LLVM 15 binaries. LLVM 15 can't read LLVM 21 DWARF/ELF attributes.
-# Prepend our tool wrappers directory so it takes precedence.
-LLVM_WRAPPER_DIR="/data/storage/el2/base/tmp/opencode/tools"
-mkdir -p "$LLVM_WRAPPER_DIR"
-# Create llvm-nm wrapper that succeeds (the check-undefined step is a
-# non-critical validation; boringssl is well-tested upstream)
-cat > "$LLVM_WRAPPER_DIR/llvm-nm" << 'NMEOF'
-#!/bin/sh
-# Wrapper: LLVM 15 llvm-nm (from OHOS SDK) can't read LLVM 21 objects.
-# For check-undefined use case: succeed with empty output (no undefined symbols).
-case "$*" in
-  *"--version"*)
-    echo "llvm-nm, compatible with GNU nm"
-    echo "LLVM (http://llvm.org/):"
-    echo "  LLVM version 21.1.8 (OHOS wrapper)"
-    exit 0
-    ;;
-  *)
-    exit 0
-    ;;
-esac
-NMEOF
-chmod +x "$LLVM_WRAPPER_DIR/llvm-nm"
-export PATH="$LLVM_WRAPPER_DIR:$LLVM21/bin:$PATH"
+# llvm@21 tools (llvm-nm, llvm-ar, ...) take precedence over the system
+# llvm@15. If the SDK formula overwrote an llvm@21 symlink with an LLVM 15
+# binary, scripts/build/tools.ts detects the version and skips the
+# undefined-symbol check rather than "passing" it against empty output from a
+# fake tool.
+export PATH="$LLVM21/bin:$PATH"
 
 WEBKIT_SRC="${WEBKIT_SRC:-/storage/Users/currentUser/springsources/WebKit}"
 WEBKIT_COMMIT=$(grep "export const WEBKIT_VERSION" "$REPO_ROOT/scripts/build/deps/webkit.ts" | head -1 | sed 's/.*"\([a-f0-9]\{40\}\)".*/\1/')
@@ -599,21 +583,32 @@ V8EOF
   local build_ninja="$OUTDIR/build.ninja"
   if [ -f "$build_ninja" ]; then
     python3 - "$build_ninja" "$SHIM_DIR/v8_stub.o" << 'PYEOF'
-import sys
+import os, sys
 nf, stub = sys.argv[1], sys.argv[2]
 with open(nf) as f:
-    c = f.read()
-old = "stream.ts link --console ${REPO_BIN}clang++ @$out.rsp $ldflags -o $out"
-# 实际命令格式
-old = c[c.find("stream.ts link"):c.find("stream.ts link")+200]
-if stub not in c:
-    # 在 @$out.rsp 前插入 stub
-    c = c.replace("@$out.rsp", stub + " @$out.rsp")
-    with open(nf, "w") as f:
-        f.write(c)
+    lines = f.read().split("\n")
+# Only the final link rule: `@$out.rsp` also appears in the ar rule, and
+# inserting the stub there would add it to every archive.
+done = False
+for i, line in enumerate(lines):
+    if "stream.ts link" not in line or "@$out.rsp" not in line:
+        continue
+    if stub in line:
+        print("v8_stub.o 已存在")
+        done = True
+        break
+    lines[i] = line.replace("@$out.rsp", stub + " @$out.rsp", 1)
+    # Atomic replace: a truncating write races ninja's manifest read and
+    # produced "premature end of file; recovering" warnings.
+    tmp = nf + ".tmp"
+    with open(tmp, "w") as f:
+        f.write("\n".join(lines))
+    os.replace(tmp, nf)
+    done = True
     print("v8_stub.o 已注入 link rule")
-else:
-    print("v8_stub.o 已存在")
+    break
+if not done:
+    print("link rule not found; v8_stub.o NOT injected")
 PYEOF
   fi
 
@@ -672,7 +667,7 @@ main() {
   phase_relink
   phase_sign
 
-  ok "全部完成! 运行: $OUTDIR/bun-ohos --version"
+  ok "全部完成! 运行: $OUTDIR/bun --version"
 }
 
 main "$@"

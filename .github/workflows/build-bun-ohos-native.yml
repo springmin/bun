@@ -32,6 +32,9 @@ on:
       - 'vendor/WebKit/**'
       - 'patches/**'
       - '.github/workflows/build-bun-ohos-native.yml'
+      - 'src/js/**'
+      - 'packages/**'
+      - 'scripts/ohos/**'
   pull_request:
     branches:
       - ohos-aarch64
@@ -46,6 +49,9 @@ on:
       - 'vendor/WebKit/**'
       - 'patches/**'
       - '.github/workflows/build-bun-ohos-native.yml'
+      - 'src/js/**'
+      - 'packages/**'
+      - 'scripts/ohos/**'
   workflow_dispatch:
 
 concurrency:
@@ -57,7 +63,7 @@ env:
   HOMEBREW_PREFIX: /storage/Users/currentUser/.harmonybrew
   LLVM21: /storage/Users/currentUser/.harmonybrew/opt/llvm@21
   OHOS_SDK: /storage/Users/currentUser/.harmonybrew/opt/ohos-sdk
-  SYSROOT: /storage/Users/currentUser/.harmonybrew/Cellar/ohos-sdk/26.0.0.18_1/native/sysroot
+  SYSROOT: /storage/Users/currentUser/.harmonybrew/opt/ohos-sdk/native/sysroot
   ICU_BREW: /storage/Users/currentUser/.harmonybrew/opt/icu4c
   BUN: /storage/Users/currentUser/.bun/bun
   WEBKIT_SRC: /storage/Users/currentUser/springsources/WebKit
@@ -95,6 +101,13 @@ jobs:
           WORK=/storage/Users/currentUser/.cache/ohos-bun-ci/src
           mkdir -p "$(dirname "$WORK")"
 
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            REF="pull/${{ github.event.number }}/head"
+          else
+            REF="${{ github.sha }}"
+          fi
+          echo "checkout ref: $REF"
+
           if [ -d "$WORK/.git" ]; then
             echo "persistent workspace exists: $WORK"
             cd "$WORK"
@@ -102,7 +115,7 @@ jobs:
             attempt=1
             while [ $attempt -le 3 ]; do
               echo "fetch attempt $attempt/3"
-              if git fetch "$REMOTE" ohos-aarch64 --depth=1 2>/dev/null; then
+              if git fetch "$REMOTE" "$REF" --depth=1 2>/dev/null; then
                 break
               fi
               attempt=$((attempt + 1))
@@ -126,7 +139,7 @@ jobs:
             else
               git clone --depth 1 --branch ohos-aarch64 "$REMOTE" "$WORK"
             fi
-            git -C "$WORK" fetch "$REMOTE" ohos-aarch64 --depth=1 2>/dev/null || true
+            git -C "$WORK" fetch "$REMOTE" "$REF" --depth=1 2>/dev/null || true
             if git -C "$WORK" rev-parse --verify FETCH_HEAD >/dev/null 2>&1; then
               git -C "$WORK" checkout -f FETCH_HEAD
             fi
@@ -339,7 +352,7 @@ jobs:
       # 写入 $GITHUB_ENV / $GITHUB_PATH, 对后续所有步骤生效。
       - name: Setup build environment
         run: |
-          bin_dir="$GITHUB_WORKSPACE/bun/.bin"
+          bin_dir="/storage/Users/currentUser/.cache/ohos-bun-ci/src/.bin"
           mkdir -p "$bin_dir"
 
           # CC/CXX: Homebrew cc/c++ shims (llvm-gcc-compat → ohos-sdk wrapper → llvm@21)
@@ -527,21 +540,31 @@ jobs:
           build_ninja="build/release/build.ninja"
           if [ -f "$build_ninja" ]; then
             python3 - "$build_ninja" "$SHIM_DIR/v8_stub.o" << 'PYEOF'
-          import sys
+          import os, sys
           nf, stub = sys.argv[1], sys.argv[2]
           with open(nf) as f:
-              c = f.read()
-          old = "stream.ts link --console ${REPO_BIN}clang++ @$out.rsp $ldflags -o $out"
-          # 实际命令格式
-          old = c[c.find("stream.ts link"):c.find("stream.ts link")+200]
-          if stub not in c:
-              # 在 @$out.rsp 前插入 stub
-              c = c.replace("@$out.rsp", stub + " @$out.rsp")
-              with open(nf, "w") as f:
-                  f.write(c)
+              lines = f.read().split("\n")
+          # Only the final link rule: `@$out.rsp` also appears in the ar rule, and
+          # inserting the stub there would add it to every archive.
+          done = False
+          for i, line in enumerate(lines):
+              if "stream.ts link" not in line or "@$out.rsp" not in line:
+                  continue
+              if stub in line:
+                  print("v8_stub.o already present")
+                  done = True
+                  break
+              lines[i] = line.replace("@$out.rsp", stub + " @$out.rsp", 1)
+              # Atomic replace: a truncating write races ninja's manifest read.
+              tmp = nf + ".tmp"
+              with open(tmp, "w") as f:
+                  f.write("\n".join(lines))
+              os.replace(tmp, nf)
+              done = True
               print("v8_stub.o injected into link rule")
-          else:
-              print("v8_stub.o already present")
+              break
+          if not done:
+              print("link rule not found; v8_stub.o NOT injected")
           PYEOF
           fi
           echo "V8 stub ready: $SHIM_DIR/v8_stub.o"

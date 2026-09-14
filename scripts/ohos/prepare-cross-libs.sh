@@ -11,6 +11,18 @@
 #=============================================================================
 set -euo pipefail
 
+# Deprecated: the maintained OHOS build does not compile libc++ here; it links
+# llvm@21's libc++_static.a (std::__n1) through the build/ohos-cross-libs
+# symlinks created by scripts/ohos/build-bun-ohos-native.sh. This script builds
+# libc++ with the SDK's LLVM 22 (std::__h), reintroducing the __h/__n1 ABI mix
+# that phase_scan_stale_abi exists to clean, and its $HOME/setup-ohos-sdk
+# layout no longer matches harmonybrew's ohos-sdk. Set
+# FORCE_PREPARE_CROSS_LIBS=1 to run it deliberately.
+if [ "${FORCE_PREPARE_CROSS_LIBS:-0}" != "1" ]; then
+  echo "[SKIP] prepare-cross-libs.sh is deprecated; set FORCE_PREPARE_CROSS_LIBS=1 to run" >&2
+  exit 0
+fi
+
 OHOS_SDK_ROOT="${OHOS_SDK_ROOT:-$HOME/setup-ohos-sdk}"
 LLVM_DIR="${OHOS_SDK_ROOT}/linux/native/llvm"
 SYSROOT="${OHOS_SDK_ROOT}/ohos/native/sysroot"

@@ -3,6 +3,13 @@
 # Each test file runs in a separate `bun test` process.
 # Features: retries, per-test timeout, parallel execution.
 # OHOS adaptations: watchdog timeout, configurable TMPDIR, bundler timeout.
+#
+# NOTE: superseded by run-all-official-progress-optimized.sh (progress output,
+# shared per-file watchdog table, orphan sweeps, parallel buckets). Prefer that
+# script for full runs; this one is kept as a minimal single-shot fallback.
+export TMPDIR="${TMPDIR:-/data/storage/el2/base/tmp}"
+# SDK lld needs the SDK's bundled libxml2 (see the optimized runner for why).
+export LD_LIBRARY_PATH="/storage/Users/currentUser/.harmonybrew/opt/ohos-sdk/native/llvm/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 
 BUN="${BUN:-bun}"
 PARALLEL=${PARALLEL:-6}

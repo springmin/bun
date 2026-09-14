@@ -23,6 +23,14 @@ BUN_TIMEOUT=${BUN_TIMEOUT:-600000}
 # Default to the app's private tmp dir, respecting explicit TMPDIR override.
 export TMPDIR="${TMPDIR:-/data/storage/el2/base/tmp}"
 
+# The OHOS SDK's lld links against the SDK's bundled libxml2, but its
+# $ORIGIN/../lib RUNPATH is not honored in this environment: every run-time
+# native compile (FFI, shim, seccomp, addon tests) failed with
+# "Error loading shared library libxml2.so.16 ... xmlFreeDoc: symbol not
+# found". Point the loader at the SDK's own copy (the opt/ symlink survives
+# SDK version bumps).
+export LD_LIBRARY_PATH="/storage/Users/currentUser/.harmonybrew/opt/ohos-sdk/native/llvm/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+
 # ── node-gyp 环境 ──
 # 必须用 harmonybrew 的 c++（llvm@21）：node-gyp 默认 clang++（llvm22.1.7）的
 # 隐式 include 路径含两个 libc++ 且顺序错误，触发 __functional/hash.h 编译失败。
@@ -48,8 +56,6 @@ fi
 # 清理之前残留的 verdaccio 实例（每个占 ~35% CPU）
 pkill -f "verdaccio" 2>/dev/null || true
 
-# 清理孤儿 bun 进程
-_ohos_kill_orphans 2>/dev/null || true
 
 # PPID=1 孤儿清理 — 杀所有不属于 verdaccio/opencode 的 PPID=1 bun 进程
 # 这些是 bun test 被杀后遗留的子孙（如 bun run jsx-*、bun -e fixture 等）
@@ -197,20 +203,10 @@ echo "Found $TOTAL_FILES test files" >> "$REPORT"
 echo "" >> "$REPORT"
 
 # ── 运行单个测试 ──
-run_test() {
-  idx=$1
-  f=$2
-  # ── OHOS 环境特殊处理 ──
-  case "$f" in
-    # terminal 测试需要 PTY（/dev/tty），用 script 包装
-    */terminal/terminal.test.ts|*/terminal/terminal-spawn.test.ts)
-      WRAP="script -q -c"
-      ;;
-    *)
-      WRAP=""
-      ;;
-  esac
-
+# Shared watchdog table: sets WT (seconds) and BT (bun-test flags) for a file.
+# `run_test` and the scheduler both call this so their timeouts never diverge.
+_ohos_watchdog_for() {
+  local f="$1"
   case "$f" in
     # ── 已知连续多日 600s 超时文件：快速失败（120s 就杀，不白等 600s）──
     # 这些文件在 OHOS 上持续超时（repl/streams 连续 3+ 次全量），降低 WT
@@ -317,6 +313,23 @@ run_test() {
       BT="--expose-internals --smol --timeout ${BUN_TIMEOUT}"
       ;;
   esac
+}
+
+run_test() {
+  idx=$1
+  f=$2
+  # ── OHOS 环境特殊处理 ──
+  case "$f" in
+    # terminal 测试需要 PTY（/dev/tty），用 script 包装
+    */terminal/terminal.test.ts|*/terminal/terminal-spawn.test.ts)
+      WRAP="script -q -c"
+      ;;
+    *)
+      WRAP=""
+      ;;
+  esac
+
+  _ohos_watchdog_for "$f"
 
   # ── 大文件回摆标记：全量并行负载下偶发用例失败（单跑必过）。
   # 这些文件用例失败时重试一次（默认只对超时重试）。
@@ -676,18 +689,8 @@ while IFS= read -r f; do
   echo "$f" > "$PDIR/running_${i}"
   # 保存该测试的 watchdog 超时（秒），供调度循环超时判断
   # 必须与 run_test 中的 case 保持一致
-  case "$f" in
-    */bundler/transpiler/jsx-production.test.ts|*/udp/udp_socket.test.ts|*/terminal/terminal-platform-gaps.test.ts|*/spawn/spawn.test.ts|*/inspector/inspector.test.ts|*/run-extensionless.test.ts)
-      _wt=$((TMOUT * 4)) ;;
-    */bake/dev/server-sourcemap.test.ts|*/web/fetch/fetch.test.ts|*/cli/create/create-jsx.test.ts|*/shell/bunshell.test.ts|*/terminal/terminal.test.ts|*/websocket/websocket-server.test.ts)
-      _wt=$((TMOUT * 3)) ;;
-    *leak*|*no-orphans*|*spawn-pipe-leak*|*serve-body-leak*|*handle-leak*)
-      _wt=$((TMOUT * 2)) ;;
-    */bundler/*)
-      _wt=$TMOUT_BUNDLER ;;
-    *)
-      _wt=$TMOUT ;;
-  esac
+  _ohos_watchdog_for "$f"
+  _wt=$WT
   echo "$_wt" > "$PDIR/wt_${i}"
   # 全局最大 WT：_wait_start 阶段 wt_* 可能已被回收（worker 完成时删除），
   # 动态超时依赖它计算；在分派时记录，避免 _max_wt=0 退化为 3600s 固定值。

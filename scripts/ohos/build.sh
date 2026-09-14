@@ -119,7 +119,7 @@ info "=== 阶段7: 打包 ==="
 
 VERSION=$(grep -m1 '"version"' package.json | sed 's/.*"version": *"\([^"]*\)".*/\1/' 2>/dev/null || echo "0.0.0")
 PKG_NAME="bun-ohos-aarch64-${VERSION}-${BUN_COMMIT}-${DATE_TAG}"
-PKG_DIR="/tmp/bun-release/${PKG_NAME}"
+PKG_DIR="${TMPDIR:-/tmp}/bun-release/${PKG_NAME}"
 mkdir -p "$PKG_DIR"
 
 cp "$BINARY" "$PKG_DIR/bun"
@@ -137,8 +137,7 @@ binary-sign-tool sign -inFile bun -outFile bun-signed -selfSign "1"
 \`\`\`
 
 ## Known Limitations
-- Bun.spawnSync blocked by OHOS seccomp
-- /tmp is read-only on OHOS
+- /tmp is read-only on OHOS (the test suite uses a writable TMPDIR)
 
 ## Links
 - https://github.com/springmin/bun/tree/ohos-aarch64
@@ -148,9 +147,9 @@ EOF
 cp test_all_in_one.js "$PKG_DIR/" 2>/dev/null || true
 cp test_perf.js "$PKG_DIR/" 2>/dev/null || true
 
-cd /tmp/bun-release
+cd "${TMPDIR:-/tmp}/bun-release"
 tar czf "${PKG_NAME}.tar.gz" "$PKG_NAME"
-info "包: /tmp/bun-release/${PKG_NAME}.tar.gz ($(du -sh "/tmp/bun-release/${PKG_NAME}.tar.gz" | awk '{print $1}'))"
+info "包: ${TMPDIR:-/tmp}/bun-release/${PKG_NAME}.tar.gz ($(du -sh "${TMPDIR:-/tmp}/bun-release/${PKG_NAME}.tar.gz" | awk '{print $1}'))"
 
 # ─── 阶段8: 发布到共享目录 ──────────────────────────────────────────────
 if [ -d /mnt/linux_share ]; then
