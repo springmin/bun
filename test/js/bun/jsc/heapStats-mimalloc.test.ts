@@ -1,6 +1,6 @@
 import { heapStats } from "bun:jsc";
 import { describe, expect, test } from "bun:test";
-import { bunEnv, bunExe, isASAN, isLinux, isMacOS } from "harness";
+import { bunEnv, bunExe, isASAN, isLinux, isMacOS, isOhos } from "harness";
 
 describe("heapStats() mimalloc integration", () => {
   test("mimalloc aggregate stats are present", () => {
@@ -132,7 +132,11 @@ describe("heapStats() mimalloc integration", () => {
   // had something to hand back. JSC's structure heap is an arena of its own that rarely has, so Malloc=1 here: JSC then
   // allocates through malloc (mimalloc as well) and there is one arena. Linux only: the wait reads RSS. Not ASAN: malloc is
   // not mimalloc there.
-  test.skipIf(!isLinux || isASAN)(
+  // OHOS: `purged` still reflects the release (~387 MB) but madvise'd pages
+  // are not deducted from RSS on this kernel, so the RSS-delta wait never
+  // reaches its bound. The forced path is covered by the sibling
+  // Bun.gc(true) test in gc-controller-cadence.
+  test.skipIf(!isLinux || isASAN || isOhos)(
     "memory freed while the purge thread is at work is purged without an idle event loop",
     async () => {
       await using proc = Bun.spawn({
