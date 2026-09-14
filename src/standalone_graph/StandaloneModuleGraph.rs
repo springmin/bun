@@ -2319,16 +2319,16 @@ pub(crate) fn inject<'a>(
             }
             #[cfg(target_env = "ohos")]
             {
-                let out_str = unsafe { core::str::from_utf8_unchecked(zname.as_bytes()) };
-                let out_path = std::path::Path::new(out_str);
+                use std::os::unix::ffi::OsStrExt;
+                let out_path = std::path::Path::new(std::ffi::OsStr::from_bytes(zname.as_bytes()));
                 // The base bun binary is already signed, but we've appended
-                // the JS bundle after the original signature.  Strip the old
+                // the JS bundle after the original signature. Strip the old
                 // .codesign and sign the modified file so the signature
                 // covers the entire standalone binary. Silent: a failure
                 // must not pollute stderr (test assertions like
                 // stderr.not.toContain("error:") would trip); the runtime
                 // reports the real load error.
-                let _ = ohos_sign::sign_selfsign_inplace_with_strip(out_path);
+                let _ = ohos_sign::ensure_signed_inplace(out_path);
             }
             return Some(Injected::new(
                 cloned_executable_fd,
@@ -2890,20 +2890,20 @@ pub fn to_executable(
         // base bun binary carries a signature, and appending the JS bundle
         // invalidates it while the stale .codesign section remains — so
         // has_codesign() would report true and skip the re-sign, leaving an
-        // invalid signature the kernel rejects. Strip and re-sign
-        // unconditionally (same as the inject() path above).
+        // invalid signature the kernel rejects. `ensure_signed_inplace`
+        // strips and re-signs, and skips files this process already signed
+        // unchanged.
         #[cfg(target_env = "ohos")]
         {
             if !outfile.is_empty() {
-                if let Some(signed_path) = core::str::from_utf8(outfile).ok() {
-                    let p = std::path::Path::new(signed_path);
-                    if p.exists() {
-                        // Silent: a failure here must not pollute stderr
-                        // (test assertions like stderr.not.toContain("error:")
-                        // would trip); the user's exec of the output reports
-                        // the real error.
-                        let _ = ohos_sign::sign_selfsign_inplace_with_strip(p);
-                    }
+                use std::os::unix::ffi::OsStrExt;
+                let p = std::path::Path::new(std::ffi::OsStr::from_bytes(outfile));
+                if p.exists() {
+                    // Silent: a failure here must not pollute stderr
+                    // (test assertions like stderr.not.toContain("error:")
+                    // would trip); the user's exec of the output reports
+                    // the real error.
+                    let _ = ohos_sign::ensure_signed_inplace(p);
                 }
             }
         }

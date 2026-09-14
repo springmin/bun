@@ -12,6 +12,7 @@
  */
 import assert from "node:assert";
 import { execFile } from "node:child_process";
+import { existsSync } from "node:fs";
 import { test } from "node:test";
 import { promisify } from "node:util";
 
@@ -21,7 +22,13 @@ const execFileP = promisify(execFile);
 // no-op here (both setting and reading return empty/no change — verified
 // directly: `ulimit -Sn 256; ulimit -Sn` prints nothing and children see
 // the unchanged limit). zsh's works. Use zsh on OHOS, /bin/sh elsewhere.
-const SHELL = process.platform === "openharmony" ? "/usr/bin/zsh" : "/bin/sh";
+// Bun reports "linux" on OpenHarmony, so probe like the test harness does.
+const isOhos =
+  process.env.BUN_OHOS === "1" ||
+  (process.platform === "linux" &&
+    process.arch === "arm64" &&
+    existsSync("/system/lib/ld-musl-aarch64.so.1"));
+const SHELL = isOhos ? "/usr/bin/zsh" : "/bin/sh";
 
 test(
   "child process inherits a sane RLIMIT_NOFILE (capped at 1<<20)",

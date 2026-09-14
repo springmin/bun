@@ -2162,7 +2162,10 @@ mod posix_impl {
     #[cfg(any(target_os = "linux", target_os = "android"))]
     mod linux_statx {
         // glibc: libc 0.2.x exposes the full surface directly.
-        #[cfg(all(target_os = "linux", not(any(target_env = "musl", target_env = "ohos"))))]
+        #[cfg(all(
+            target_os = "linux",
+            not(any(target_env = "musl", target_env = "ohos"))
+        ))]
         pub(super) use libc::{
             STATX_ATIME, STATX_BLOCKS, STATX_BTIME, STATX_CTIME, STATX_GID, STATX_INO, STATX_MODE,
             STATX_MTIME, STATX_NLINK, STATX_SIZE, STATX_TYPE, STATX_UID, statx,
@@ -2345,12 +2348,19 @@ mod posix_impl {
                 //               (verified on-device); fold into the fallback —
                 //               a genuinely bad fd still gets EBADF from the
                 //               plain fstat in statx_fallback.
-                let is_fallback_errno = matches!(
+                // Only genuinely-unsupported errnos latch the process-wide
+                // "no statx" flag. OHOS's statx rejects socket-backed fds with
+                // EBADF; that is per-fd, so the fallback runs without
+                // disabling statx for every later call (node:fs birthtime
+                // and the fstat fallback would otherwise be lost).
+                let unsupported_errno = matches!(
                     errno,
                     Some(E::ENOSYS | E::EOPNOTSUPP | E::EPERM | E::EINVAL)
-                ) || (cfg!(target_env = "ohos") && errno == Some(E::EBADF));
-                if is_fallback_errno {
-                    SUPPORTS_STATX_ON_LINUX.store(false, Ordering::Relaxed);
+                );
+                if unsupported_errno || (cfg!(target_env = "ohos") && errno == Some(E::EBADF)) {
+                    if unsupported_errno {
+                        SUPPORTS_STATX_ON_LINUX.store(false, Ordering::Relaxed);
+                    }
                     return statx_fallback(fd, path, flags);
                 }
                 return Err(Error {
@@ -2842,8 +2852,7 @@ mod posix_impl {
             };
             if rc != 0 {
                 let errno = crate::linux::errno();
-                return Err(Error::from_code_int(errno, Tag::fchmodat)
-                    .with_path(path.as_bytes()));
+                return Err(Error::from_code_int(errno, Tag::fchmodat).with_path(path.as_bytes()));
             }
             Ok(())
         }
@@ -3025,7 +3034,10 @@ mod posix_impl {
     }
 
     pub fn futimens(fd: Fd, atime: TimeLike, mtime: TimeLike) -> Maybe<()> {
-        let ts = [clamp_timespec(atime.to_timespec()), clamp_timespec(mtime.to_timespec())];
+        let ts = [
+            clamp_timespec(atime.to_timespec()),
+            clamp_timespec(mtime.to_timespec()),
+        ];
         check!(
             // SAFETY: `fd` is a live descriptor; `ts` is a 2-element stack
             // array and `futimens` reads exactly two `timespec`s.
@@ -3035,7 +3047,10 @@ mod posix_impl {
         Ok(())
     }
     pub fn utimens(path: &ZStr, atime: TimeLike, mtime: TimeLike) -> Maybe<()> {
-        let ts = [clamp_timespec(atime.to_timespec()), clamp_timespec(mtime.to_timespec())];
+        let ts = [
+            clamp_timespec(atime.to_timespec()),
+            clamp_timespec(mtime.to_timespec()),
+        ];
         check_p!(
             // SAFETY: `path` is NUL-terminated (`ZStr`); `ts` is a 2-element
             // stack array and `utimensat` reads exactly two `timespec`s.
@@ -3046,7 +3061,10 @@ mod posix_impl {
         Ok(())
     }
     pub fn lutimens(path: &ZStr, atime: TimeLike, mtime: TimeLike) -> Maybe<()> {
-        let ts = [clamp_timespec(atime.to_timespec()), clamp_timespec(mtime.to_timespec())];
+        let ts = [
+            clamp_timespec(atime.to_timespec()),
+            clamp_timespec(mtime.to_timespec()),
+        ];
         check_p!(
             // SAFETY: `path` is NUL-terminated (`ZStr`); `ts` is a 2-element
             // stack array and `utimensat` reads exactly two `timespec`s.
@@ -3573,7 +3591,10 @@ mod posix_impl {
     /// (memfd writes not visible to the parent's fstat after exit), so
     /// callers must fall back to socketpair/pipe. Matches the stdio.rs
     /// can_use_memfd() guard.
-    #[cfg(all(any(target_os = "linux", target_os = "android"), not(target_env = "ohos")))]
+    #[cfg(all(
+        any(target_os = "linux", target_os = "android"),
+        not(target_env = "ohos")
+    ))]
     #[inline]
     pub fn can_use_memfd() -> bool {
         if bun_core::env_var::feature_flag::BUN_FEATURE_FLAG_DISABLE_MEMFD
@@ -3584,7 +3605,10 @@ mod posix_impl {
         }
         !MEMFD_ENOSYS.load(core::sync::atomic::Ordering::Relaxed)
     }
-    #[cfg(not(all(any(target_os = "linux", target_os = "android"), not(target_env = "ohos"))))]
+    #[cfg(not(all(
+        any(target_os = "linux", target_os = "android"),
+        not(target_env = "ohos")
+    )))]
     #[inline]
     pub fn can_use_memfd() -> bool {
         false
@@ -6181,7 +6205,6 @@ pub mod RTLD {
     pub const LOCAL: i32 = 0;
 }
 
-
 /// C-compatible entry point for `dlopen` — called from C++ as `Bun__dlopen`.
 /// OHOS: if dlopen fails with EPERM (unsigned .node/.so), sign and retry.
 #[unsafe(no_mangle)]
@@ -6202,22 +6225,21 @@ pub fn dlopen(filename: &ZStr, flags: i32) -> Option<*mut c_void> {
     #[cfg(target_env = "ohos")]
     {
         fn ensure_signed(path: &ZStr) {
-            let path_str = core::str::from_utf8(path.as_bytes()).unwrap_or("");
+            let bytes = path.as_bytes();
             // Only native addons (.node/.so) need signing before dlopen.
             // Host executables (bun itself, /bin/sh, node, bash) are already
             // signed or live on a read-only filesystem — re-signing them
             // fails with ETXTBSY/EROFS and the error line ("I/O error")
             // leaks into stderr, tripping test assertions like
             // `stderr.not.toContain("error:")`.
-            if !path_str.ends_with(".node") && !path_str.ends_with(".so") {
+            if !bytes.ends_with(b".node") && !bytes.ends_with(b".so") {
                 return;
             }
-            let p = std::path::Path::new(path_str);
-            // Unconditional re-sign: a stale .codesign section defeats
-            // has_codesign() while the signature no longer covers the file,
-            // and the kernel then rejects the dlopen with EPERM. Failures
-            // are silent — dlopen below reports the real error.
-            let _ = ohos_sign::sign_selfsign_inplace_with_strip(p);
+            // `ensure_signed_inplace` checks the ELF magic with a 4-byte read
+            // and skips files this process already signed unchanged.
+            use std::os::unix::ffi::OsStrExt;
+            let p = std::path::Path::new(std::ffi::OsStr::from_bytes(bytes));
+            let _ = ohos_sign::ensure_signed_inplace(p);
         }
         ensure_signed(filename);
         // SAFETY: filename is NUL-terminated.

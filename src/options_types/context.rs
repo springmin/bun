@@ -495,11 +495,12 @@ impl Default for TestOptions {
     #[inline(always)]
     fn default() -> Self {
         Self {
-            // 5 seconds (30 seconds on OHOS due to slower ASan build)
-            #[cfg(target_env = "ohos")]
-            default_timeout_ms: 30 * 1000,
-            #[cfg(not(target_env = "ohos"))]
-            default_timeout_ms: 5 * 1000,
+            // 5 seconds; ASan builds are slow enough that their default is 30.
+            default_timeout_ms: if bun_core::env::ENABLE_ASAN {
+                30 * 1000
+            } else {
+                5 * 1000
+            },
             update_snapshots: false,
             repeat_count: 0,
             retry: 0,

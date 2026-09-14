@@ -412,14 +412,20 @@ impl<'a> State<'a> {
             Output::writer()
         };
 
-        // Process complete lines
-        while let Some(newline_pos) = strings::index_of_char_usize(&pipe.line_buffer, b'\n') {
-            let line = &pipe.line_buffer[0..newline_pos + 1];
+        // Process complete lines. Consume with an offset and drain the
+        // consumed prefix once: `drain_front` per line memmoves the whole
+        // remainder, which is O(n²) for a chunk with many short lines.
+        let mut consumed = 0;
+        while let Some(rel) = strings::index_of_char_usize(&pipe.line_buffer[consumed..], b'\n') {
+            let end = consumed + rel + 1;
+            let line = &pipe.line_buffer[consumed..end];
             // SAFETY: pipe.handle backref set in ProcessHandle::start()
             let handle = unsafe { &*pipe.handle };
             self.write_line_with_prefix(handle, line, writer)?;
-            // Remove processed line from buffer
-            pipe.line_buffer.drain_front(newline_pos + 1);
+            consumed = end;
+        }
+        if consumed > 0 {
+            pipe.line_buffer.drain_front(consumed);
         }
         Ok(())
     }
@@ -576,53 +582,52 @@ impl<'a> State<'a> {
     /// Poll FIONREAD each loop iteration and read directly, bypassing poll
     /// readiness. Non-OHOS builds never take this path.
     #[cfg(target_env = "ohos")]
-    fn drain_ohos_pipes(&mut self) {
+    fn drain_ohos_pipes(&mut self) -> bool {
         let handles_ptr = self.handles.as_mut_ptr();
         let state_ptr: *mut State<'a> = self;
         // SAFETY: indices are in bounds; each reader is re-borrowed one at a
         // time from its handle, same aliasing pattern as the buffered-reader
         // dispatch above.
+        let mut read_any = false;
         for i in 0..self.handles.len() {
             let handle = unsafe { &mut *handles_ptr.add(i) };
-            Self::drain_one(state_ptr, &raw mut handle.stdout_reader, handle);
-            Self::drain_one(state_ptr, &raw mut handle.stderr_reader, handle);
+            read_any |= Self::drain_one(state_ptr, &raw mut handle.stdout_reader, handle);
+            read_any |= Self::drain_one(state_ptr, &raw mut handle.stderr_reader, handle);
         }
+        read_any
     }
 
+    /// Reads everything currently buffered on one pipe. Returns true if any
+    /// bytes were read (the caller uses this to back off when idle).
     #[cfg(target_env = "ohos")]
     fn drain_one(
         state_ptr: *mut State<'a>,
         reader_ptr: *mut PipeReader<'a>,
         handle_ptr: &mut ProcessHandle<'a>,
-    ) {
+    ) -> bool {
         // SAFETY: reader_ptr points into handle_ptr's readers; state_ptr is
         // the live State; all outlive this call.
         let reader = unsafe { &mut *reader_ptr };
         if reader.ended {
-            return;
+            return false;
         }
         let fd = reader.reader.get_fd();
         if fd == bun_sys::Fd::INVALID {
-            return;
-        }
-        let mut avail: libc::c_int = 0;
-        // SAFETY: avail is a valid int out-param for ioctl FIONREAD.
-        if unsafe { libc::ioctl(fd.native(), libc::FIONREAD, &raw mut avail) } != 0 {
-            return;
+            return false;
         }
         // The poll was unregistered at start() (see ProcessHandle::start), so
         // this drain is the only reader: read directly until EAGAIN so one
-        // tick drains everything the child wrote. Also probe with a read even
-        // when FIONREAD says 0 bytes — the child may have exited with its
-        // pipe write end closed but no buffered data, and only a read()
-        // returning 0 surfaces that EOF (with no poll registered, nothing
-        // else would).
+        // tick drains everything the child wrote. A read surfaces both
+        // buffered data and EOF, so FIONREAD is not consulted — and returning
+        // early when its ioctl fails would leave that pipe undrained forever.
+        let mut read_any = false;
         let mut buf = [0u8; 16384];
         loop {
             // SAFETY: buf is a valid write buffer for read(); fd is
             // non-blocking (set in ProcessHandle::start).
             let n = unsafe { libc::read(fd.native(), buf.as_mut_ptr().cast(), buf.len()) };
             if n > 0 {
+                read_any = true;
                 // SAFETY: state_ptr is the live State; reader is one of its
                 // handles' readers (aliasing the buffered-reader dispatch
                 // relies on).
@@ -636,6 +641,7 @@ impl<'a> State<'a> {
             }
             break;
         }
+        read_any
     }
 
     fn start_dependents(dependents: &[*mut ProcessHandle]) {
@@ -1352,6 +1358,8 @@ pub(crate) fn run(ctx: &mut Command::ContextData) -> Result<core::convert::Infal
 
     AbortHandler::install();
 
+    #[cfg(target_env = "ohos")]
+    let mut idle_polls: u32 = 0;
     while !state.is_done() {
         if SHOULD_ABORT.load(Ordering::SeqCst) && !state.aborted {
             AbortHandler::uninstall();
@@ -1362,15 +1370,24 @@ pub(crate) fn run(ctx: &mut Command::ContextData) -> Result<core::convert::Infal
         }
         #[cfg(target_env = "ohos")]
         {
-            // OHOS: pipes are drained via FIONREAD polling (T50 kernel bug —
-            // epoll never reports a pipe readable). A blocking tick would
-            // stall forever when no epoll event fires (e.g. a detached child
-            // still writing to the pipe after its parent script exited), so
-            // tick non-blocking, drain, then yield briefly to avoid busy
-            // spinning the CPU.
-            unsafe { (*event_loop).tick_without_idle((&raw const state).cast_mut().cast::<c_void>()) };
-            state.drain_ohos_pipes();
-            std::thread::sleep(std::time::Duration::from_millis(2));
+            // OHOS: pipes are drained by polling (T50 kernel bug — epoll never
+            // reports a pipe readable). A blocking tick would stall forever
+            // when no epoll event fires (e.g. a detached child still writing
+            // to the pipe after its parent script exited), so tick
+            // non-blocking, drain, then yield. 2 ms while output is flowing,
+            // backing off to 10 ms after a few empty passes: each tick still
+            // reads, so the added latency stays bounded.
+            unsafe {
+                (*event_loop).tick_without_idle((&raw const state).cast_mut().cast::<c_void>())
+            };
+            let read_any = state.drain_ohos_pipes();
+            idle_polls = if read_any {
+                0
+            } else {
+                (idle_polls + 1).min(16)
+            };
+            let sleep_ms = if idle_polls < 8 { 2 } else { 10 };
+            std::thread::sleep(std::time::Duration::from_millis(sleep_ms));
         }
         #[cfg(not(target_env = "ohos"))]
         {

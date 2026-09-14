@@ -18,7 +18,14 @@ import { dirname, isAbsolute, join } from "path";
 export const BREAKING_CHANGES_BUN_1_2 = false;
 
 export const isMacOS = process.platform === "darwin";
-export const isOHOS = process.platform === "openharmony";
+// Bun reports `"linux"` on OpenHarmony, so `process.platform` cannot identify
+// it. `BUN_OHOS` is set by the OHOS test runner; the musl loader probe catches
+// a device run started without it. Keep this in sync with `isOhos` below.
+export const isOHOS =
+  Bun.env.BUN_OHOS === "1" ||
+  (process.platform === "linux" &&
+    process.arch === "arm64" &&
+    fs.existsSync("/system/lib/ld-musl-aarch64.so.1"));
 export const isLinux = process.platform === "linux";
 export const isFreeBSD = process.platform === "freebsd";
 /** Bun (like Node) reports `"android"` on Android; it is not folded into `isLinux`. */
@@ -1133,9 +1140,7 @@ export function dockerExe(): string | null {
 // OpenHarmony never ships docker; treat it as permanently docker-less so the
 // CI docker-required throw below doesn't fire on OHOS runners.
 // Exported for test files that need to skip OHOS-incompatible cases.
-export const isOhos =
-  Bun.env.BUN_OHOS === "1" ||
-  (isLinux && process.arch === "arm64" && fs.existsSync("/system/lib/ld-musl-aarch64.so.1"));
+export const isOhos = isOHOS;
 export function isDockerEnabled(): boolean {
   const dockerCLI = dockerExe();
   if (!dockerCLI) {

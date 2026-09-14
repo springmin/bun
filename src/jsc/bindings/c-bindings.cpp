@@ -87,35 +87,6 @@ extern "C" void bun_ignore_sigpipe()
     signal(SIGPIPE, SIG_IGN);
 #endif
 }
-#if defined(__OHOS__)
-static void ohos_sigsys_handler(int sig, siginfo_t* info, void* uctx) {
-    (void)sig;
-    (void)info;
-    (void)uctx;
-    int syscall_nr = -1;
-    FILE* f = fopen("/proc/self/syscall", "r");
-    if (f) {
-        char buf[128] = {};
-        if (fgets(buf, sizeof(buf), f)) {
-            char* end = buf;
-            long val = strtol(buf, &end, 0);
-            if (end != buf) syscall_nr = (int)val;
-        }
-        fclose(f);
-    }
-    fprintf(stderr, "\n*** SIGSYS: blocked syscall #%d ***\n", syscall_nr);
-    fflush(stderr);
-}
-
-extern "C" void ohos_setup_sigsys_handler() {
-    struct sigaction sa;
-    memset(&sa, 0, sizeof(sa));
-    sa.sa_flags = SA_SIGINFO;
-    sa.sa_sigaction = ohos_sigsys_handler;
-    sigaction(SIGSYS, &sa, nullptr);
-}
-#endif
-
 extern "C" ssize_t bun_sysconf__SC_CLK_TCK()
 {
 #ifdef __APPLE__
@@ -736,11 +707,14 @@ extern "C" void bun_initialize_process()
     // This is less of an issue for macOS due to posix_spawn
     // This is best effort, not all linux kernels support close_range or CLOSE_RANGE_CLOEXEC
     // To avoid breaking --watch, we skip stdin, stdout, stderr and IPC.
-#if !OS(WINDOWS) && !defined(__OHOS__)
+#if !defined(__OHOS__)
     bun_close_range(4, ~0U, CLOSE_RANGE_CLOEXEC);
-
-    execve_counting_pid = getpid();
 #endif
+    // Also on OHOS: the wrapped execve/pthread_create (see the
+    // -Wl,--wrap=execve/--wrap=pthread_create flags in flags.ts) only count
+    // execs when the pid matches, so this must be recorded on every Linux
+    // target including OHOS.
+    execve_counting_pid = getpid();
 #endif
 
 #if OS(LINUX) || OS(DARWIN) || OS(FREEBSD)
@@ -1177,14 +1151,6 @@ extern "C" const char* BUN_DEFAULT_PATH_FOR_SPAWN = _PATH_DEFPATH;
 extern "C" const char* BUN_DEFAULT_PATH_FOR_SPAWN = "C:\\Windows\\System32;C:\\Windows;";
 #else
 extern "C" const char* BUN_DEFAULT_PATH_FOR_SPAWN = "/usr/bin:/bin";
-#endif
-
-// OHOS seccomp blocks close_range with uncatchable SIGSYS (verified 2026-06-07).
-// pidfd_open and memfd_create are available (no longer gated by this flag).
-#if defined(__OHOS__)
-extern "C" const bool BUN_OHOS_CLOSE_RANGE_BLOCKED = true;
-#else
-extern "C" const bool BUN_OHOS_CLOSE_RANGE_BLOCKED = false;
 #endif
 
 #if OS(DARWIN)

@@ -2521,34 +2521,15 @@ pub(crate) fn ohos_sign_native_binaries(pkg_dir: &[u8]) {
         let name = entry.basename.as_bytes();
         // Sign any ELF file — not just .so/.node. Postinstall scripts
         // download/compile executables (esbuild, node-gyp output, .bin links)
-        // that also need signing. Check the ELF magic bytes.
-        let is_elf = {
-            let mut full = Vec::with_capacity(pkg_dir.len() + 1 + name.len());
-            full.extend_from_slice(pkg_dir);
-            full.push(b'/');
-            full.extend_from_slice(name);
-            let full_str = unsafe { core::str::from_utf8_unchecked(&full) };
-            let p = std::path::Path::new(full_str);
-            if let Ok(bytes) = std::fs::read(p) {
-                bytes.len() > 4 && bytes[..4] == [0x7f, 0x45, 0x4c, 0x46]
-            } else {
-                false
-            }
-        };
-        if !is_elf {
-            continue;
-        }
+        // that also need signing. `ensure_signed_inplace` checks the ELF
+        // magic with a 4-byte read and skips files this process already
+        // signed unchanged; non-ELF files are rejected without being read.
         let mut full = Vec::with_capacity(pkg_dir.len() + 1 + name.len());
         full.extend_from_slice(pkg_dir);
         full.push(b'/');
         full.extend_from_slice(name);
-        let full_str = unsafe { core::str::from_utf8_unchecked(&full) };
-        let p = std::path::Path::new(full_str);
-        // Re-sign unconditionally: a stale .codesign section defeats
-        // has_codesign() while the signature no longer covers the file, and
-        // exec then fails with EACCES. Strip any old section and re-sign
-        // (no-op strip when none present). Failures are silent — the
-        // postinstall/exec reports the real error.
-        let _ = ohos_sign::sign_selfsign_inplace_with_strip(p);
+        use std::os::unix::ffi::OsStrExt;
+        let p = std::path::Path::new(std::ffi::OsStr::from_bytes(&full));
+        let _ = ohos_sign::ensure_signed_inplace(p);
     }
 }

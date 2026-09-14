@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { bunExe, isPosix, tempDir } from "harness";
+import { bunExe, isOhos, isPosix, tempDir } from "harness";
 import path from "path";
 
 describe.if(isPosix)("garbage env", () => {
@@ -18,7 +18,7 @@ describe.if(isPosix)("garbage env", () => {
       expect(exitCode).toBe(0);
     }
 
-    if (process.platform === "openharmony") {
+    if (isOhos) {
       // Freshly compiled here via a raw `cc` invocation, so it never goes
       // through bun's own install/build signing pipeline — exec then fails
       // with EACCES/Permission denied.

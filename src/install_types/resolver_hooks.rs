@@ -817,7 +817,13 @@ impl OperatingSystem {
         | Self::ANDROID
         | Self::OPENHARMONY;
 
-    #[cfg(all(target_os = "linux", not(target_os = "android")))]
+    #[cfg(target_env = "ohos")]
+    pub const CURRENT: Self = Self(Self::OPENHARMONY);
+    #[cfg(all(
+        target_os = "linux",
+        not(target_os = "android"),
+        not(target_env = "ohos")
+    ))]
     pub const CURRENT: Self = Self(Self::LINUX);
     #[cfg(target_os = "android")]
     pub const CURRENT: Self = Self(Self::ANDROID);
@@ -855,7 +861,8 @@ impl OperatingSystem {
 
 negatable_names! { OperatingSystem: u16, OPERATING_SYSTEM_NAMES => [
     b"aix" => AIX, b"linux" => LINUX, b"sunos" => SUNOS, b"win32" => WIN32,
-    b"darwin" => DARWIN, b"android" => ANDROID, b"freebsd" => FREEBSD, b"openbsd" => OPENBSD,
+    b"darwin" => DARWIN, b"android" => ANDROID, b"openharmony" => OPENHARMONY,
+    b"freebsd" => FREEBSD, b"openbsd" => OPENBSD,
 ] }
 
 // ──────────────────────────────────────────────────────────────────────────

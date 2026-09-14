@@ -44,6 +44,9 @@ pub const IS_KQUEUE: bool = IS_MAC || IS_FREEBSD;
 pub(crate) const IS_AARCH64: bool = cfg!(target_arch = "aarch64");
 pub(crate) const IS_X64: bool = cfg!(target_arch = "x86_64");
 pub const IS_MUSL: bool = cfg!(any(target_env = "musl", target_env = "ohos"));
+/// OpenHarmony's libc is musl, but it is not Alpine: addon compatibility checks
+/// and release-artifact naming that key off `IS_MUSL` must branch separately.
+pub const IS_OHOS: bool = cfg!(target_env = "ohos");
 pub const IS_ANDROID: bool = cfg!(target_os = "android");
 pub const ALLOW_ASSERT: bool = IS_DEBUG || IS_TEST || build_options::RELEASE_SAFE;
 pub const CI_ASSERT: bool =

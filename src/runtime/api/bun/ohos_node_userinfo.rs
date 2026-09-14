@@ -2,10 +2,11 @@
 //! node` shebang siblings: npm/npx/corepack/yarn/pnpm/pnpx) a working
 //! `os.userInfo()`.
 //!
-//! The vendored ohos-compat-shim linked into *this* executable
-//! (`scripts/build/shims.ts`'s `needsOhosCompatShim`, workarounds.ts's
-//! `ohos-compat-shim-embed`) interposes `getpwuid_r` for calls that resolve
-//! through bun's own dynamic symbol table. That only covers code running
+//! In-process resolution: `getpwuid_r(getuid())` is used when the sandbox uid
+//! has a passwd entry (containers, dev hosts); otherwise the parent's
+//! `$USER`/`$LOGNAME` is carried through `BUN_OHOS_USERNAME`. (A future
+//! OS-account NDK lookup could replace that env fallback on devices where
+//! neither is available.) That only covers code running
 //! *inside this process* (and native modules it dlopens) — an exec'd `node`
 //! child gets the real musl libc, and HarmonyOS app-sandbox uids (2002xxxx)
 //! have no `/etc/passwd` entry, so `os.userInfo()` throws
@@ -163,11 +164,10 @@ fn is_disabled(env_array: &[*const c_char]) -> bool {
     {
         return true;
     }
-    // Honor the embedded shim's own toggle (ohos_compat_shim.c's
-    // OHOS_COMPAT_SHIM_DISABLE) so a test/user that turns off the shim's
-    // getpwuid_r interposer also turns this off -- otherwise "the shim is
-    // disabled" and "node still gets a working username" would contradict
-    // each other for anyone deliberately probing the raw ENOENT.
+    // Honor the legacy OHOS_COMPAT_SHIM_DISABLE toggle (the preload that used
+    // to provide getpwuid_r): a test/user probing the raw ENOENT must also
+    // turn this off, or "the shim is disabled" and "node still gets a working
+    // username" would contradict each other.
     let shim_disable = find_env_value(env_array, b"OHOS_COMPAT_SHIM_DISABLE")
         .or_else(|| std::env::var_os("OHOS_COMPAT_SHIM_DISABLE").map(|v| v.into_encoded_bytes()));
     if let Some(v) = shim_disable {
@@ -182,19 +182,32 @@ fn is_disabled(env_array: &[*const c_char]) -> bool {
 // Username / home-dir source of truth
 // ─────────────────────────────────────────────────────────────────────────
 
-struct ShimIdentity {
-    /// `getpwuid_r(getuid())` username via the embedded shim's interposed
-    /// symbol -- survives a device with no `$USER` set. `None` if the
-    /// lookup failed or returned something that can't safely become an env
-    /// value (contains `=` or NUL).
+struct UserIdentity {
+    /// `getpwuid_r(getuid())` username, or (when that has no passwd entry)
+    /// the parent's `$USER`/`$LOGNAME`. `None` when neither source yields
+    /// something that can safely become an env value (no `=` or NUL).
     username: Option<Box<[u8]>>,
     /// `pw_dir` from the same call, reused as a home-dir candidate for the
     /// preload directory search below so we don't pay for getpwuid_r twice.
     home: Option<Box<[u8]>>,
 }
 
-fn shim_identity() -> &'static ShimIdentity {
-    static ONCE: Once<ShimIdentity> = Once::new();
+/// Parent-process `$USER`/`$LOGNAME` fallback for sandbox uids with no passwd
+/// entry. Rejects values that can't become an env value (empty, `=`, NUL).
+fn env_username() -> Option<Box<[u8]>> {
+    for key in ["USER", "LOGNAME"] {
+        if let Some(v) = std::env::var_os(key) {
+            let bytes = v.into_encoded_bytes();
+            if !bytes.is_empty() && !bytes.contains(&b'=') && !bytes.contains(&0) {
+                return Some(bytes.into_boxed_slice());
+            }
+        }
+    }
+    None
+}
+
+fn user_identity() -> &'static UserIdentity {
+    static ONCE: Once<UserIdentity> = Once::new();
     ONCE.get_or_init(|| {
         // SAFETY: zeroed POD, same as node_os.rs's homedir() implementation.
         let mut pw: libc::passwd = bun_core::ffi::zeroed();
@@ -204,12 +217,9 @@ fn shim_identity() -> &'static ShimIdentity {
         let mut buf: &mut [u8] = &mut stack_buf;
 
         let ret: core::ffi::c_int = loop {
-            // NOTE: must be `getuid()`, not `geteuid()` -- the embedded
-            // shim's getpwuid_r interposer (ohos_compat_shim.c) only takes
-            // the OS-account fast path when `uid == getuid()`. Passing
-            // geteuid() here would silently fall through to the shim's own
-            // env-var fallback, defeating the point of calling this instead
-            // of just reading $USER ourselves.
+            // NOTE: `getuid()`, not `geteuid()`: the username is the account
+            // the process was started as; the env fallback below only covers
+            // environments where that uid has no passwd entry.
             let ret = unsafe {
                 libc::getpwuid_r(
                     sys::c::getuid(),
@@ -232,8 +242,8 @@ fn shim_identity() -> &'static ShimIdentity {
         };
 
         if ret != 0 || result.is_null() {
-            return ShimIdentity {
-                username: None,
+            return UserIdentity {
+                username: env_username(),
                 home: None,
             };
         }
@@ -243,8 +253,9 @@ fn shim_identity() -> &'static ShimIdentity {
             let bytes = unsafe { CStr::from_ptr(pw.pw_name) }.to_bytes();
             (!bytes.is_empty() && !bytes.contains(&b'=') && !bytes.contains(&0))
                 .then(|| Box::<[u8]>::from(bytes))
+                .or_else(env_username)
         } else {
-            None
+            env_username()
         };
         let home = if !pw.pw_dir.is_null() {
             // SAFETY: same as pw_name above.
@@ -254,7 +265,7 @@ fn shim_identity() -> &'static ShimIdentity {
             None
         };
 
-        ShimIdentity { username, home }
+        UserIdentity { username, home }
     })
 }
 
@@ -289,7 +300,7 @@ fn preload_path() -> Option<&'static [u8]> {
 }
 
 fn resolve_and_materialize() -> Option<ZBox> {
-    let ident = shim_identity();
+    let ident = user_identity();
     let filename = format!(
         "bun-ohos-userinfo-{:016x}.cjs",
         fnv1a64(PRELOAD_JS.as_bytes())
@@ -307,7 +318,7 @@ fn resolve_and_materialize() -> Option<ZBox> {
 /// a malformed argument node then refuses to parse), so any candidate
 /// containing one is skipped outright rather than escaped -- the hardcoded
 /// EL2 fallback never contains any of these, so there's always one left.
-fn candidate_dirs(ident: &ShimIdentity) -> Vec<Vec<u8>> {
+fn candidate_dirs(ident: &UserIdentity) -> Vec<Vec<u8>> {
     let mut out = Vec::with_capacity(3);
     if let Some(install) = env_var::BUN_INSTALL.get() {
         push_candidate(&mut out, install, b"/ohos");
@@ -317,9 +328,8 @@ fn candidate_dirs(ident: &ShimIdentity) -> Vec<Vec<u8>> {
         push_candidate(&mut out, home, b"/.bun/ohos");
     }
     // HarmonyOS per-HAP sandbox base -- always resolvable, no env
-    // dependency, and the shim itself falls back to this same path for HOME
-    // (ohos_compat_shim.c). Works identically on any device the compiled
-    // binary ships to.
+    // dependency. Works identically on any device the compiled binary ships
+    // to.
     out.push(b"/data/storage/el2/base/.bun-ohos".to_vec());
     out
 }
@@ -474,7 +484,7 @@ pub fn compute(argv0: &[u8], env_array: &[*const c_char]) -> Option<Injection> {
     }
     node_options.extend_from_slice(&flag);
 
-    let username = shim_identity().username.as_ref().map(|name| {
+    let username = user_identity().username.as_ref().map(|name| {
         let mut line = Vec::with_capacity(b"BUN_OHOS_USERNAME=".len() + name.len());
         line.extend_from_slice(b"BUN_OHOS_USERNAME=");
         line.extend_from_slice(name);

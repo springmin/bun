@@ -53,7 +53,9 @@ pub(crate) unsafe extern "C" fn Bun__addonNeedsGlibcOnMusl(
 
 #[cfg(any(target_os = "linux", target_os = "android"))]
 fn check_enabled() -> bool {
-    bun_core::Environment::IS_MUSL
+    // OHOS's libc is musl, but its addons are OHOS-targeted: the glibc
+    // DT_NEEDED probe and its Alpine/Debian error message do not apply.
+    (bun_core::Environment::IS_MUSL && !bun_core::Environment::IS_OHOS)
         || bun_core::env_var::BUN_INTERNAL_NAPI_FORCE_MUSL_CHECK.get() == Some(true)
 }
 

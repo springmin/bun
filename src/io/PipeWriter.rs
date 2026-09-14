@@ -160,6 +160,9 @@ pub trait PosixPipeWriter {
             // times, so the time window keeps this from misfiring there.
             // Reduced idle CPU on an affected OHOS build from ~100% to
             // ~6-8% (measured via /proc/<pid>/stat ground truth).
+            // OHOS-only: other kernels disarm EPOLLONESHOT correctly and must
+            // not pay the thread-local atomics/Instant per empty wake.
+            #[cfg(target_env = "ohos")]
             {
                 use core::sync::atomic::{AtomicI32, AtomicU32, Ordering};
                 use std::sync::Mutex;

@@ -513,6 +513,10 @@ impl Terminal {
                         // confirmed real-device OHOS kernel epoll defect
                         // (registration reports success, kernel never
                         // delivers) -- see OHOS_TEST_STATUS.md 2026-08-20.
+                        // OHOS-only: the watchdog thread and its periodic
+                        // epoll_ctl re-arms must not run for every Bun.Terminal
+                        // on other Unix platforms.
+                        #[cfg(target_env = "ohos")]
                         r.flags.insert(PosixFlags::EPOLL_REARM_WATCH);
                     });
                 }

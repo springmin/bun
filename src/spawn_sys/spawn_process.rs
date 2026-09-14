@@ -1073,23 +1073,14 @@ pub unsafe fn spawn_process_posix(
     {
         // OHOS seccomp blocks exec of unsigned ELF binaries. Sign any
         // native binary before spawning so posix_spawn doesn't return
-        // EACCES. Only checks regular files with ELF magic.
-        let argv0_str = unsafe { core::str::from_utf8_unchecked(argv0_cstr.to_bytes()) };
-        let p = std::path::Path::new(argv0_str);
+        // EACCES. `ensure_signed_inplace` reads four bytes to reject
+        // non-ELF files and skips files this process already signed
+        // unchanged, so a spawn no longer reads and rewrites the whole
+        // target binary. Failures are silent (see its doc).
+        use std::os::unix::ffi::OsStrExt;
+        let p = std::path::Path::new(std::ffi::OsStr::from_bytes(argv0_cstr.to_bytes()));
         if p.is_file() {
-            if let Ok(bytes) = std::fs::read(p) {
-                if bytes.len() > 4 && bytes[..4] == [0x7f, 0x45, 0x4c, 0x46] {
-                    // Unconditional re-sign: a stale .codesign section
-                    // defeats has_codesign() while the signature no longer
-                    // covers the file, and exec then fails with EACCES.
-                    // Failures are silent — re-signing a running host
-                    // executable (bun itself, /bin/sh, bash) fails with
-                    // ETXTBSY/EROFS and the error line would pollute stderr,
-                    // tripping `stderr.not.toContain("error:")` assertions;
-                    // posix_spawn below reports the real error.
-                    let _ = ohos_sign::sign_selfsign_inplace_with_strip(p);
-                }
-            }
+            let _ = ohos_sign::ensure_signed_inplace(p);
         }
     }
     let spawn_result = posix_spawn::spawn_z(argv0_cstr, Some(&actions), Some(&attr), argv, envp);
