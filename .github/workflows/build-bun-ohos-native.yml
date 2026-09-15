@@ -474,6 +474,7 @@ jobs:
               --os=ohos \
               --arch=aarch64 \
               --webkit=local \
+              --lto=off \
               --cache-dir="$cache_dir" \
               --ohos-sdk-root="$OHOS_SDK" \
               --ohos-sysroot="$SYSROOT" \

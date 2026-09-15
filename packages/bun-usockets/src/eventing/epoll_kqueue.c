@@ -469,7 +469,7 @@ void us_loop_run(struct us_loop_t *loop) {
     }
 }
 
-extern void Bun__JSC_onBeforeWait(void * _Nonnull jsc_vm, uint64_t now_ns);
+extern unsigned int Bun__JSC_onBeforeWait(void * _Nonnull jsc_vm, uint64_t now_ns);
 
 void us_loop_run_bun_tick(struct us_loop_t *loop, const struct timespec* timeout, uint64_t now_ns) {
     if (loop->num_polls == 0)
@@ -504,7 +504,7 @@ void us_loop_run_bun_tick(struct us_loop_t *loop, const struct timespec* timeout
      * (timer::All::get_timeout), reused here to rate-limit the idle sweep; 0
      * if it had none to share. Nothing measures a deadline against it. */
     if (will_idle_inside_event_loop && loop->data.jsc_vm)
-        Bun__JSC_onBeforeWait(loop->data.jsc_vm, now_ns);
+        (void) Bun__JSC_onBeforeWait(loop->data.jsc_vm, now_ns);
 
     /* Fetch ready polls */
 #ifdef LIBUS_USE_EPOLL

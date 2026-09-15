@@ -518,11 +518,16 @@ phase_build() {
     info "编译尝试 #$attempt"
 
     # 1. 只 configure (生成 build.ninja), 不运行 ninja
+    # LTO off: upstream now defaults ThinLTO on for every release build
+    # (config.ts), which flips WebKit's CMAKE_BUILD_TYPE RelWithDebInfo ->
+    # Release and invalidates the existing WebKit build dir. OHOS has never
+    # been validated with LTO; keep the previous codegen.
     if ! "$BUN" scripts/build.ts \
       --profile=release \
       --os=ohos \
       --arch=aarch64 \
       --webkit=local \
+      --lto=off \
       --cache-dir="$cache_dir" \
       --ohos-sdk-root="$OHOS_SDK" \
       --ohos-sysroot="$SYSROOT" \

@@ -219,6 +219,7 @@ run_codegen() {
         --target=aarch64-linux-ohos \
         --ohos-sysroot="$OHOS_SYSROOT" \
         --webkit=local \
+        --lto=off \
         --configure-only 2>&1 || {
         err "configure 失败"
         return 1

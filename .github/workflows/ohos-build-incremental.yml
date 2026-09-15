@@ -173,6 +173,7 @@ jobs:
             --os=ohos \
             --arch=aarch64 \
             --webkit=local \
+            --lto=off \
             --build-dir=build/release-ohos \
             --ohos-sysroot=$OHOS_SYSROOT \
             --configure-only

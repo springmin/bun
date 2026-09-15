@@ -429,6 +429,9 @@ export function resolveLlvmToolchain(
   | "strip"
   | "llvmStrip"
   | "nm"
+  | "readobj"
+  | "objdump"
+  | "cxxfilt"
   | "dsymutil"
   | "ccache"
   | "rc"
@@ -563,6 +566,11 @@ export function resolveLlvmToolchain(
       }
     } catch {}
   }
+  // The post-link binary checks (verify-binary.ts) read the executable with
+  // these; a partial install skips the checks rather than the build.
+  const readobj = findLlvmTool("llvm-readobj", paths, os, { checkVersion: false, required: false })?.path;
+  const objdump = findLlvmTool("llvm-objdump", paths, os, { checkVersion: false, required: false })?.path;
+  const cxxfilt = findLlvmTool("llvm-cxxfilt", paths, os, { checkVersion: false, required: false })?.path;
 
   // dsymutil: required on darwin; optional elsewhere (needed only when
   // cross-compiling a darwin release from a non-darwin host).
@@ -629,6 +637,9 @@ export function resolveLlvmToolchain(
     strip,
     llvmStrip,
     nm,
+    readobj,
+    objdump,
+    cxxfilt,
     dsymutil,
     ccache,
     rc,
@@ -713,7 +724,19 @@ export function findRustLld(os: OS): {
     const started = performance.now();
     spawnSync(
       rustup,
-      ["-q", "toolchain", "install", channel, "--no-self-update", "--profile", "minimal", "--component", "rust-src"],
+      [
+        "-q",
+        "toolchain",
+        "install",
+        channel,
+        "--no-self-update",
+        "--profile",
+        "minimal",
+        "--component",
+        "rust-src",
+        "--component",
+        "llvm-tools",
+      ],
       {
         encoding: "utf8",
         timeout: 300_000,

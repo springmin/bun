@@ -13,7 +13,7 @@
 | `scripts/ohos/build-bun-ohos-native.sh` | 原生编译脚本（llvm@21 工具链、V8 stub 注入、relink、签名） |
 | `scripts/ohos/build-bun-ohos.sh` | 交叉编译脚本（CI 模式） |
 | `scripts/ohos/build.sh` / `run-all-official*.sh` / `patch-node-gyp.sh` / `prepare-cross-libs.sh` / `git-fetch-upstream.sh` | 构建/测试辅助 |
-| `src/ohos_sign/` | OHOS ELF 签名工具（binary-sign-tool 替代） |
+| `src/ohos_sign/` | OHOS ELF 签名工具（binary-sign-tool 替代）：`ensure_signed_inplace`（进程内 (dev,ino,size,mtime) 缓存 + `is_validly_signed` 校验，仅签名失效才重签）、`write_signed`（temp+rename，兼容执行后被内核标记不可变的 inode） |
 | `src/runtime/api/bun/ohos_node_userinfo.rs` | node:os userInfo 沙箱 uid 适配 |
 | `patches/zstd/ohos-qsort-r.patch` | zstd qsort_r 适配 |
 | `.github/workflows/build-bun-ohos-native.yml` / `ohos-build-rust.yml` / `ohos-build-incremental.yml` | OHOS CI（`ohos-build.yml` 已删除） |
@@ -28,6 +28,8 @@
 | `scripts/build/rust.ts` | OHOS target 的 RUSTUP_HOME/CARGO_HOME 持久化 | 上游改 rust 构建时检查 |
 | `scripts/build/workarounds.ts` | "ohos-node-userinfo-preload" 等 | 上游改 preload 机制时检查 |
 | `scripts/build.ts` / `bun.ts` / `config.ts` / `source.ts` / `shims.ts` / `tools.ts` / `deps/{cares,zstd}.ts` | OHOS 平台分支（工具链路径、依赖构建） | 上游改构建管线时检查 |
+| OHOS 构建入口（`scripts/ohos/build-bun-ohos-native.sh`、`build-bun-ohos.sh`、`build.sh`、`.github/workflows/ohos-build-*.yml`） | 显式 `--lto=off`：上游 config.ts 把 ThinLTO 默认对所有 release 打开（原先只对 linux/darwin-cross/windows-cross），OHOS 从未用 LTO 验证过，且会翻转 WebKit 的 CMAKE_BUILD_TYPE（RelWithDebInfo→Release）使既有 WebKit 构建目录失效 | ⚠️ 上游再改 LTO 默认或 WebKit buildType 时重新评估 |
+| `scripts/build/source.ts` | 依赖编译的 PIC 策略：OHOS 与 Android 一样必须 `-fPIC`（上游 #42556 把 `-fno-pic -fno-pie` 默认推广到所有 unix；OHOS 上非 PIC 依赖会让链接器发 R_AARCH64_COPY，OHOS musl 不填充这些 libc 数据 → 启动即 abort） | ⚠️ 上游改 PIC 策略/新增依赖时检查 |
 | `rust-toolchain.toml` | nightly-2026-07-20（OHOS Tier3 需 build-std） | ⚠️ 上游 bump 时需确认 OHOS 可用 |
 | `.rust-nightly-version` | nightly-2026-07-20 | 同上 |
 
@@ -75,7 +77,7 @@
 | `src/jsc/bindings/bun-spawn.cpp` | OHOS spawn 平台分支 | 上游改时检查 |
 | `src/jsc/bindings/c-bindings.cpp` | close_range 的 `#if OS(LINUX)||OS(FREEBSD)` 块闭合 | 上游改 close_range 时检查 |
 | `src/jsc/bindings/BunProcess.cpp` / `bun-spawn.cpp` | OHOS 平台分支 | 上游改时检查 |
-| `src/install/PackageManager.rs` | node-gyp 的 CC/CXX/LDFLAGS 默认值（cc/c++ + `-Wl,--code-sign`）（1184） | ⚠️ 上游改 node-gyp 环境时，OHOS 默认编译器必须保留 |
+| `src/install/PackageManager.rs` | node-gyp 的 CC/CXX 默认值（cc/c++，~1237）；**不再传 `-Wl,--code-sign`**（现有 ld.lld 都不接受；签名由 install/dlopen 时的 `ohos_sign::ensure_signed_inplace` 负责） | ⚠️ 上游改 node-gyp 环境时，OHOS 默认编译器必须保留 |
 | `src/install/PackageInstaller.rs` / `src/install/isolated_install.rs` / `src/install/isolated_install/Hardlinker.rs` | OHOS 文件系统/硬链接差异 | 上游改 install 时检查 |
 | `src/resolver/lib.rs` / `src/resolver/resolver.rs` | OHOS 目录权限 fallback | 上游改 resolver 时检查 |
 | `src/runtime/api/bun/js_bun_spawn_bindings.rs` | OHOS node userInfo env 注入（ohos_node_userinfo，1015） | 上游改 spawn env 时检查 |

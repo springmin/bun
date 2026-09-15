@@ -92,6 +92,7 @@ OHOS_SYSROOT="${OHOS_SDK_ROOT}/ohos/native/sysroot"
 bun run build:release \
   --os=ohos --arch=aarch64 \
   --webkit=local \
+  --lto=off \
   --ohos-sysroot="$OHOS_SYSROOT" \
   --configure-only 2>&1 | tail -1
 
