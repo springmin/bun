@@ -75,9 +75,6 @@ RUST_VER="nightly-2026-07-20"
 RUST_HOME="${RUST_HOME:-$HOME/.rust-nightly/nightly-2026-07-20}"
 RUST_READY="$RUST_HOME/BREW_SIGNED_OK"
 
-# V8 stub (Rust napi 引用的 V8 符号)
-SHIM_DIR="/data/storage/el2/base/tmp/icu-shim"
-
 # 已知的陈旧 libc++ ABI 命名空间 (mangled 前缀)。std 里没有以双下划线开头的
 # 公开实体, 该前缀只会来自内联 ABI 命名空间, 不会误伤正常符号。
 KNOWN_STALE_ABI_MARKERS="_ZNSt3__h"
@@ -371,7 +368,7 @@ CLANGXX
   export OHOS_BUN_SIGNING_LINKER="$CXX"
   export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_OHOS_LINKER="$CXX"
 
-  # 并行度: 与 scripts/ohos/build.sh 一致 (默认 nproc, 可用 NINJA_JOBS 覆盖)
+  # 并行度: 默认 nproc, 可用 NINJA_JOBS 覆盖
   export NINJA_JOBS="${NINJA_JOBS:-$(nproc)}"
 
   # cargo sparse protocol
@@ -541,7 +538,7 @@ phase_build() {
     #    统一替换为 llvm@21 (否则 ninja regen 会覆盖手动修改)
     patch_ninja_llvm21 || return 1
 
-    # 3. 运行 ninja 编译 (并行度 NINJA_JOBS, 同 scripts/ohos/build.sh)
+    # 3. 运行 ninja 编译 (并行度 NINJA_JOBS)
     if ninja -C "$OUTDIR" -j"$NINJA_JOBS" bun 2>&1 | tee "$TMPDIR/build.log"; then
       ok "编译成功!"
       return 0
@@ -561,76 +558,6 @@ phase_build() {
 
   err "重试 $max_attempts 次后仍失败"
   return 1
-}
-
-# ─── 阶段8: V8 stub 编译 + 注入链接 ─────────────────────────────────────
-# ICU 已用 llvm@21 OHOS libc++ 头文件重编 (std::__h 命名空间), 由
-# libc++_static.a 真实解析, 不再需要 ICU ABI shim.
-# 仅剩 Rust napi_body 引用的 2 个 V8 符号需要 stub:
-#   - v8::Array::New(Local<Context>, size_t, function<...>)
-#   - v8::CpuProfiler::CollectSample(Isolate*, optional<size_t>)
-phase_icu_shim() {
-  info "=== 编译 V8 stub ==="
-  mkdir -p "$SHIM_DIR"
-
-  cat > "$SHIM_DIR/v8_stub.cpp" << 'V8EOF'
-extern "C" void _ZN2v85Array3NewENS_5LocalINS_7ContextEEEmNSt3__18functionIFNS_10MaybeLocalINS_5ValueEEEvEEE() {}
-extern "C" void _ZN2v811CpuProfiler13CollectSampleEPNS_7IsolateENSt3__18optionalImEE() {}
-V8EOF
-
-  "$LLVM21/bin/clang++" \
-    --target=aarch64-linux-ohos \
-    --sysroot="$SYSROOT" \
-    -D__MUSL__ -fPIC -Oz -fno-emulated-tls \
-    -c "$SHIM_DIR/v8_stub.cpp" -o "$SHIM_DIR/v8_stub.o"
-
-  # 将 v8_stub.o 注入最终链接命令 (link rule 的 command)
-  local build_ninja="$OUTDIR/build.ninja"
-  if [ -f "$build_ninja" ]; then
-    python3 - "$build_ninja" "$SHIM_DIR/v8_stub.o" << 'PYEOF'
-import os, sys
-nf, stub = sys.argv[1], sys.argv[2]
-with open(nf) as f:
-    lines = f.read().split("\n")
-# Only the final link rule: `@$out.rsp` also appears in the ar rule, and
-# inserting the stub there would add it to every archive.
-done = False
-for i, line in enumerate(lines):
-    if "stream.ts link" not in line or "@$out.rsp" not in line:
-        continue
-    if stub in line:
-        print("v8_stub.o 已存在")
-        done = True
-        break
-    lines[i] = line.replace("@$out.rsp", stub + " @$out.rsp", 1)
-    # Atomic replace: a truncating write races ninja's manifest read and
-    # produced "premature end of file; recovering" warnings.
-    tmp = nf + ".tmp"
-    with open(tmp, "w") as f:
-        f.write("\n".join(lines))
-    os.replace(tmp, nf)
-    done = True
-    print("v8_stub.o 已注入 link rule")
-    break
-if not done:
-    print("link rule not found; v8_stub.o NOT injected")
-PYEOF
-  fi
-
-  ok "V8 stub 已编译: $SHIM_DIR/v8_stub.o"
-}
-
-# ─── 阶段8b: 重新链接 (V8 stub 注入后必须重跑 link) ──────────────────────
-# phase_build 的 ninja link 发生在 stub 注入之前, 产物缺少 stub 符号,
-# 运行时报 "symbol not found" (v8::Array::New / CpuProfiler::CollectSample).
-# stub 注入 build.ninja 后重新 link, 解析 Rust napi 引用的 __1 符号.
-phase_relink() {
-  info "=== 重新链接 (V8 stub 生效) ==="
-  if ! ninja -C "$OUTDIR" -j"$NINJA_JOBS" bun 2>&1 | tee "$TMPDIR/build.log"; then
-    err "重新链接失败 (查看 $TMPDIR/build.log)"
-    return 1
-  fi
-  ok "重新链接完成"
 }
 
 # ─── 阶段9: 签名 ─────────────────────────────────────────────────────────
@@ -668,8 +595,6 @@ main() {
   phase_set_env
   phase_scan_stale_abi
   phase_build
-  phase_icu_shim
-  phase_relink
   phase_sign
 
   ok "全部完成! 运行: $OUTDIR/bun --version"

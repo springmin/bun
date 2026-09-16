@@ -2,7 +2,7 @@
 #
 # 核心逻辑和环境配置来自本地脚本 scripts/ohos/build-bun-ohos-native.sh,
 # 阶段一一对应 (环境检查 / Rust nightly / WebKit / 布局 / bun install /
-# 构建环境 / configure+build 重试 / V8 stub / relink / 签名)。
+# 构建环境 / configure+build 重试 / 签名)。
 # 结构参考 .github/workflows/ohos-build-rust.yml (触发、job、产物上传)。
 #
 # 运行环境 (self-hosted, HarmonyOS PC):
@@ -386,7 +386,7 @@ jobs:
           echo "RUSTUP_TOOLCHAIN=$RUST_VER" >> "$GITHUB_ENV"
           echo "RUSTC=$RUST_HOME/bin/rustc" >> "$GITHUB_ENV"
 
-          # 并行度: 与 scripts/ohos/build.sh 一致 (默认 nproc, 可用 NINJA_JOBS 覆盖)
+          # 并行度: 默认 nproc, 可用 NINJA_JOBS 覆盖
           echo "NINJA_JOBS=${NINJA_JOBS:-$(nproc)}" >> "$GITHUB_ENV"
 
           # OHOS 专用
@@ -496,7 +496,7 @@ jobs:
             # 统一工具链 (幂等; 覆盖 ninja regen 可能覆盖 patch 的情况)
             patch_ninja_llvm21 || exit 1
 
-            # ninja 编译 (并行度 NINJA_JOBS, 同 scripts/ohos/build.sh)
+            # ninja 编译 (并行度 NINJA_JOBS)
             if ninja -C build/release -j"$NINJA_JOBS" bun 2>&1 | tee "$TMPDIR/build.log"; then
               echo "build succeeded"
               exit 0
@@ -516,66 +516,6 @@ jobs:
 
           echo "failed after $max_attempts attempts"
           exit 1
-
-      # ─── phase_icu_shim ──────────────────────────────────────────────────
-      # ICU 已用 llvm@21 OHOS libc++ 头文件重编, 仅剩 Rust napi 引用的
-      # 2 个 V8 符号需要 stub (v8::Array::New / v8::CpuProfiler::CollectSample)。
-      - name: Compile + inject V8 stub
-        working-directory: /storage/Users/currentUser/.cache/ohos-bun-ci/src
-        run: |
-          SHIM_DIR=/data/storage/el2/base/tmp/icu-shim
-          mkdir -p "$SHIM_DIR"
-
-          cat > "$SHIM_DIR/v8_stub.cpp" << 'V8EOF'
-          extern "C" void _ZN2v85Array3NewENS_5LocalINS_7ContextEEEmNSt3__18functionIFNS_10MaybeLocalINS_5ValueEEEvEEE() {}
-          extern "C" void _ZN2v811CpuProfiler13CollectSampleEPNS_7IsolateENSt3__18optionalImEE() {}
-          V8EOF
-
-          "$LLVM21/bin/clang++" \
-            --target=aarch64-linux-ohos \
-            --sysroot="$SYSROOT" \
-            -D__MUSL__ -fPIC -Oz -fno-emulated-tls \
-            -c "$SHIM_DIR/v8_stub.cpp" -o "$SHIM_DIR/v8_stub.o"
-
-          # 将 v8_stub.o 注入最终链接命令 (link rule 的 command)
-          build_ninja="build/release/build.ninja"
-          if [ -f "$build_ninja" ]; then
-            python3 - "$build_ninja" "$SHIM_DIR/v8_stub.o" << 'PYEOF'
-          import os, sys
-          nf, stub = sys.argv[1], sys.argv[2]
-          with open(nf) as f:
-              lines = f.read().split("\n")
-          # Only the final link rule: `@$out.rsp` also appears in the ar rule, and
-          # inserting the stub there would add it to every archive.
-          done = False
-          for i, line in enumerate(lines):
-              if "stream.ts link" not in line or "@$out.rsp" not in line:
-                  continue
-              if stub in line:
-                  print("v8_stub.o already present")
-                  done = True
-                  break
-              lines[i] = line.replace("@$out.rsp", stub + " @$out.rsp", 1)
-              # Atomic replace: a truncating write races ninja's manifest read.
-              tmp = nf + ".tmp"
-              with open(tmp, "w") as f:
-                  f.write("\n".join(lines))
-              os.replace(tmp, nf)
-              done = True
-              print("v8_stub.o injected into link rule")
-              break
-          if not done:
-              print("link rule not found; v8_stub.o NOT injected")
-          PYEOF
-          fi
-          echo "V8 stub ready: $SHIM_DIR/v8_stub.o"
-
-      # ─── phase_relink ────────────────────────────────────────────────────
-      # stub 注入 build.ninja 后必须重跑 link, 否则运行时报 symbol not found。
-      - name: Relink (V8 stub)
-        working-directory: /storage/Users/currentUser/.cache/ohos-bun-ci/src
-        run: |
-          ninja -C build/release -j"$NINJA_JOBS" bun 2>&1 | tee "$TMPDIR/build.log"
 
       # ─── phase_sign ──────────────────────────────────────────────────────
       - name: Sign final binary

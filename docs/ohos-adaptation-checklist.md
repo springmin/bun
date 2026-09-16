@@ -10,9 +10,9 @@
 
 | 路径 | 用途 |
 |---|---|
-| `scripts/ohos/build-bun-ohos-native.sh` | 原生编译脚本（llvm@21 工具链、V8 stub 注入、relink、签名） |
+| `scripts/ohos/build-bun-ohos-native.sh` | 原生编译脚本（llvm@21 工具链、签名） |
 | `scripts/ohos/build-bun-ohos.sh` | 交叉编译脚本（CI 模式） |
-| `scripts/ohos/build.sh` / `run-all-official*.sh` / `patch-node-gyp.sh` / `prepare-cross-libs.sh` / `git-fetch-upstream.sh` | 构建/测试辅助 |
+| `scripts/ohos/build-bun-ohos.sh` / `run-all-official*.sh` / `patch-node-gyp.sh` | 构建/测试辅助（`build.sh`/`prepare-cross-libs.sh` 于 2026-09-16 删除：旧 SDK 布局 + 已废弃） |
 | `src/ohos_sign/` | OHOS ELF 签名工具（binary-sign-tool 替代）：`ensure_signed_inplace`（进程内 (dev,ino,size,mtime) 缓存 + `is_validly_signed` 校验，仅签名失效才重签）、`write_signed`（temp+rename，兼容执行后被内核标记不可变的 inode） |
 | `src/runtime/api/bun/ohos_node_userinfo.rs` | node:os userInfo 沙箱 uid 适配 |
 | `patches/zstd/ohos-qsort-r.patch` | zstd qsort_r 适配 |
@@ -70,9 +70,9 @@
 | `src/runtime/cli/run_command.rs` | ① 目录遍历 EACCES/EPERM 时 fallback HOME package.json（630-720）② **`bun node <file>`**：`IS_NODE_ARG` 检测 + exec_as_if_node 移除 "node" 占位 + 重解析 node flags（3077+） | ⚠️ 上游改 run_command 时，IS_NODE_ARG 逻辑和 OHOS 目录 fallback 必须保留（as-node 测试 11 个依赖） |
 | `src/runtime/cli/mod.rs` | `IS_NODE_ARG` 静态标志 + which() 的 `first_arg_name == "node"` 分支 | 同上 |
 | `src/runtime/ffi/ffi_body.rs` | aarch64 系统头/库路径：OHOS_SYSROOT → /system/include → /usr/include/aarch64-linux-gnu | 上游改 FFI 默认路径时检查 |
-| `src/runtime/napi/napi_body.rs` | OHOS 的 V8 符号引用（Array::New/CpuProfiler::CollectSample）——构建期 stub 依赖 | ⚠️ 上游改 napi 引用 V8 符号时，需同步更新 `build-bun-ohos-native.sh` 的 v8_stub.cpp（当前 stub 用 `NSt3__1` 拼写，而 napi_body 引用 `NSt4__n1`；C++ 兼容层提供后者，stub 目前是死重量） |
+| `src/runtime/napi/napi_body.rs` | OHOS 的 V8 符号引用（Array::New/CpuProfiler::CollectSample，`NSt4__n1` 拼写）——由 `src/jsc/bindings/v8/V8CpuProfiler.cpp`/`V8Array.cpp` 用 OHOS libc++ 自然 mangling 提供；历史 `v8_stub.cpp`（`NSt3__1`）+ 链接注入机制已于 2026-09-16 删除（注入规则在上游 link rule 重构后不再匹配、stub 符号无引用） | 上游改 napi 引用 V8 符号时，确认 C++ 兼容层仍有对应实现 |
 | `src/runtime/node/node_fs.rs` | `link` OHOS 走 linkat（5563） | 上游改 node:fs link 时检查 |
-| `src/jsc/bindings/v8/V8Array.cpp` | `__MUSL__` 条件（V8 符号 stub 相关） | 上游改 V8Array 时检查 |
+| `src/jsc/bindings/v8/V8Array.cpp` | `__MUSL__` 条件（禁用 libstdc++ 拼写的 alias；OHOS libc++ 走 `NSt4__n1`） | 上游改 V8Array 时检查 |
 | `src/jsc/bindings/highway_json.cpp` / `src/jsc/bindings/highway_sourcemap.cpp` / `src/jsc/bindings/highway_xml.cpp` | aarch64 SVE 禁用（`HWY_DISABLED_TARGETS`）——scalable SVE 缺符号 | 上游改 highway 时检查 |
 | `src/jsc/bindings/webcore/MessagePort.h` / `src/jsc/bindings/webcore/MessagePort.cpp` | ~~`m_closeEventPending` leak fix~~ 该字段从未被置位（已清理）；保留 `m_closeEventDispatched` 的 pending-activity 逻辑 | 上游改 MessagePort 生命周期时检查 |
 | `src/jsc/bindings/bun-spawn.cpp` | OHOS spawn 平台分支 | 上游改时检查 |
@@ -132,7 +132,6 @@
 8. filter_run.rs drain 缺口（见 §三 filter_run 行）
 9. MessagePort leak fix、highway SVE、V8Array、c-bindings
 10. sys/lib.rs fstat/statx/getcwd/link
-11. napi_body V8 符号 → v8_stub.cpp 同步（当前 mangling 不一致，stub 是死重量）
 
 ### 🟢 冲突概率低（上游不常动）
 12. ffi_body 系统路径、node_fs link、PackageManager CC/CXX、其余
