@@ -76,17 +76,34 @@ pub fn ensure_signed_inplace(path: &std::path::Path) -> bool {
         attempted_file_cache().lock().unwrap().insert(key);
         return false;
     }
+    // One read serves both the validation and the fallback signing below.
+    let Ok(bytes) = std::fs::read(path) else {
+        attempted_file_cache().lock().unwrap().insert(key);
+        return false;
+    };
     // A signature that still validates is left untouched: re-signing rewrites
     // the file (EACCES once OHOS marked it immutable after execution) and pays
     // a full read/strip/sign/write on every dlopen. The in-process cache above
     // already covers repeat lookups with a single stat.
-    if let Ok(bytes) = std::fs::read(path) {
-        if is_validly_signed(&bytes) {
-            signed_file_cache().lock().unwrap().insert(key);
-            return true;
-        }
+    if is_validly_signed(&bytes) {
+        signed_file_cache().lock().unwrap().insert(key);
+        return true;
     }
-    if sign_selfsign_inplace_with_strip(path).is_err() {
+    // `sign_selfsign_inplace_with_strip` silently skips non-ELF64 inputs
+    // (e.g. Mach-O templates for --target=bun-darwin-*); keep that skip while
+    // reusing the bytes above for the strip+sign.
+    if !elf::is_elf64(&bytes) {
+        signed_file_cache().lock().unwrap().insert(key);
+        return true;
+    }
+    let signed = match sign_selfsign_with_strip(&bytes) {
+        Ok(signed) => signed,
+        Err(_) => {
+            attempted_file_cache().lock().unwrap().insert(key);
+            return false;
+        }
+    };
+    if write_signed(path, &signed).is_err() {
         attempted_file_cache().lock().unwrap().insert(key);
         return false;
     }

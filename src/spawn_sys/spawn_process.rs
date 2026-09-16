@@ -15,6 +15,7 @@ use core::sync::atomic::Ordering;
 
 #[cfg(target_os = "macos")]
 use bun_core::Output;
+use bun_core::strings;
 #[cfg(unix)]
 use bun_sys::FdExt as _;
 use bun_sys::{self, Fd};
@@ -984,7 +985,11 @@ pub unsafe fn spawn_process_posix(
     // the already-signed interpreter; the script path becomes an argv entry
     // and is only opened/read (not exec'd) by the interpreter.
     #[cfg(target_env = "ohos")]
-    let _ohos_shebang_keepalive: Option<(std::ffi::CString, Vec<std::ffi::CString>, Vec<*const c_char>)> = 'shim: {
+    let _ohos_shebang_keepalive: Option<(
+        std::ffi::CString,
+        Vec<std::ffi::CString>,
+        Vec<*const c_char>,
+    )> = 'shim: {
         use std::io::Read as _;
         use std::os::unix::ffi::OsStrExt as _;
         let path = std::ffi::OsStr::from_bytes(argv0_cstr.to_bytes());
@@ -996,14 +1001,14 @@ pub unsafe fn spawn_process_posix(
         if &buf[..2] != b"#!" {
             break 'shim None;
         }
-        let line_end = buf[..n].iter().position(|&b| b == b'\n').unwrap_or(n);
+        let line_end = strings::index_of_char_usize(&buf[..n], b'\n').unwrap_or(n);
         let line = &buf[2..line_end];
         let mut i = 0usize;
         while i < line.len() && matches!(line[i], b' ' | b'\t') {
             i += 1;
         }
         let rest = &line[i..];
-        let (interp_b, arg_b): (&[u8], Option<&[u8]>) = match rest.iter().position(|&b| matches!(b, b' ' | b'\t')) {
+        let (interp_b, arg_b): (&[u8], Option<&[u8]>) = match strings::index_of_any(rest, b" \t") {
             Some(sp) => {
                 let interp = &rest[..sp];
                 let mut j = sp;

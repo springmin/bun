@@ -58,6 +58,10 @@ pub trait PosixPipeWriter {
     fn on_error(&mut self, err: sys::Error);
     fn get_file_type(&self) -> FileType;
     fn get_force_sync(&self) -> bool;
+    /// OHOS: expand the pipe's kernel buffer before its first write (no-op on
+    /// other platforms). See `expand_pipe_buffer`.
+    #[cfg(target_env = "ohos")]
+    fn ensure_pipe_expanded(&self);
 
     fn handle(&self) -> &PollOrFd;
 
@@ -76,7 +80,11 @@ pub trait PosixPipeWriter {
             FileType::NonblockingPipe | FileType::File => {
                 self.try_write_with_write_fn(buf, sys::write)
             }
-            FileType::Pipe => self.try_write_with_write_fn(buf, write_to_blocking_pipe),
+            FileType::Pipe => {
+                #[cfg(target_env = "ohos")]
+                self.ensure_pipe_expanded();
+                self.try_write_with_write_fn(buf, write_to_blocking_pipe)
+            }
             FileType::Socket => self.try_write_with_write_fn(buf, write_to_socket),
         }
     }
@@ -276,18 +284,20 @@ pub trait PosixPipeWriter {
 
 /// Free fn for the blocking-pipe path; the other file types are handled
 /// inline in `try_write` above.
-fn write_to_blocking_pipe(fd: Fd, buf: &[u8]) -> sys::Result<usize> {
-    // OHOS: expand pipe buffer from 4KB default to 1MB so large writes
-    // don't loop on every 4KB chunk + EAGAIN retry. Best-effort: if the
-    // fcntl fails (e.g. non-pipe fd or kernel doesn't support it), the
-    // write loop below falls back to the default buffer size.
-    #[cfg(target_env = "ohos")]
-    {
-        const F_SETPIPE_SZ: libc::c_int = 1031;
-        const ONE_MB: libc::c_int = 1048576;
-        let _ = unsafe { libc::fcntl(fd.0, F_SETPIPE_SZ, ONE_MB) };
-    }
+/// OHOS: expand a blocking pipe's kernel buffer (4 KB default → 1 MB) so large
+/// writes don't loop on 4 KB chunks + EAGAIN. Called once per writer, on its
+/// first pipe write — the fcntl is not free and the pipe keeps the size for its
+/// lifetime. Best-effort: it fails on non-pipe fds or kernels without
+/// F_SETPIPE_SZ and the write loop then falls back to the default size.
+#[cfg(target_env = "ohos")]
+#[inline]
+fn expand_pipe_buffer(fd: Fd) {
+    const F_SETPIPE_SZ: libc::c_int = 1031;
+    const ONE_MB: libc::c_int = 1048576;
+    let _ = unsafe { libc::fcntl(fd.0, F_SETPIPE_SZ, ONE_MB) };
+}
 
+fn write_to_blocking_pipe(fd: Fd, buf: &[u8]) -> sys::Result<usize> {
     #[cfg(any(target_os = "linux", target_os = "android"))]
     {
         if bun_sys::linux::RWFFlagSupport::is_maybe_supported() {
@@ -354,6 +364,8 @@ pub struct PosixBufferedWriter<Parent: PosixBufferedWriterParent> {
     pub(crate) pollable: bool,
     pub(crate) closed_without_reporting: bool,
     pub close_fd: bool,
+    /// OHOS: whether `expand_pipe_buffer` already ran for this writer's pipe.
+    pipe_size_set: core::cell::Cell<bool>,
 }
 
 impl<Parent: PosixBufferedWriterParent> Default for PosixBufferedWriter<Parent> {
@@ -365,6 +377,7 @@ impl<Parent: PosixBufferedWriterParent> Default for PosixBufferedWriter<Parent> 
             pollable: false,
             closed_without_reporting: false,
             close_fd: true,
+            pipe_size_set: core::cell::Cell::new(false),
         }
     }
 }
@@ -372,6 +385,12 @@ impl<Parent: PosixBufferedWriterParent> Default for PosixBufferedWriter<Parent> 
 impl<Parent: PosixBufferedWriterParent> PosixPipeWriter for PosixBufferedWriter<Parent> {
     fn get_fd(&self) -> Fd {
         self.handle.get_fd()
+    }
+    #[cfg(target_env = "ohos")]
+    fn ensure_pipe_expanded(&self) {
+        if !self.pipe_size_set.replace(true) {
+            expand_pipe_buffer(self.get_fd());
+        }
     }
     fn get_buffer(&self) -> &[u8] {
         self.get_buffer_internal()
@@ -679,6 +698,8 @@ pub struct PosixStreamingWriter<Parent: PosixStreamingWriterParent> {
     pub force_sync: bool,
     /// Last reported `WriteStatus == Pending` (i.e. write(2) returned EAGAIN).
     backed_up: core::cell::Cell<bool>,
+    /// OHOS: whether `expand_pipe_buffer` already ran for this writer's pipe.
+    pipe_size_set: core::cell::Cell<bool>,
 }
 
 impl<Parent: PosixStreamingWriterParent> Default for PosixStreamingWriter<Parent> {
@@ -691,6 +712,7 @@ impl<Parent: PosixStreamingWriterParent> Default for PosixStreamingWriter<Parent
             closed_without_reporting: false,
             force_sync: false,
             backed_up: core::cell::Cell::new(false),
+            pipe_size_set: core::cell::Cell::new(false),
         }
     }
 }
@@ -698,6 +720,12 @@ impl<Parent: PosixStreamingWriterParent> Default for PosixStreamingWriter<Parent
 impl<Parent: PosixStreamingWriterParent> PosixPipeWriter for PosixStreamingWriter<Parent> {
     fn get_fd(&self) -> Fd {
         self.handle.get_fd()
+    }
+    #[cfg(target_env = "ohos")]
+    fn ensure_pipe_expanded(&self) {
+        if !self.pipe_size_set.replace(true) {
+            expand_pipe_buffer(self.get_fd());
+        }
     }
     fn get_buffer(&self) -> &[u8] {
         self.outgoing.slice()
