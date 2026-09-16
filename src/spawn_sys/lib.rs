@@ -119,7 +119,17 @@ pub mod ffi {
 pub mod waiter_thread_flag {
     use core::sync::atomic::{AtomicBool, Ordering};
 
-    static SHOULD_USE_WAITER_THREAD: AtomicBool = AtomicBool::new(false);
+    // OHOS: default this on. `Process::watch()`'s async child-exit path
+    // (`pidfd_open()` + level-triggered epoll on the shared JS event loop)
+    // has no OHOS carve-out, unlike the synchronous spawn path. On device:
+    // after `Bun.serve()` serves a FIFO-backed response and
+    // `server.stop(true)` resolves, `Bun.spawn(...).exited` for a process
+    // forked right after never resolves — the child exits cleanly (observed
+    // as a zombie) while the parent's event-loop thread spins busy instead
+    // of blocking. The waiter thread's own `poll(eventfd, POLLIN, INFTIM)`
+    // sidesteps the shared loop. See process.rs:70-85 for the related
+    // dropped-one-shot pidfd hazard.
+    static SHOULD_USE_WAITER_THREAD: AtomicBool = AtomicBool::new(cfg!(target_env = "ohos"));
 
     /// The waiter thread is the fallback for Linux without pidfd. kqueue
     /// platforms always have EVFILT_PROC, and the thread's loop has no wakeup

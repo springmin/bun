@@ -94,7 +94,15 @@ function systemLibs(cfg: Config): string[] {
     // statically.
     libs.push("-lc", "-lpthread", "-ldl");
     if (cfg.ohosIcuDir) {
-      libs.push(`-L${resolve(cfg.ohosIcuDir, "lib")}`, "-licudata", "-licui18n", "-licuuc");
+      // Explicit .a paths: the keg's lib dir also carries .so, and ld
+      // prefers shared — that would bake DT_NEEDED libicu*.so.78 (with no
+      // usable rpath) into the binary, breaking it away from a device that
+      // happens to have those libs on LD_LIBRARY_PATH.
+      libs.push(
+        join(cfg.ohosIcuDir, "lib", "libicudata.a"),
+        join(cfg.ohosIcuDir, "lib", "libicui18n.a"),
+        join(cfg.ohosIcuDir, "lib", "libicuuc.a"),
+      );
     }
   }
 
