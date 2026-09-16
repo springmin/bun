@@ -57,7 +57,10 @@ fn trailing_data_survives_signing() {
 fn big_endian_elf_is_rejected() {
     let mut elf = minimal_elf64();
     elf[5] = 2; // ELFDATA2MSB
-    assert!(sign_selfsign(&elf).is_err(), "big-endian ELF must not be signed");
+    assert!(
+        sign_selfsign(&elf).is_err(),
+        "big-endian ELF must not be signed"
+    );
 }
 
 #[test]

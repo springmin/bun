@@ -21,7 +21,10 @@ impl fmt::Display for SignError {
             SignError::NoSectionHeaders => write!(f, "ELF has no section header table"),
             SignError::ShstrtabOutOfBounds => write!(f, "shstrtab out of bounds"),
             SignError::AlreadySigned => {
-                write!(f, "already has .codesign section; strip first or use --force")
+                write!(
+                    f,
+                    "already has .codesign section; strip first or use --force"
+                )
             }
             SignError::Io(e) => write!(f, "I/O error: {e}"),
         }
@@ -133,15 +136,29 @@ pub fn has_codesign_section(elf: &[u8]) -> bool {
     let Ok((e_shoff, e_shnum, e_shstrndx, e_shentsize)) = parse_header(elf) else {
         return false;
     };
-    find_section_by_name(elf, e_shoff, e_shnum, e_shstrndx, e_shentsize, CODESIGN_NAME).is_some()
+    find_section_by_name(
+        elf,
+        e_shoff,
+        e_shnum,
+        e_shstrndx,
+        e_shentsize,
+        CODESIGN_NAME,
+    )
+    .is_some()
 }
 
 /// Return `(file offset, size)` of the `.codesign` section when it is present
 /// and in bounds; used to validate an existing self-signature.
 pub fn codesign_section_range(elf: &[u8]) -> Option<(usize, usize)> {
     let (e_shoff, e_shnum, e_shstrndx, e_shentsize) = parse_header(elf).ok()?;
-    let cs_entry =
-        find_section_by_name(elf, e_shoff, e_shnum, e_shstrndx, e_shentsize, CODESIGN_NAME)?;
+    let cs_entry = find_section_by_name(
+        elf,
+        e_shoff,
+        e_shnum,
+        e_shstrndx,
+        e_shentsize,
+        CODESIGN_NAME,
+    )?;
     let off = read_u64(elf, cs_entry + 24) as usize;
     let size = read_u64(elf, cs_entry + 32) as usize;
     if off > elf.len() || size > elf.len() - off {
@@ -155,9 +172,14 @@ pub fn codesign_section_range(elf: &[u8]) -> Option<(usize, usize)> {
 pub fn strip(elf: &mut Vec<u8>) -> Result<bool, SignError> {
     let (e_shoff, e_shnum, e_shstrndx, e_shentsize) = parse_header(elf)?;
     let e_shentsize = e_shentsize as usize;
-    let Some(cs_entry_off) =
-        find_section_by_name(elf, e_shoff, e_shnum, e_shstrndx, e_shentsize as u16, CODESIGN_NAME)
-    else {
+    let Some(cs_entry_off) = find_section_by_name(
+        elf,
+        e_shoff,
+        e_shnum,
+        e_shstrndx,
+        e_shentsize as u16,
+        CODESIGN_NAME,
+    ) else {
         return Ok(false);
     };
     let cs_idx = (cs_entry_off - e_shoff as usize) / e_shentsize;
@@ -214,8 +236,16 @@ pub fn strip(elf: &mut Vec<u8>) -> Result<bool, SignError> {
     let shstr_entry_off_in_new = new_shstrndx * 64;
     if new_shstrndx < cs_idx {
         // entry index unchanged, update sh_offset and sh_size
-        write_u64(elf, new_sht_off_usize + shstr_entry_off_in_new + 24, new_shstr_off);
-        write_u64(elf, new_sht_off_usize + shstr_entry_off_in_new + 32, new_shstr.len() as u64);
+        write_u64(
+            elf,
+            new_sht_off_usize + shstr_entry_off_in_new + 24,
+            new_shstr_off,
+        );
+        write_u64(
+            elf,
+            new_sht_off_usize + shstr_entry_off_in_new + 32,
+            new_shstr.len() as u64,
+        );
     } else {
         // index shifted down by 1
         let adj = (new_shstrndx - 1) * 64;

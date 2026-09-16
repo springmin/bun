@@ -757,11 +757,7 @@ export const bunOnlyFlags: Flag[] = [
     // that WebKit's headers rely on for the U16_*/U_IS_BMP macros, and bun's
     // C++ must compile against the same cross-built ICU WebKit links.
     // C++ only: the `-include` would be parsed as assembly in the `.S` objects.
-    flag: c => [
-      ...(c.ohosIcuDir ? ["-isystem", join(c.ohosIcuDir, "include")] : []),
-      "-include",
-      "unicode/utf.h",
-    ],
+    flag: c => [...(c.ohosIcuDir ? ["-isystem", join(c.ohosIcuDir, "include")] : []), "-include", "unicode/utf.h"],
     when: c => c.ohos,
     lang: "cxx",
     desc: "OHOS: cross-built ICU headers + force unicode/utf.h (SDK utypes.h omits it)",
@@ -1554,9 +1550,7 @@ export const linkerFlags: Flag[] = [
         // namespaces are disjoint, so they coexist).
         // The SDK root can be either `<root>/native/...` or `<root>/ohos/native/...`,
         // so resolve the sibling `llvm/` dir from the sysroot itself.
-        ...(c.ohosSysroot
-          ? [join(dirname(c.ohosSysroot), "llvm/lib/aarch64-linux-ohos/libc++_shared.so")]
-          : []),
+        ...(c.ohosSysroot ? [join(dirname(c.ohosSysroot), "llvm/lib/aarch64-linux-ohos/libc++_shared.so")] : []),
         "-lc",
       ].filter(f => f !== ""),
     when: c => c.ohos,

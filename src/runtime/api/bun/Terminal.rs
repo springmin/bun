@@ -588,8 +588,7 @@ impl Terminal {
             #[cfg(debug_assertions)]
             eprintln!(
                 "T@{:x} init: replaying deferred exit_code={}",
-                parent_ptr as usize,
-                code
+                parent_ptr as usize, code
             );
             terminal.this_value.with_mut(|v| v.downgrade());
             terminal.call_exit_callback(code, None);

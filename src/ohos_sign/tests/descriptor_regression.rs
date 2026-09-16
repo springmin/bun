@@ -61,10 +61,14 @@ fn non_elf_input_is_skipped_silently() {
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("macho-template");
     let mut f = std::fs::File::create(&path).unwrap();
-    f.write_all(&[0xcf, 0xfa, 0xed, 0xfe, 0x07, 0x00, 0x00, 0x01]).unwrap(); // Mach-O MH_MAGIC_64
+    f.write_all(&[0xcf, 0xfa, 0xed, 0xfe, 0x07, 0x00, 0x00, 0x01])
+        .unwrap(); // Mach-O MH_MAGIC_64
     drop(f);
     let result = ohos_sign::sign_selfsign_inplace_with_strip(&path);
-    assert!(result.is_ok(), "non-ELF input must be skipped, got {result:?}");
+    assert!(
+        result.is_ok(),
+        "non-ELF input must be skipped, got {result:?}"
+    );
     // file must be untouched (not signed, not replaced)
     let bytes = std::fs::read(&path).unwrap();
     assert_eq!(bytes, [0xcf, 0xfa, 0xed, 0xfe, 0x07, 0x00, 0x00, 0x01]);

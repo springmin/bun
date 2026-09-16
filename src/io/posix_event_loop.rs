@@ -1373,8 +1373,7 @@ mod epoll_rearm_watchdog {
                 // on the same epfd from another thread. A failure here (most
                 // likely ENOENT: unregistered/closed between our snapshot and
                 // this call) is inert -- nothing to recover, the fd is gone.
-                let _ =
-                    unsafe { linux::epoll_ctl(watcher_fd, EPOLL::CTL_MOD, fd, &raw mut event) };
+                let _ = unsafe { linux::epoll_ctl(watcher_fd, EPOLL::CTL_MOD, fd, &raw mut event) };
             }
         }
     }
