@@ -2328,7 +2328,7 @@ pub(crate) fn inject<'a>(
                 // must not pollute stderr (test assertions like
                 // stderr.not.toContain("error:") would trip); the runtime
                 // reports the real load error.
-                let _ = ohos_sign::ensure_signed_inplace(out_path);
+                let _ = bun_sys::ensure_signed_inplace(out_path);
             }
             return Some(Injected::new(
                 cloned_executable_fd,
@@ -2903,7 +2903,7 @@ pub fn to_executable(
                     // (test assertions like stderr.not.toContain("error:")
                     // would trip); the user's exec of the output reports
                     // the real error.
-                    let _ = ohos_sign::ensure_signed_inplace(p);
+                    let _ = bun_sys::ensure_signed_inplace(p);
                 }
             }
         }

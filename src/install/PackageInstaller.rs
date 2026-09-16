@@ -2530,6 +2530,6 @@ pub(crate) fn ohos_sign_native_binaries(pkg_dir: &[u8]) {
         full.extend_from_slice(name);
         use std::os::unix::ffi::OsStrExt;
         let p = std::path::Path::new(std::ffi::OsStr::from_bytes(&full));
-        let _ = ohos_sign::ensure_signed_inplace(p);
+        let _ = bun_sys::ensure_signed_inplace(p);
     }
 }

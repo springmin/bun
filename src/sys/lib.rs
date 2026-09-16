@@ -89,6 +89,11 @@ pub mod walker_skippable;
 // kernel-version probe goes through `bun_core::linux_kernel_version()`.
 #[path = "copy_file.rs"]
 pub mod copy_file;
+/// OHOS: file-level ELF self-signing (see the module docs).
+#[cfg(target_env = "ohos")]
+mod ohos_sign_io;
+#[cfg(target_env = "ohos")]
+pub use ohos_sign_io::ensure_signed_inplace;
 
 // Directory-entry kind — same set as `bun_core::FileKind`.
 pub use bun_core::FileKind as EntryKind;
@@ -6274,7 +6279,7 @@ pub fn dlopen(filename: &ZStr, flags: i32) -> Option<*mut c_void> {
             // and skips files this process already signed unchanged.
             use std::os::unix::ffi::OsStrExt;
             let p = std::path::Path::new(std::ffi::OsStr::from_bytes(bytes));
-            let _ = ohos_sign::ensure_signed_inplace(p);
+            let _ = ohos_sign_io::ensure_signed_inplace(p);
         }
         ensure_signed(filename);
         // SAFETY: filename is NUL-terminated.

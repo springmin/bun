@@ -1085,7 +1085,7 @@ pub unsafe fn spawn_process_posix(
         use std::os::unix::ffi::OsStrExt;
         let p = std::path::Path::new(std::ffi::OsStr::from_bytes(argv0_cstr.to_bytes()));
         if p.is_file() {
-            let _ = ohos_sign::ensure_signed_inplace(p);
+            let _ = bun_sys::ensure_signed_inplace(p);
         }
     }
     let spawn_result = posix_spawn::spawn_z(argv0_cstr, Some(&actions), Some(&attr), argv, envp);
