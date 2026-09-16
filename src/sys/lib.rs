@@ -2665,10 +2665,9 @@ mod posix_impl {
     }
 
     /// `process.cwd()` entry point: like `getcwd`, but surfaces a rmdir'd cwd
-    /// as ENOENT (Node's uv_cwd() contract) instead of the ohos-compat-shim's
-    /// `$HOME` fallback. Narrow to `process.cwd()` only — bun's other getcwd
-    /// callers (install, resolver, lockfile) rely on the shim's `$HOME`
-    /// fallback for robustness.
+    /// as ENOENT (Node's uv_cwd() contract) rather than silently substituting
+    /// `$HOME`. Narrow to `process.cwd()` only — bun's other getcwd callers
+    /// (install, resolver, lockfile) use the plain `getcwd()`.
     #[cfg(target_env = "ohos")]
     pub fn process_cwd(buf: &mut [u8]) -> Maybe<usize> {
         let result = getcwd(buf);
@@ -2710,23 +2709,56 @@ mod posix_impl {
     pub fn linkat(src_dir: impl AsFd, src: &ZStr, dest_dir: impl AsFd, dest: &ZStr) -> Maybe<()> {
         let src_dir = src_dir.as_fd();
         let dest_dir = dest_dir.as_fd();
-        // Tags as `.link`.
-        check_p!(
-            // SAFETY: both dir fds are live (or AT_FDCWD); both `ZStr`s are
-            // valid NUL-terminated C strings.
-            unsafe {
-                libc::linkat(
-                    src_dir.native(),
-                    src.as_ptr(),
-                    dest_dir.native(),
-                    dest.as_ptr(),
-                    0,
-                )
-            },
-            Tag::link,
-            src
-        );
-        Ok(())
+        // SAFETY: both dir fds are live (or AT_FDCWD); both `ZStr`s are
+        // valid NUL-terminated C strings.
+        let rc = unsafe {
+            libc::linkat(
+                src_dir.native(),
+                src.as_ptr(),
+                dest_dir.native(),
+                dest.as_ptr(),
+                0,
+            )
+        };
+        if rc == 0 {
+            return Ok(());
+        }
+        let errno = last_errno();
+        // OHOS: the sandbox rejects hardlinks (EACCES on hmdfs, EPERM under
+        // /storage). Emulate the link with a byte copy — the same fallback the
+        // deleted LD_PRELOAD shim provided for this symbol. The copy has a
+        // different inode, exactly like the shim's.
+        #[cfg(target_env = "ohos")]
+        if errno == libc::EACCES || errno == libc::EPERM {
+            return linkat_copy_fallback(src_dir, src, dest_dir, dest);
+        }
+        Err(Error::from_code_int(errno, Tag::link).with_path(src.as_bytes()))
+    }
+
+    /// OHOS-only; see the call site in [`linkat`]. `dest` is created
+    /// exclusively, so `EEXIST`/`ENOENT` keep their `link(2)` semantics, and
+    /// a directory source keeps returning `EPERM` instead of a copy error.
+    #[cfg(target_env = "ohos")]
+    fn linkat_copy_fallback(src_dir: Fd, src: &ZStr, dest_dir: Fd, dest: &ZStr) -> Maybe<()> {
+        let source = File::openat(src_dir, src, O::RDONLY | O::CLOEXEC, 0)?;
+        let stat = source.stat()?;
+        if stat.st_mode & libc::S_IFMT == libc::S_IFDIR {
+            let _ = source.close();
+            return Err(Error::from_code(E::EPERM, Tag::link).with_path(src.as_bytes()));
+        }
+        let dest_file = File::openat(
+            dest_dir,
+            dest,
+            O::WRONLY | O::CREAT | O::EXCL | O::CLOEXEC,
+            stat.st_mode as Mode,
+        )?;
+        let result = copy_file(source.fd(), dest_file.fd());
+        if result.is_err() {
+            let _ = unlinkat(dest_dir, dest);
+        }
+        let _ = source.close();
+        let _ = dest_file.close();
+        result
     }
     /// Materialize an `O_TMPFILE` fd. Fast path
     /// uses `linkat(tmpfd, "", dirfd, name, AT_EMPTY_PATH)` (requires

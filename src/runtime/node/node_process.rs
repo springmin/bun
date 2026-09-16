@@ -444,8 +444,8 @@ mod _impl {
         // process.cwd() calls uv_cwd() so a deleted cwd must surface here.
         let mut buf = bun_paths::path_buffer_pool::get();
         // OHOS: use process_cwd(), which surfaces a rmdir'd cwd as ENOENT
-        // (Node's uv_cwd() contract) instead of the ohos-compat-shim's $HOME
-        // fallback. Other platforms use the plain getcwd().
+        // (Node's uv_cwd() contract) rather than silently substituting
+        // $HOME. Other platforms use the plain getcwd().
         #[cfg(target_env = "ohos")]
         let result = bun_sys::process_cwd(&mut buf[..]);
         #[cfg(not(target_env = "ohos"))]

@@ -5351,33 +5351,16 @@ impl NodeFS {
                 Ok(result) => Ok(result),
             };
         }
-        // OHOS: go through `linkat` rather than `link`. The kernel refuses the
-        // bare linkat syscall with EACCES, and ohos-compat-shim works around
-        // that by interposing the libc *symbol* `linkat` (falling back to a
-        // byte copy). musl implements `link(a, b)` as a direct
-        // `syscall(SYS_linkat, AT_FDCWD, a, AT_FDCWD, b, 0)`, so it never
-        // reaches that symbol and never gets the workaround. Measured
-        // on-device: the libc `linkat` symbol succeeds where both `link()` and
-        // the raw syscall return EACCES, and stripping the shim from
-        // LD_PRELOAD makes `linkat` fail too. AT_FDCWD makes both paths
-        // resolve exactly as `link` would.
-        // SAFETY: `from`/`to` are NUL-terminated by `slice_z`.
+        // OHOS: `bun_sys::linkat` falls back to a byte copy when the sandbox
+        // refuses the hardlink (EACCES on hmdfs, EPERM under /storage) — the
+        // same behavior the deleted LD_PRELOAD shim provided. A plain
+        // `link(2)` never reaches that fallback: musl implements it as a raw
+        // `linkat` syscall.
         #[cfg(all(not(windows), target_env = "ohos"))]
-        return Maybe::<ret::Link>::errno_sys_pd(
-            unsafe {
-                libc::linkat(
-                    libc::AT_FDCWD,
-                    from.as_ptr().cast(),
-                    libc::AT_FDCWD,
-                    to.as_ptr().cast(),
-                    0,
-                )
-            },
-            sys::Tag::link,
-            args.old_path.slice(),
-            args.new_path.slice(),
-        )
-        .unwrap_or(Ok(()));
+        return match Syscall::linkat(FD::cwd(), from, FD::cwd(), to) {
+            Ok(()) => Ok(()),
+            Err(err) => Err(err.with_path_dest(args.old_path.slice(), args.new_path.slice())),
+        };
 
         // SAFETY: `from`/`to` are NUL-terminated by `slice_z`; `link(2)` is the libc FFI.
         #[cfg(all(not(windows), not(target_env = "ohos")))]

@@ -33,8 +33,7 @@
 //! cached "we already wrote it" flag.
 //!
 //! Registered in `scripts/build/workarounds.ts` as
-//! `ohos-node-userinfo-preload` (separate entry from `ohos-compat-shim-embed`
-//! — the cleanup actions don't overlap).
+//! `ohos-node-userinfo-preload`.
 
 use core::ffi::{CStr, c_char};
 
@@ -45,9 +44,8 @@ use bun_sys as sys;
 // The preload itself
 // ─────────────────────────────────────────────────────────────────────────
 
-/// Probe-then-fallback, matching ohos-compat-shim's own design: the real
-/// `os.userInfo()` is tried first and the patch only installs when it
-/// actually throws, so this file is an exact no-op anywhere the syscall
+/// Probe-then-fallback: the real `os.userInfo()` is tried first and the
+/// patch only installs when it actually throws, so this file is an exact no-op anywhere the syscall
 /// already works (a non-OHOS `NODE_OPTIONS` leak, a future OS fix, a
 /// container where the sandbox uid happens to resolve).
 const PRELOAD_JS: &str = r#""use strict";
@@ -163,17 +161,6 @@ fn is_disabled(env_array: &[*const c_char]) -> bool {
         || std::env::var_os("BUN_OHOS_NO_NODE_USERINFO").is_some()
     {
         return true;
-    }
-    // Honor the legacy OHOS_COMPAT_SHIM_DISABLE toggle (the preload that used
-    // to provide getpwuid_r): a test/user probing the raw ENOENT must also
-    // turn this off, or "the shim is disabled" and "node still gets a working
-    // username" would contradict each other.
-    let shim_disable = find_env_value(env_array, b"OHOS_COMPAT_SHIM_DISABLE")
-        .or_else(|| std::env::var_os("OHOS_COMPAT_SHIM_DISABLE").map(|v| v.into_encoded_bytes()));
-    if let Some(v) = shim_disable {
-        if v.split(|&b| b == b',').any(|s| s == b"getpwuid_r") {
-            return true;
-        }
     }
     false
 }
@@ -615,16 +602,14 @@ mod tests {
     }
 
     #[test]
-    fn is_disabled_reads_shim_disable_getpwuid_r_from_env_array() {
+    fn related_toggles_do_not_disable_node_userinfo() {
         use std::ffi::CString;
-        let entries: Vec<CString> = vec![CString::new("OHOS_COMPAT_SHIM_DISABLE=close_range,getpwuid_r").unwrap()];
+        // The shim-era symbol list must no longer have any effect: only
+        // BUN_OHOS_NO_NODE_USERINFO turns this off.
+        let entries: Vec<CString> =
+            vec![CString::new("OHOS_COMPAT_SHIM_DISABLE=close_range,getpwuid_r").unwrap()];
         let ptrs: Vec<*const c_char> = entries.iter().map(|e| e.as_ptr()).collect();
-        assert!(is_disabled(&ptrs));
-
-        // Disabling an unrelated symbol must not disable this.
-        let entries_other: Vec<CString> = vec![CString::new("OHOS_COMPAT_SHIM_DISABLE=close_range").unwrap()];
-        let ptrs_other: Vec<*const c_char> = entries_other.iter().map(|e| e.as_ptr()).collect();
-        assert!(!is_disabled(&ptrs_other));
+        assert!(!is_disabled(&ptrs));
     }
 
     #[test]

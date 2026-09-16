@@ -1263,11 +1263,9 @@ pub type FlagsSet = enumset::EnumSet<Flags>;
 /// fix for a fd class with confirmed exposure, not a blanket tax on every
 /// Readable registration in the runtime.
 ///
-/// Backoff mirrors `ohos-compat-shim`'s `epoll_pipe` interceptor (same
-/// defect family, different interception layer -- this path is bun's own
-/// direct `epoll_ctl` call via uws, never passes through the shim's
-/// LD_PRELOAD libc-symbol layer): any real registration activity (a fresh
-/// ADD or a natural WouldBlock-driven MOD) resets an fd's poke interval to
+/// The backoff follows the deleted LD_PRELOAD shim's `epoll_pipe`
+/// interceptor for the same defect family: any real registration activity (a
+/// fresh ADD or a natural WouldBlock-driven MOD) resets an fd's poke interval to
 /// `BASE_POKE_INTERVAL`; each watchdog-driven poke with no intervening
 /// natural activity doubles it, capped at `MAX_POKE_INTERVAL`. A healthy,
 /// actively-read fd re-registers constantly on its own and never accrues a

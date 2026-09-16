@@ -58,7 +58,7 @@
 | `statx`（2183+） | OHOS 归入 musl/raw-syscall 分支（libc 无 statx wrapper） | 上游改 statx 时检查 cfg 分组 |
 | `statx_fallback`（2369） | OHOS 的 EBADF 也触发 fallback（socket fd 上 statx 返回 EBADF），但**不再 latch** 全局禁用 statx（只有 ENOSYS/EOPNOTSUPP/EPERM/EINVAL 才禁用） | 同上 |
 | `getcwd`（2684） | OHOS hmdfs 缓存已删 cwd → stat(".") 探测 ENOENT | 上游改 getcwd 时检查 |
-| `link`（2709 附近） | OHOS 裸 linkat syscall EACCES → 走 libc `linkat` 符号 | ⚠️ 上游改 link 时，OHOS 必须走 linkat |
+| `linkat`（~2710） | OHOS 沙箱拒绝硬链接（hmdfs EACCES、/storage EPERM）→ **源码内字节复制回退**（`linkat_copy_fallback`，`#[cfg(target_env="ohos")]`；2026-09-16 起替代已删除的 LD_PRELOAD shim 的 `linkat` interpose）；复制产物 inode 不同，`EEXIST/ENOENT/目录 EPERM` 语义保持 | ⚠️ 上游改 linkat 时检查回退仍在，且 node_fs/install 调用点未被绕过 |
 | `lchmod`（2955 附近） | **OHOS 无 fchmodat2（syscall 452 被 seccomp SIGSYS）** → 回退普通 chmod（bin 链接执行位依赖） | ⚠️ 上游改 lchmod 时，OHOS 回退必须保留（node-gyp 测试依赖） |
 | `src/sys/linux_syscall.rs` | OHOS syscall 包装差异（fstat/statx 等） | 上游改时检查 |
 | `src/bun_core/env.rs` | `IS_MUSL = cfg!(musl \|\| ohos)`；另新增 `IS_OHOS`（`cfg(target_env = "ohos")`，用于 NAPI glibc 检查等需要区分 Alpine 的场景） | 上游改 env 检测时检查 |
@@ -71,7 +71,7 @@
 | `src/runtime/cli/mod.rs` | `IS_NODE_ARG` 静态标志 + which() 的 `first_arg_name == "node"` 分支 | 同上 |
 | `src/runtime/ffi/ffi_body.rs` | aarch64 系统头/库路径：OHOS_SYSROOT → /system/include → /usr/include/aarch64-linux-gnu | 上游改 FFI 默认路径时检查 |
 | `src/runtime/napi/napi_body.rs` | OHOS 的 V8 符号引用（Array::New/CpuProfiler::CollectSample，`NSt4__n1` 拼写）——由 `src/jsc/bindings/v8/V8CpuProfiler.cpp`/`V8Array.cpp` 用 OHOS libc++ 自然 mangling 提供；历史 `v8_stub.cpp`（`NSt3__1`）+ 链接注入机制已于 2026-09-16 删除（注入规则在上游 link rule 重构后不再匹配、stub 符号无引用） | 上游改 napi 引用 V8 符号时，确认 C++ 兼容层仍有对应实现 |
-| `src/runtime/node/node_fs.rs` | `link` OHOS 走 linkat（5563） | 上游改 node:fs link 时检查 |
+| `src/runtime/node/node_fs.rs` | `link` OHOS 走 `bun_sys::linkat`（继承复制回退），`fs.linkSync` 因此可用 | 上游改 node:fs link 时检查 |
 | `src/jsc/bindings/v8/V8Array.cpp` | `__MUSL__` 条件（禁用 libstdc++ 拼写的 alias；OHOS libc++ 走 `NSt4__n1`） | 上游改 V8Array 时检查 |
 | `src/jsc/bindings/highway_json.cpp` / `src/jsc/bindings/highway_sourcemap.cpp` / `src/jsc/bindings/highway_xml.cpp` | aarch64 SVE 禁用（`HWY_DISABLED_TARGETS`）——scalable SVE 缺符号 | 上游改 highway 时检查 |
 | `src/jsc/bindings/webcore/MessagePort.h` / `src/jsc/bindings/webcore/MessagePort.cpp` | ~~`m_closeEventPending` leak fix~~ 该字段从未被置位（已清理）；保留 `m_closeEventDispatched` 的 pending-activity 逻辑 | 上游改 MessagePort 生命周期时检查 |
@@ -117,6 +117,24 @@
 
 ---
 
+## 六-2、无 LD_PRELOAD shim 行为矩阵（2026-09-16）
+
+旧 `ohos_compat_shim.c`（LD_PRELOAD 符号 interpose）已删除。"完整去 shim"后每个曾由它补偿的行为都有源码级实现或确认无需；上游改动相关代码时查此表：
+
+| 旧 shim 行为 | 现在由谁承担 | 守护测试 |
+|---|---|---|
+| `linkat` 硬链接回退 | `bun_sys::linkat` 的 `linkat_copy_fallback`（OHOS 字节复制） | `test/js/bun/util/ohos-fs-fallbacks.test.ts` |
+| `symlinkat` | 设备原生支持（无需回退） | 同上 |
+| `close_range` / `syscall` | `bun_close_range` 在 OHOS 返回 ENOSYS，调用点 `#if !defined(__OHOS__)` 走 close 循环 | spawn/fd 相关用例 |
+| `fchmodat2`(452) | `sys/lib.rs` lchmod → `SYS_fchmodat` | node-gyp lifecycle |
+| `getpwuid_r` | `ohos_node_userinfo`（注入 + `$USER/$LOGNAME` 回退）；遗留 `OHOS_COMPAT_SHIM_DISABLE` 开关已删除 | `test/js/bun/spawn/spawn-ohos-node-userinfo.test.ts` |
+| `getcwd` | `bun_core::cwd_is_deleted_ohos`（`/proc/self/cwd` 探测） | deleted-cwd 用例 |
+| `getaddrinfo` | 原生 DNS（loopback/ADDRCONFIG 对齐，T49） | T49 相关用例 |
+| `tmpfile` | 启动期 `TMPDIR` 回退（`bin_entry`） | install 用例 |
+| `splice` | 全仓无调用点，不需要 | — |
+| `epoll_ctl`/`epoll_pwait`/`poll`/`ppoll`/`epoll_pipe` | T50 原生 workaround：multi_run drain / `deinit_poll_keep_fd` / `tick_without_idle`、Terminal `EPOLL_REARM_WATCH`、PipeWriter storm 检测 | `multi-run`、terminal 套件 |
+| `close` | 仅 shim 内部簿记 | — |
+
 ## 七、merge 上游时的检查清单（按优先级）
 
 ### 🔴 必须人工验证（历史冲突/高风险）
@@ -139,7 +157,7 @@
 ## 八、验证命令（merge 后必跑）
 
 ```bash
-# 构建（脚本含 configure + relink + 签名）
+# 构建（脚本含 configure + 签名）
 ./scripts/ohos/build-bun-ohos-native.sh
 
 # 核心回归（部署到 all-tests 后）
