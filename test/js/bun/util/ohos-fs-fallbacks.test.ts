@@ -9,6 +9,15 @@ import { join } from "node:path";
 // interposer. These tests pin that fallback and the link(2)-shaped error
 // cases so the de-shimmed behavior cannot regress silently.
 describe.skipIf(!isOhos)("OHOS fs fallbacks without the compat shim", () => {
+  function errorCode(body: () => unknown): string | undefined {
+    try {
+      body();
+    } catch (error: any) {
+      return error?.code;
+    }
+    return undefined;
+  }
+
   test("linkSync produces the destination contents", () => {
     using dir = tempDir("ohos-link-copy", { "src.txt": "contents" });
     const src = join(String(dir), "src.txt");
@@ -29,13 +38,13 @@ describe.skipIf(!isOhos)("OHOS fs fallbacks without the compat shim", () => {
     const dst = join(String(dir), "dst.txt");
 
     linkSync(src, dst);
-    expect(() => linkSync(src, dst)).toThrow();
-    expect(() => linkSync(join(String(dir), "absent"), join(String(dir), "other"))).toThrow();
+    expect(errorCode(() => linkSync(src, dst))).toBe("EEXIST");
+    expect(errorCode(() => linkSync(join(String(dir), "absent"), join(String(dir), "other")))).toBe("ENOENT");
   });
 
-  test("linkSync on a directory still fails", () => {
+  test("linkSync on a directory still fails with EPERM", () => {
     using dir = tempDir("ohos-link-dir", {});
-    expect(() => linkSync(String(dir), join(String(dir), "dirlink"))).toThrow();
+    expect(errorCode(() => linkSync(String(dir), join(String(dir), "dirlink")))).toBe("EPERM");
   });
 
   test("symlinkSync works natively", () => {

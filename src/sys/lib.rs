@@ -2750,7 +2750,7 @@ mod posix_impl {
             dest_dir,
             dest,
             O::WRONLY | O::CREAT | O::EXCL | O::CLOEXEC,
-            stat.st_mode as Mode,
+            (stat.st_mode & 0o7777) as Mode,
         )?;
         let result = copy_file(source.fd(), dest_file.fd());
         if result.is_err() {
