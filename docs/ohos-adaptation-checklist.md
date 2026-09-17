@@ -45,7 +45,7 @@
 | `src/runtime/cli/multi_run.rs` | ① `ProcessHandle::start`（~237/253）：start 后 `deinit_poll_keep_fd()` 取消 epoll 注册 ② `drain_ohos_pipes`/`drain_one`（579/593）：raw `libc::read` 循环到 EAGAIN，EOF 靠 read=0；不再咨询 FIONREAD（其值从未被使用，且 ioctl 失败会导致该管道永不排空）；`drain_one` 返回是否有数据 ③ 主循环（1372）：`tick_without_idle` 非阻塞 tick + drain + 自适应 sleep（有数据 2ms，连续空转后 10ms） ④ `drain_and_close_pipes`（319-355）：OHOS 分支同步 raw drain + force-end | ⚠️ **上游已多次改动此文件**（#37206/#37286）：每次 merge 需确认 OHOS 门控保留且与新逻辑兼容（drain_and_close_pipes 的 OHOS 分支是"同步 drain 后再 force-end"，不能整体跳过也不能只用 BufferedReader::read） |
 | `src/io/pipes.rs` | `PollOrFd::deinit_poll_keep_fd()`（pub，仅 OHOS multi_run 用） | 上游改 PollOrFd 时检查该方法保留 |
 | `src/event_loop/MiniEventLoop.rs` | `tick_without_idle` 改 `pub`（OHOS multi_run 跨 crate 调用） | ⚠️ 上游是 `pub(crate)`——上游改回 pub(crate) 会破坏 OHOS 编译 |
-| `src/runtime/cli/filter_run.rs` | ① `--workspaces/--filter` 的 pipe_setup（SOCKET|NONBLOCKING flags）② `drain_and_close_pipes` OHOS 跳过 `BufferedReader::read`（保留 deinit） | ⚠️ **已知缺口**：`filter_run` 没有 `drain_ohos_pipes`（该函数只在 multi_run.rs），其注释对 drain 的引用已过时；`bun run --filter/--workspaces` 的管道排空需在设备上复测 |
+| `src/runtime/cli/filter_run.rs` | ① `--workspaces/--filter` 的 pipe_setup（SOCKET|NONBLOCKING flags）② **OHOS T50 排空（2026-09-17 按 multi_run 补齐）**：启动后 `deinit_poll_keep_fd`（反注册 poll，tick 直读是唯一 reader）、主循环 `tick_without_idle` + `drain_ohos_pipes`/`drain_one` 原始 fd 直读到 EAGAIN（EOF 做 `remaining_fds` 记账 + `maybe_finish`）、退出路径先排空 fd 再 force-end | 上游改 filter_run 的 drain/event-loop 时检查；`test/cli/run/filter-workspace.test.ts` 必须保持全通过（LLVM23 构建中曾因旧「跳过」实现丢输出 23 失败） |
 | `src/runtime/api/bun/spawn/stdio.rs` | `can_use_memfd`/`use_memfd` OHOS 返回 false（memfd 写入对 fstat 不可见 + 子进程崩溃） | ⚠️ 上游若改 memfd 逻辑，OHOS 必须保持禁用 |
 | `src/sys/lib.rs` `can_use_memfd` | OHOS 全局禁用 memfd（`excluded even though memfd_create works`） | 同上，sys 层统一门控 |
 | `src/spawn_sys/spawn_process.rs` | ① memfd fast-path 三处 `not(target_env="ohos")`（CStr import、'stdio label、use_memfd 块）→ OHOS 回退 socketpair ② **shebang 手动解析**（1004-1090）：OHOS 上 exec 脚本时手动读 shebang 构造 argv（内核 shebang 处理差异） | ⚠️ 上游改 spawn 时检查 memfd 门控 + shebang shim |
@@ -150,7 +150,7 @@
 
 ### 🟡 需检查（OHOS 门控存在但上游少动）
 7. MiniEventLoop.rs `tick_without_idle` pub 可见性
-8. filter_run.rs drain 缺口（见 §三 filter_run 行）
+8. filter_run.rs drain —— 2026-09-17 按 multi_run 补齐 T50 直读（见 §三 filter_run 行）；上游改 drain 逻辑时复测 `--filter/--workspaces`
 9. MessagePort leak fix、highway SVE、V8Array、c-bindings
 10. sys/lib.rs fstat/statx/getcwd/link
 11. **工具链（LLVM/Rust nightly）** —— 上游 bump 时：`scripts/build/tools.ts` 的 `LLVM_VERSION_RANGE` 是硬约束（当前 `>=23.1.0 <23.1.99`），需要 brew 提供对应 LLVM（当前 llvm 23.1.1 + keg-only lld 23）；Rust 仍由脚本 `RUST_VER`/`RUST_HOME` 钉在 `nightly-2026-07-20`，与 `rust-toolchain.toml` 的 channel 解耦；`src/collections/*` 的 nightly 兼容层（`core_intrinsics`）保留，不随上游迁移到 `type_info` API

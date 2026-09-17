@@ -176,6 +176,13 @@ impl<'a> ProcessHandle<'a> {
                         poll.set_flag(FilePollFlag::Socket);
                         poll.set_flag(FilePollFlag::Nonblocking);
                     }
+                    #[cfg(target_env = "ohos")]
+                    {
+                        // OHOS: a pipe never reports readable to epoll (T50);
+                        // unregister the poll so the tick-based drain is the
+                        // only reader. The fd stays for the raw reads.
+                        reader.handle.deinit_poll_keep_fd();
+                    }
                     Ok(())
                 };
             if let Some(fd) = stdout_fd {
@@ -186,6 +193,8 @@ impl<'a> ProcessHandle<'a> {
                 let _ = sys::set_nonblocking(stderr);
                 handle.remaining_fds += 1;
                 handle.stderr.start(stderr, true)?;
+                #[cfg(target_env = "ohos")]
+                handle.stderr.handle.deinit_poll_keep_fd();
             }
         }
         #[cfg(not(unix))]
@@ -240,15 +249,33 @@ impl<'a> ProcessHandle<'a> {
         unsafe {
             for reader in [&raw mut (*this).stdout, &raw mut (*this).stderr] {
                 // `is_done()` = EOF already counted out of `remaining_fds`.
-                // OHOS: skip the buffered read — it re-registers the poll
-                // (EAGAIN → register_poll) and races the FIONREAD drain for
-                // bytes, swallowing output the drain would have read from
-                // the fd (see drain_ohos_pipes). The force-end below still
-                // applies so a detached child holding the write end cannot
-                // stall the finish.
                 #[cfg(all(unix, not(target_env = "ohos")))]
                 if !(*reader).is_done() && (*reader).get_fd() != sys::Fd::INVALID {
                     BufferedReader::read(reader);
+                }
+                // OHOS: pipes are never poll-registered and never report
+                // readable to epoll (T50), so the tick-based `drain_ohos_pipes`
+                // is the only reader. Read directly from the fd here so the
+                // last chunk a fast-exiting child wrote is not dropped; the
+                // force-end below still applies so a detached child holding
+                // the write end cannot stall the finish.
+                #[cfg(target_env = "ohos")]
+                if !(*reader).is_done() && (*reader).get_fd() != sys::Fd::INVALID {
+                    let fd = (*reader).get_fd();
+                    let mut buf = [0u8; 16384];
+                    loop {
+                        // SAFETY: buf is a valid write buffer; the fd is
+                        // non-blocking (set in `start`).
+                        let n =
+                            libc::read(fd.native(), buf.as_mut_ptr().cast(), buf.len());
+                        if n <= 0 {
+                            break;
+                        }
+                        let mut state_ref = (*this).state;
+                        // SAFETY: state backref is live for the run loop.
+                        let state = state_ref.get_mut();
+                        let _ = state.read_chunk(&mut *this, &buf[..n as usize]);
+                    }
                 }
                 if !(*reader).is_done() {
                     (*reader).deinit();
@@ -408,6 +435,69 @@ impl<'a> State<'a> {
             self.flush_draw_buf();
         }
         Ok(())
+    }
+
+    /// OHOS kernel pipe-readiness bug (T50): a pipe never reports readable to
+    /// epoll after the child writes, so the poll-driven read path is dead
+    /// here. Read each pipe directly every loop iteration instead (mirrors
+    /// `multi_run.rs`). Non-OHOS builds never take this path.
+    #[cfg(target_env = "ohos")]
+    fn drain_ohos_pipes(&mut self) -> bool {
+        let handles_ptr = self.handles.as_mut_ptr();
+        let state_ptr: *mut State<'a> = self;
+        // SAFETY: indices are in bounds; each reader is re-borrowed one at a
+        // time from its handle, same aliasing pattern as `read_chunk`.
+        let mut read_any = false;
+        for i in 0..self.handles.len() {
+            let handle = unsafe { &mut *handles_ptr.add(i) };
+            read_any |= Self::drain_one(state_ptr, &raw mut handle.stdout, handle);
+            read_any |= Self::drain_one(state_ptr, &raw mut handle.stderr, handle);
+        }
+        read_any
+    }
+
+    /// Reads everything currently buffered on one pipe. Returns true if any
+    /// bytes were read (the caller backs off when idle).
+    #[cfg(target_env = "ohos")]
+    fn drain_one(
+        state_ptr: *mut State<'a>,
+        reader_ptr: *mut BufferedReader,
+        handle_ptr: &mut ProcessHandle<'a>,
+    ) -> bool {
+        // SAFETY: reader_ptr points into handle_ptr's readers; both outlive this call.
+        let reader = unsafe { &mut *reader_ptr };
+        if handle_ptr.finished || reader.get_fd() == sys::Fd::INVALID {
+            return false;
+        }
+        // The poll was unregistered at start(), so this drain is the only
+        // reader: read directly until EAGAIN so one tick drains everything
+        // the child wrote. A read surfaces both buffered data and EOF.
+        let fd = reader.get_fd();
+        let mut read_any = false;
+        let mut buf = [0u8; 16384];
+        loop {
+            // SAFETY: buf is a valid write buffer for read(); fd is
+            // non-blocking (set in `start`).
+            let n = unsafe { libc::read(fd.native(), buf.as_mut_ptr().cast(), buf.len()) };
+            if n > 0 {
+                read_any = true;
+                // SAFETY: state_ptr is the live State.
+                let _ = unsafe { (*state_ptr).read_chunk(handle_ptr, &buf[..n as usize]) };
+                continue;
+            }
+            if n == 0 {
+                // EOF: `deinit` stops further reads from this fd and fires no
+                // callback, so mirror `on_reader_done`'s accounting here.
+                reader.deinit();
+                if handle_ptr.remaining_fds > 0 {
+                    handle_ptr.remaining_fds -= 1;
+                }
+                // SAFETY: state is live; same call the reader callback makes.
+                let _ = unsafe { (*state_ptr).maybe_finish(handle_ptr) };
+            }
+            break;
+        }
+        read_any
     }
 
     /// A script is finished once its process has exited *and* both pipes have
@@ -1124,6 +1214,8 @@ pub(crate) fn run_scripts_with_filter(
 
     AbortHandler::install();
 
+    #[cfg(target_env = "ohos")]
+    let mut idle_polls: u32 = 0;
     while !state.is_done() {
         if SHOULD_ABORT.load(Ordering::SeqCst) && !state.aborted {
             // We uninstall the custom abort handler so that if the user presses Ctrl+C again,
@@ -1135,6 +1227,28 @@ pub(crate) fn run_scripts_with_filter(
             // before blocking in a tick no event may ever wake.
             continue;
         }
+        #[cfg(target_env = "ohos")]
+        {
+            // OHOS: pipes are drained by polling (T50 kernel bug — epoll never
+            // reports a pipe readable). A blocking tick would stall forever
+            // when no epoll event fires, so tick non-blocking, drain, then
+            // yield. 2 ms while output is flowing, backing off to 10 ms after
+            // a few empty passes: each tick still reads, so the added latency
+            // stays bounded.
+            // SAFETY: event_loop is the live thread-local MiniEventLoop singleton.
+            unsafe {
+                (*event_loop).tick_without_idle((&raw const state).cast_mut().cast::<c_void>())
+            };
+            let read_any = state.drain_ohos_pipes();
+            idle_polls = if read_any {
+                0
+            } else {
+                (idle_polls + 1).min(16)
+            };
+            let sleep_ms = if idle_polls < 8 { 2 } else { 10 };
+            std::thread::sleep(std::time::Duration::from_millis(sleep_ms));
+        }
+        #[cfg(not(target_env = "ohos"))]
         // SAFETY: event_loop is the live thread-local MiniEventLoop singleton.
         unsafe { (*event_loop).tick_once(&raw const state as *mut c_void) };
     }
