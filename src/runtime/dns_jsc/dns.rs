@@ -5366,7 +5366,7 @@ impl Resolver {
                 Some(name),
                 &mut promise,
             )
-            .reject_later(global_this);
+            .reject_later(global_this, context);
             return Ok(promise_value);
         }
 
