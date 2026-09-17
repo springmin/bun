@@ -64,6 +64,27 @@ beforeAll(async () => {
       process.exit(1);
     }
     console.timeEnd("Building node-gyp");
+    if (isOhos) {
+      // OHOS loads only ELF files that carry a .codesign section. Bun signs an
+      // addon when it dlopens one, but `checkSameOutput` also loads the same
+      // addon in a real `node` child, which does not sign: sign every freshly
+      // built output here so both sides see the same file.
+      const out = join(__dirname, "napi-app", "build", "Debug");
+      if (existsSync(out)) {
+        for (const name of readdirSync(out)) {
+          if (!name.endsWith(".node")) continue;
+          const file = join(out, name);
+          // Requiring is enough: bun signs the ELF before it calls dlopen, and
+          // an addon that fails (or aborts) to load is still left signed.
+          spawnSync({
+            cmd: [bunExe(), "-e", `try{require(${JSON.stringify(file)})}catch{}`],
+            env: bunEnv,
+            stdout: "ignore",
+            stderr: "ignore",
+          });
+        }
+      }
+    }
   }
   // node-gyp rebuild can take a while under a debug/ASAN binary (and the
   // hook may first download an ABI-matching node); default 5s hook timeout

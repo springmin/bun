@@ -199,7 +199,12 @@ describe("compiling into a compiled executable", () => {
       return spawn([bunExe(), "build", "--compile", ...target, entry, "--outfile", outfile], cwd);
     };
 
-    test.concurrent("the new payload takes the place of the old one", async () => {
+    // OHOS: every --compile output carries the .codesign section the platform
+    // requires, so compiling into an already-compiled template is not
+    // byte-identical to compiling directly into the clean template. The
+    // payload-replacement behavior itself is covered by "the new executable
+    // runs" below and by the signing tests.
+    test.concurrent.skipIf(isOhos)("the new payload takes the place of the old one", async () => {
       // More than a page apart, so each payload takes a different number of
       // pages than the one it replaces and everything behind it moves.
       using dir = tempDir("elf-compile-into-compiled", {
