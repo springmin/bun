@@ -31,6 +31,7 @@
 | `scripts/build/rust.ts` | OHOS target 的 RUSTUP_HOME/CARGO_HOME 持久化 | 上游改 rust 构建时检查 |
 | 工具链（brew） | `opt/llvm` 23.1.1（OHOS libc++，ABI `std::__n1`）+ keg-only `opt/lld` 23；`ohos-sdk` 与 llvm 主 formula 冲突已 unlink（`cc/c++` shims 走绝对路径，不受影响）；构建脚本在 `.bin` 补齐 `aarch64-linux-ohos-clang*` 三前缀 | 上游 bump LLVM 必须同步安装对应版本：`tools.ts` 的 `LLVM_VERSION_RANGE` 是硬约束 |
 | `scripts/build/workarounds.ts` | "ohos-node-userinfo-preload" 等 | 上游改 preload 机制时检查 |
+| `src/runtime/napi/libc_check.rs` | OHOS 保留 glibc-addon 预检查（`IS_MUSL` 在 OHOS 为 true）：glibc 链接的 `.node` 在 OHOS 同样无法加载，应报 "linked against glibc" 而非 loader 的 Permission denied；提示语在 `BunProcess.cpp` 有 `#if defined(__OHOS__)` 专属分支 | 上游改该探测或其消息时检查两处分支 |
 | `scripts/build.ts` / `bun.ts` / `config.ts` / `source.ts` / `shims.ts` / `tools.ts` / `deps/{cares,zstd}.ts` | OHOS 平台分支（工具链路径、依赖构建）；`bun.ts` 的 `systemLibs` 用**显式 `.a` 路径**链接本地 WebKit 的 OHOS ICU（`-licu*` 会优先 keg 里的 `.so`，把无 rpath 的 `DT_NEEDED libicu*.so.78` 烘进二进制） | 上游改构建管线/OHOS 库列表时检查 |
 | OHOS 构建入口（`scripts/ohos/build-bun-ohos-native.sh`、`build-bun-ohos.sh`、`build.sh`、`.github/workflows/ohos-build-*.yml`） | 显式 `--lto=off`：上游 config.ts 把 ThinLTO 默认对所有 release 打开（原先只对 linux/darwin-cross/windows-cross），OHOS 从未用 LTO 验证过，且会翻转 WebKit 的 CMAKE_BUILD_TYPE（RelWithDebInfo→Release）使既有 WebKit 构建目录失效 | ⚠️ 上游再改 LTO 默认或 WebKit buildType 时重新评估 |
 | `scripts/build/source.ts` | 依赖编译的 PIC 策略：OHOS 与 Android 一样必须 `-fPIC`（上游 #42556 把 `-fno-pic -fno-pie` 默认推广到所有 unix；OHOS 上非 PIC 依赖会让链接器发 R_AARCH64_COPY，OHOS musl 不填充这些 libc 数据 → 启动即 abort） | ⚠️ 上游改 PIC 策略/新增依赖时检查 |

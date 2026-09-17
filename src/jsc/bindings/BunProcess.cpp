@@ -560,7 +560,11 @@ JSC_DEFINE_HOST_FUNCTION_WITH_ATTRIBUTES(Process_functionDlopen, __attribute__((
             msg.append(filename);
             msg.append(" is linked against glibc (DT_NEEDED "_s);
             msg.append(WTF::StringView::fromLatin1(soname));
+#if defined(__OHOS__)
+            msg.append("), but this Bun build targets OpenHarmony (musl libc). glibc-targeted native addons cannot be loaded; build the addon against the OpenHarmony SDK instead."_s);
+#else
             msg.append("), but this Bun build uses musl. glibc-targeted native addons cannot be loaded on Alpine/musl even with gcompat. Use a glibc-based image (e.g. oven/bun:debian) or install a musl build of this addon."_s);
+#endif
             return throwError(globalObject, scope, ErrorCode::ERR_DLOPEN_FAILED, msg.toString());
         }
     }
