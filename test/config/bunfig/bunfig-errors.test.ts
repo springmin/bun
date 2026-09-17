@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { bunEnv, bunExe, isWindows, tempDir } from "harness";
+import { bunEnv, bunExe, isOhos, isWindows, tempDir } from "harness";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 
@@ -108,7 +108,11 @@ describe.concurrent.skipIf(isWindows)("config paths that do not fit in a path bu
     // create, and the path is built (and used to overflow) before it is opened.
     const skippedCases: [configPathWouldBe: string, cwdBytes: number][] = [
       ["exactly MAX_PATH_BYTES bytes, leaving no room for the NUL", MAX_PATH_BYTES - "/bunfig.toml".length],
-      ["longer than the buffer", MAX_PATH_BYTES - 1],
+      // OHOS: the kernel cannot report a cwd of MAX_PATH_BYTES - 1 bytes back
+      // through getcwd() (ENOENT for every buffer size) or /proc/self/cwd
+      // (readlink returns 0), so the process can chdir there but process.cwd()
+      // cannot succeed.
+      ...(isOhos ? [] : ([["longer than the buffer", MAX_PATH_BYTES - 1]] as [string, number][])),
     ];
 
     test.each(skippedCases)("bun -e still runs when the bunfig.toml path would be %s", async (_, cwdBytes) => {

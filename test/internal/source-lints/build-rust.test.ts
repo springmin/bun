@@ -120,7 +120,10 @@ describe("allRustTargets", () => {
       toolchain: { targets: string[] };
     };
     const prebuilt = allRustTargets.filter(triple => !rustTargetIsTier3(triple));
-    expect([...toolchain.targets].sort()).toEqual([...prebuilt].sort());
+    // OHOS: the port pins its own nightly via RUST_HOME in
+    // scripts/ohos/build-bun-ohos-native.sh and lists
+    // aarch64-unknown-linux-ohos, which is not part of the upstream matrix.
+    expect([...toolchain.targets].sort()).toEqual([...prebuilt, "aarch64-unknown-linux-ohos"].sort());
 
     // rust:check-all reaches the remaining triples with -Zbuild-std; that path
     // is only exercised if the matrix really contains a Tier 3 triple.
