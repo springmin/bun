@@ -62,3 +62,42 @@ describe("Bun.spawn large stdin buffer", () => {
     }, 60_000);
   }
 });
+
+describe("repeated stdin readiness", () => {
+  // Each flush can wake the child's stdin reader again while an earlier read
+  // loop is still running. The loop must stay owned by exactly one worker:
+  // when a wakeup handed the read loop out twice, the payload was truncated to
+  // a random offset (OHOS: a 4MB read came back as ~300 bytes). Repeat many
+  // rounds — one per fresh process — to make the race probabilistic rather
+  // than deterministic.
+  const payload = Buffer.alloc(4 * 1024 * 1024);
+  for (let i = 0; i < payload.length; i++) payload[i] = i % 251;
+  const digest = new Bun.CryptoHasher("sha256").update(payload).digest("hex");
+  const reader = `
+    const data = await Bun.stdin.arrayBuffer();
+    console.log(data.byteLength + ":" + new Bun.CryptoHasher("sha256").update(data).digest("hex"));
+  `;
+
+  test("preserves every byte across 12 rounds", async () => {
+    for (let round = 0; round < 12; round++) {
+      await using proc = Bun.spawn({
+        cmd: [bunExe(), "-e", reader],
+        env: bunEnv,
+        stdin: "pipe",
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+      const output = proc.stdout.text();
+      const errors = proc.stderr.text();
+      for (let offset = 0; offset < payload.length; offset += 16381) {
+        proc.stdin.write(payload.subarray(offset, offset + 16381));
+        await proc.stdin.flush();
+        if (offset % (16381 * 32) === 0) await Bun.sleep(1);
+      }
+      await proc.stdin.end();
+      expect(await output).toBe(`${payload.length}:${digest}\n`);
+      expect(await errors).toBe("");
+      expect(await proc.exited).toBe(0);
+    }
+  }, 60_000);
+});
