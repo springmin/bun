@@ -14,6 +14,9 @@
 #      脚本在 .bin 里补齐)
 #   - 上游 tools.ts 的 LLVM_VERSION_RANGE = >=23.1.0 <23.1.99; .bin/clang 即
 #     23.1.1, configure 不再需要事后改写 build.ninja
+#   - brew 的 llvm >=22 不安装 libc++ 的 C 兼容头, 但 libc++ 23 的 <cstring>/
+#     <cwchar>/<cerrno> 仍要求它们: 12 个官方 23.1.1 头叠加自
+#     scripts/ohos/libcxx23-c-headers/
 #
 # 核心思路:
 #   1. build/ohos-cross-libs → opt/llvm OHOS 头文件/库的符号链接
@@ -97,6 +100,8 @@ phase_check() {
   [ -d "$LLVM_HOME/include/aarch64-linux-ohos/c++/v1" ] \
                                  || { err "llvm OHOS libc++ 头文件未找到"; fail=1; }
   [ -f "$LLD_HOME/bin/ld.lld" ]  || { err "brew lld 未找到 (brew install lld)"; fail=1; }
+  [ -f "$REPO_ROOT/scripts/ohos/libcxx23-c-headers/string.h" ] \
+                                 || { err "libc++ 23 C 兼容头 overlay 缺失"; fail=1; }
   [ -d "$SYSROOT/usr/include" ]  || { err "ohos-sdk sysroot 未找到"; fail=1; }
   command -v binary-sign-tool &>/dev/null || { err "binary-sign-tool 不在 PATH"; fail=1; }
   [ -f "$BUN" ]                  || { err "bootstrap bun 未找到: $BUN"; fail=1; }
@@ -204,13 +209,19 @@ phase_setup_layout() {
     fi
   done
 
-  # 4b: build/ohos-cross-libs — 指向 opt/llvm 的 OHOS libc++ (避免 musl 冲突)
+  # 4b: build/ohos-cross-libs — opt/llvm 的 OHOS libc++ + C 兼容头 overlay
+  # (避免 musl 冲突; brew 的 llvm >=22 不再安装 libc++ 自带的 12 个 C 兼容头,
+  #  而 libc++ 23 的 <cstring>/<cwchar>/<cerrno> 等仍要求它们, 见脚本头部说明)
   local cross="$REPO_ROOT/build/ohos-cross-libs"
+  local src_v1="$LLVM_HOME/include/aarch64-linux-ohos/c++/v1"
   rm -rf "$cross"
-  mkdir -p "$cross/libcxx/include" "$cross/libcxxabi" "$cross/libcxx/lib" "$cross/libcxxabi/lib" "$cross/libunwind/lib"
+  mkdir -p "$cross/libcxx/include/v1" "$cross/libcxxabi" "$cross/libcxx/lib" "$cross/libcxxabi/lib" "$cross/libunwind/lib"
 
-  ln -sf "$LLVM_HOME/include/aarch64-linux-ohos/c++/v1" "$cross/libcxx/include/v1"
-  ln -sf "$LLVM_HOME/include/aarch64-linux-ohos/c++/v1" "$cross/libcxxabi/include"
+  for f in "$src_v1"/*; do
+    ln -sf "$f" "$cross/libcxx/include/v1/"
+  done
+  cp -f "$REPO_ROOT/scripts/ohos/libcxx23-c-headers"/*.h "$cross/libcxx/include/v1/"
+  ln -sfn "$cross/libcxx/include/v1" "$cross/libcxxabi/include"
 
   # OHOS 静态库链接映射:
   # - libc++ 的实际实现在 libc++_static.a (homebrew 的 libc++.a 是 38 字节空占位!)

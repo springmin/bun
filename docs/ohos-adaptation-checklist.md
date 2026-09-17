@@ -17,6 +17,7 @@
 | `src/sys/ohos_sign_io.rs` | 文件级签名 I/O（bun_sys，OHOS-only）：`ensure_signed_inplace`（(dev,ino,size,mtime) 缓存 + `is_validly_signed` 校验，仅失效才重签；4 字节 magic 先探，脚本不被整读）、temp+rename 写（兼容执行后不可变 inode）、`ohos_ensure_elf_signed` FFI |
 | `src/runtime/api/bun/ohos_node_userinfo.rs` | node:os userInfo 沙箱 uid 适配 |
 | `patches/zstd/ohos-qsort-r.patch` | zstd qsort_r 适配 |
+| `scripts/ohos/libcxx23-c-headers/` | LLVM 23.1.1 官方源码里的 12 个 libc++ C 兼容头（`string.h`/`wchar.h`/`errno.h`/`math.h`/`stdatomic.h`/`stdio.h`/`stdlib.h`/`uchar.h`/`wctype.h`/`complex.h`/`tgmath.h`/`__mbstate_t.h`）。brew 的 llvm ≥22 不再安装它们，而 libc++ 23 的 `<cstring>`/`<cwchar>` 仍要求，构建时叠加进 `build/ohos-cross-libs/libcxx/include/v1` |
 | `.github/workflows/build-bun-ohos-native.yml` / `ohos-build-rust.yml` / `ohos-build-incremental.yml` | OHOS CI（`ohos-build.yml` 已删除） |
 | `test/js/bun/spawn/spawn-ohos-node-userinfo.test.ts` | 对应测试 |
 
