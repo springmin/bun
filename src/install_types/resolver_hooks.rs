@@ -817,8 +817,13 @@ impl OperatingSystem {
         | Self::ANDROID
         | Self::OPENHARMONY;
 
+    /// OHOS uses musl like Alpine and `process.platform` reports "linux":
+    /// match as LINUX so `os: ["linux"]` packages keep installing and
+    /// negations (`os: ["!linux"]`) keep excluding OHOS. The `openharmony`
+    /// name stays in the map, but CURRENT is a single bit - a two-bit CURRENT
+    /// would make `!linux` still match through the other bit.
     #[cfg(target_env = "ohos")]
-    pub const CURRENT: Self = Self(Self::OPENHARMONY);
+    pub const CURRENT: Self = Self(Self::LINUX);
     #[cfg(all(
         target_os = "linux",
         not(target_os = "android"),

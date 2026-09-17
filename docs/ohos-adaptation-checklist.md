@@ -16,6 +16,7 @@
 | `src/ohos_sign/` | 纯字节签名库（descriptor/merkle/sha256、`sign_selfsign*`、`strip_codesign`、`is_validly_signed`、`is_elf64`）——**无 I/O、零依赖**（是 `bun_sys` 的依赖，不能反向依赖它） |
 | `src/sys/ohos_sign_io.rs` | 文件级签名 I/O（bun_sys，OHOS-only）：`ensure_signed_inplace`（(dev,ino,size,mtime) 缓存 + `is_validly_signed` 校验，仅失效才重签；4 字节 magic 先探，脚本不被整读）、temp+rename 写（兼容执行后不可变 inode）、`ohos_ensure_elf_signed` FFI |
 | `src/runtime/api/bun/ohos_node_userinfo.rs` | node:os userInfo 沙箱 uid 适配 |
+| `src/install_types/resolver_hooks.rs` | OHOS 的 npm `os` 匹配 `CURRENT = LINUX`：`process.platform` 是 "linux" 且 libc 是 musl（同 Alpine），linux 声明的包必须继续匹配；**必须是单一 bit**（两 bit 会让 `os:["!linux"]` 仍经 openharmony 命中）；`openharmony` 名字保留在映射表 | 上游改 OperatingSystem/CURRENT 时检查；勿改回纯 OPENHARMONY（fixture 声明 os:[linux] 的上游 install 测试与真实包都会挂） |
 | `patches/zstd/ohos-qsort-r.patch` | zstd qsort_r 适配 |
 | `scripts/ohos/libcxx23-c-headers/` | LLVM 23.1.1 官方源码里的 12 个 libc++ C 兼容头（`string.h`/`wchar.h`/`errno.h`/`math.h`/`stdatomic.h`/`stdio.h`/`stdlib.h`/`uchar.h`/`wctype.h`/`complex.h`/`tgmath.h`/`__mbstate_t.h`）。brew 的 llvm ≥22 不再安装它们，而 libc++ 23 的 `<cstring>`/`<cwchar>` 仍要求，构建时叠加进 `build/ohos-cross-libs/libcxx/include/v1` |
 | `.github/workflows/build-bun-ohos-native.yml` / `ohos-build-rust.yml` / `ohos-build-incremental.yml` | OHOS CI（`ohos-build.yml` 已删除） |
