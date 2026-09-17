@@ -1,6 +1,6 @@
 # OHOS (HarmonyOS) Bun 适配修改清单
 
-> 基准版本: ohos-aarch64（持续合并上游，本清单最近一次校对 2026-09-14）
+> 基准版本: ohos-aarch64（持续合并上游，本清单最近一次校对 2026-09-17）
 > 用途: merge 上游 oven/main 时，逐项检查上游改动是否触及以下适配点。
 > 检查方法: `git diff <upstream>..HEAD -- <file>` 看该文件的上游改动是否与 OHOS 门控逻辑冲突。
 
@@ -10,7 +10,7 @@
 
 | 路径 | 用途 |
 |---|---|
-| `scripts/ohos/build-bun-ohos-native.sh` | 原生编译脚本（llvm@21 工具链、签名） |
+| `scripts/ohos/build-bun-ohos-native.sh` | 原生编译脚本（brew llvm 23 + lld 23 工具链、签名） |
 | `scripts/ohos/build-bun-ohos.sh` | 交叉编译脚本（CI 模式） |
 | `scripts/ohos/build-bun-ohos.sh` / `run-all-official*.sh` / `patch-node-gyp.sh` | 构建/测试辅助（`build.sh`/`prepare-cross-libs.sh` 于 2026-09-16 删除：旧 SDK 布局 + 已废弃） |
 | `src/ohos_sign/` | 纯字节签名库（descriptor/merkle/sha256、`sign_selfsign*`、`strip_codesign`、`is_validly_signed`、`is_elf64`）——**无 I/O、零依赖**（是 `bun_sys` 的依赖，不能反向依赖它） |
@@ -27,6 +27,7 @@
 | `scripts/build/deps/webkit.ts` | **13 处 cfg.ohos**：prebuilt URL、ICU 库名、**cmake 配置块**（`CMAKE_SYSTEM_NAME: "Linux"`、CMAKE_FIND_ROOT_PATH/ohosSysroot、ICU_ROOT/ohosIcuDir、`CMAKE_SYSTEM_PROCESSOR: "aarch64"`、静态 JSC 等） | ⚠️ **上游 webkit.ts 无任何 ohos 引用**——上游改 cmake 参数时需检查 OHOS 块是否仍兼容；**WEBKIT_VERSION 升级时需重新构建并验证 OHOS** |
 | `scripts/build/flags.ts` | `-fno-pic/-fno-pie/-no-pie` 对 OHOS 跳过（PIE 需要） | 上游改 flags 逻辑时检查 |
 | `scripts/build/rust.ts` | OHOS target 的 RUSTUP_HOME/CARGO_HOME 持久化 | 上游改 rust 构建时检查 |
+| 工具链（brew） | `opt/llvm` 23.1.1（OHOS libc++，ABI `std::__n1`）+ keg-only `opt/lld` 23；`ohos-sdk` 与 llvm 主 formula 冲突已 unlink（`cc/c++` shims 走绝对路径，不受影响）；构建脚本在 `.bin` 补齐 `aarch64-linux-ohos-clang*` 三前缀 | 上游 bump LLVM 必须同步安装对应版本：`tools.ts` 的 `LLVM_VERSION_RANGE` 是硬约束 |
 | `scripts/build/workarounds.ts` | "ohos-node-userinfo-preload" 等 | 上游改 preload 机制时检查 |
 | `scripts/build.ts` / `bun.ts` / `config.ts` / `source.ts` / `shims.ts` / `tools.ts` / `deps/{cares,zstd}.ts` | OHOS 平台分支（工具链路径、依赖构建）；`bun.ts` 的 `systemLibs` 用**显式 `.a` 路径**链接本地 WebKit 的 OHOS ICU（`-licu*` 会优先 keg 里的 `.so`，把无 rpath 的 `DT_NEEDED libicu*.so.78` 烘进二进制） | 上游改构建管线/OHOS 库列表时检查 |
 | OHOS 构建入口（`scripts/ohos/build-bun-ohos-native.sh`、`build-bun-ohos.sh`、`build.sh`、`.github/workflows/ohos-build-*.yml`） | 显式 `--lto=off`：上游 config.ts 把 ThinLTO 默认对所有 release 打开（原先只对 linux/darwin-cross/windows-cross），OHOS 从未用 LTO 验证过，且会翻转 WebKit 的 CMAKE_BUILD_TYPE（RelWithDebInfo→Release）使既有 WebKit 构建目录失效 | ⚠️ 上游再改 LTO 默认或 WebKit buildType 时重新评估 |
@@ -151,6 +152,7 @@
 8. filter_run.rs drain 缺口（见 §三 filter_run 行）
 9. MessagePort leak fix、highway SVE、V8Array、c-bindings
 10. sys/lib.rs fstat/statx/getcwd/link
+11. **工具链（LLVM/Rust nightly）** —— 上游 bump 时：`scripts/build/tools.ts` 的 `LLVM_VERSION_RANGE` 是硬约束（当前 `>=23.1.0 <23.1.99`），需要 brew 提供对应 LLVM（当前 llvm 23.1.1 + keg-only lld 23）；Rust 仍由脚本 `RUST_VER`/`RUST_HOME` 钉在 `nightly-2026-07-20`，与 `rust-toolchain.toml` 的 channel 解耦；`src/collections/*` 的 nightly 兼容层（`core_intrinsics`）保留，不随上游迁移到 `type_info` API
 
 ### 🟢 冲突概率低（上游不常动）
 12. ffi_body 系统路径、node_fs link、PackageManager CC/CXX、其余

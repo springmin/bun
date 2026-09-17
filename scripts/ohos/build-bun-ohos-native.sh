@@ -4,22 +4,26 @@
 #
 # 参考 social4hyq/homebrew-core bottle-build CI (bun.rb formula) 的逻辑。
 #
-# 工具链: 统一使用 llvm@21 (/storage/Users/currentUser/.harmonybrew/opt/llvm@21)
-#   - llvm@21 的 include/aarch64-linux-ohos/c++/v1 作为 OHOS libc++ 头文件
-#   - llvm@21 的 lib/aarch64-linux-ohos/libc++_static.a 作为 libc++ 实现
+# 工具链: Homebrew llvm 23 (opt/llvm, 别名 llvm@23) + lld 23 (opt/lld)
+#   - opt/llvm 的 include/aarch64-linux-ohos/c++/v1 作为 OHOS libc++ 头文件
+#   - opt/llvm 的 lib/aarch64-linux-ohos/libc++_static.a 作为 libc++ 实现
 #     (homebrew 的 libc++.a 是空占位, 真实实现在 libc++_static.a)
-#   - llvm@21 的 aarch64-linux-ohos-clang++ 作为 OHOS 交叉编译器
-#     (替代 OHOS SDK 自带 LLVM 15 的 aarch64-unknown-linux-ohos-clang++)
-#   - configure 检测到的 llvm22.1.7 在 build.ninja 生成后统一替换为 llvm@21
+#     ABI namespace 为 std::__n1, 与 llvm@21/brew ICU 相同, 可直接混链.
+#   - opt/llvm 的 clang/clang++ + --target=aarch64-linux-ohos 作为 OHOS 交叉编译器
+#     (brew 的 llvm 23 keg 不再提供 aarch64-linux-ohos-clang* 三前缀链接,
+#      脚本在 .bin 里补齐)
+#   - 上游 tools.ts 的 LLVM_VERSION_RANGE = >=23.1.0 <23.1.99; .bin/clang 即
+#     23.1.1, configure 不再需要事后改写 build.ninja
 #
 # 核心思路:
-#   1. build/ohos-cross-libs → llvm@21 OHOS 头文件/库的符号链接
-#   2. CC/CXX 指向 Homebrew 的 cc/c++ shims (→ llvm@21 clang)
+#   1. build/ohos-cross-libs → opt/llvm OHOS 头文件/库的符号链接
+#   2. CC/CXX 指向 Homebrew 的 cc/c++ shims (llvm-gcc-compat → ohos-sdk clang,
+#      供 node-gyp 等子进程使用)
 #   3. bun scripts/build.ts 直接驱动构建 (--webkit=local + $BUN_WEBKIT_PATH 编译 WebKit)
 #   4. rust nightly (nightly-2026-07-20, aarch64-linux-ohos) 预装于
-#      ~/.rust-nightly/nightly-2026-07-20 (已签名, 持久目录)
-#   5. ICU 用 llvm@21 OHOS libc++ 头文件重编 (std::__h 命名空间),
-#      由 libc++_static.a 真实解析, 无需 shim
+#      ~/.rust-nightly/nightly-2026-07-20 (已签名, 持久目录);
+#      rust-toolchain.toml 里的 channel 只影响裸 cargo, 构建用 RUST_HOME 硬钉
+#   5. ICU 用 OHOS libc++ (std::__n1) 编译, 由 libc++_static.a 真实解析, 无需 shim
 #
 # 产物: build/release/bun (已签名, 直接运行)
 #===============================================================================
@@ -37,9 +41,10 @@ err()   { echo -e "${RED}[ERROR]${NC} $*"; }
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 BUN="${BUN:-/storage/Users/currentUser/.bun/bun}"
 
-LLVM21="/storage/Users/currentUser/.harmonybrew/opt/llvm@21"
-OHOS_SDK="/storage/Users/currentUser/.harmonybrew/opt/ohos-sdk"
 HOMEBREW_PREFIX="/storage/Users/currentUser/.harmonybrew"
+LLVM_HOME="$HOMEBREW_PREFIX/opt/llvm"
+LLD_HOME="$HOMEBREW_PREFIX/opt/lld"
+OHOS_SDK="$HOMEBREW_PREFIX/opt/ohos-sdk"
 # Use the stable `opt/` symlink, not a versioned Cellar path: upgrading
 # ohos-sdk re-points opt/ and removes the old version dir, which broke every
 # baked path when 26.0.0.18_1 -> _2 happened mid-build. An explicit
@@ -48,12 +53,10 @@ HOMEBREW_PREFIX="/storage/Users/currentUser/.harmonybrew"
 SYSROOT="${OHOS_SYSROOT:-$HOMEBREW_PREFIX/opt/ohos-sdk/native/sysroot}"
 [ -d "$SYSROOT/usr/include" ] || SYSROOT="$HOMEBREW_PREFIX/opt/ohos-sdk/native/sysroot"
 
-# llvm@21 tools (llvm-nm, llvm-ar, ...) take precedence over the system
-# llvm@15. If the SDK formula overwrote an llvm@21 symlink with an LLVM 15
-# binary, scripts/build/tools.ts detects the version and skips the
-# undefined-symbol check rather than "passing" it against empty output from a
-# fake tool.
-export PATH="$LLVM21/bin:$PATH"
+# llvm 23 tools (llvm-nm, llvm-ar, ...) take precedence over the LLVM 15 that
+# ships with the OHOS SDK: scripts/build/tools.ts requires clang/llvm in the
+# >=23.1.0 <23.1.99 range, so the brew keg has to win.
+export PATH="$LLVM_HOME/bin:$LLD_HOME/bin:$PATH"
 
 WEBKIT_SRC="${WEBKIT_SRC:-/storage/Users/currentUser/springsources/WebKit}"
 WEBKIT_COMMIT=$(grep "export const WEBKIT_VERSION" "$REPO_ROOT/scripts/build/deps/webkit.ts" | head -1 | sed 's/.*"\([a-f0-9]\{40\}\)".*/\1/')
@@ -90,12 +93,10 @@ phase_check() {
   for cmd in "$BUN" cmake ninja git perl python3; do
     command -v "$cmd" &>/dev/null || { err "缺少: $cmd"; fail=1; }
   done
-  [ -f "$LLVM21/bin/clang" ]     || { err "llvm@21 clang 未找到"; fail=1; }
-  [ -d "$LLVM21/include/aarch64-linux-ohos/c++/v1" ] \
-                                 || { err "llvm@21 OHOS libc++ 头文件未找到"; fail=1; }
-  # OHOS 交叉编译器 (llvm@21 提供, 替代 SDK 自带 LLVM 15)
-  [ -f "$LLVM21/bin/aarch64-linux-ohos-clang++" ] \
-                                 || { err "llvm@21 OHOS 交叉编译器未找到"; fail=1; }
+  [ -f "$LLVM_HOME/bin/clang" ]  || { err "brew llvm clang 未找到 (brew install llvm)"; fail=1; }
+  [ -d "$LLVM_HOME/include/aarch64-linux-ohos/c++/v1" ] \
+                                 || { err "llvm OHOS libc++ 头文件未找到"; fail=1; }
+  [ -f "$LLD_HOME/bin/ld.lld" ]  || { err "brew lld 未找到 (brew install lld)"; fail=1; }
   [ -d "$SYSROOT/usr/include" ]  || { err "ohos-sdk sysroot 未找到"; fail=1; }
   command -v binary-sign-tool &>/dev/null || { err "binary-sign-tool 不在 PATH"; fail=1; }
   [ -f "$BUN" ]                  || { err "bootstrap bun 未找到: $BUN"; fail=1; }
@@ -203,38 +204,38 @@ phase_setup_layout() {
     fi
   done
 
-  # 4b: build/ohos-cross-libs — 指向 llvm@21 的 OHOS libc++ (避免 musl 冲突)
+  # 4b: build/ohos-cross-libs — 指向 opt/llvm 的 OHOS libc++ (避免 musl 冲突)
   local cross="$REPO_ROOT/build/ohos-cross-libs"
   rm -rf "$cross"
   mkdir -p "$cross/libcxx/include" "$cross/libcxxabi" "$cross/libcxx/lib" "$cross/libcxxabi/lib" "$cross/libunwind/lib"
 
-  ln -sf "$LLVM21/include/aarch64-linux-ohos/c++/v1" "$cross/libcxx/include/v1"
-  ln -sf "$LLVM21/include/aarch64-linux-ohos/c++/v1" "$cross/libcxxabi/include"
+  ln -sf "$LLVM_HOME/include/aarch64-linux-ohos/c++/v1" "$cross/libcxx/include/v1"
+  ln -sf "$LLVM_HOME/include/aarch64-linux-ohos/c++/v1" "$cross/libcxxabi/include"
 
   # OHOS 静态库链接映射:
   # - libc++ 的实际实现在 libc++_static.a (homebrew 的 libc++.a 是 38 字节空占位!)
   # - 链接时用 -lc++ 解析到 libc++_static.a 的真实实现
   for lib in libc++abi.a libunwind.a; do
-    if [ -f "$LLVM21/lib/aarch64-linux-ohos/$lib" ]; then
-      ln -sf "$LLVM21/lib/aarch64-linux-ohos/$lib" "$cross/libcxx/lib/$lib"
-      ln -sf "$LLVM21/lib/aarch64-linux-ohos/$lib" "$cross/libcxxabi/lib/$lib"
-      ln -sf "$LLVM21/lib/aarch64-linux-ohos/$lib" "$cross/libunwind/lib/$lib"
+    if [ -f "$LLVM_HOME/lib/aarch64-linux-ohos/$lib" ]; then
+      ln -sf "$LLVM_HOME/lib/aarch64-linux-ohos/$lib" "$cross/libcxx/lib/$lib"
+      ln -sf "$LLVM_HOME/lib/aarch64-linux-ohos/$lib" "$cross/libcxxabi/lib/$lib"
+      ln -sf "$LLVM_HOME/lib/aarch64-linux-ohos/$lib" "$cross/libunwind/lib/$lib"
     fi
   done
   # libc++.a → libc++_static.a (真实实现)
-  if [ -f "$LLVM21/lib/aarch64-linux-ohos/libc++_static.a" ]; then
-    ln -sf "$LLVM21/lib/aarch64-linux-ohos/libc++_static.a" "$cross/libcxx/lib/libc++.a"
-    ln -sf "$LLVM21/lib/aarch64-linux-ohos/libc++_static.a" "$cross/libcxxabi/lib/libc++.a"
-    ln -sf "$LLVM21/lib/aarch64-linux-ohos/libc++_static.a" "$cross/libunwind/lib/libc++.a"
+  if [ -f "$LLVM_HOME/lib/aarch64-linux-ohos/libc++_static.a" ]; then
+    ln -sf "$LLVM_HOME/lib/aarch64-linux-ohos/libc++_static.a" "$cross/libcxx/lib/libc++.a"
+    ln -sf "$LLVM_HOME/lib/aarch64-linux-ohos/libc++_static.a" "$cross/libcxxabi/lib/libc++.a"
+    ln -sf "$LLVM_HOME/lib/aarch64-linux-ohos/libc++_static.a" "$cross/libunwind/lib/libc++.a"
   fi
 
-  ok "构建布局已设置 (ohos-cross-libs → llvm@21 OHOS)"
+  ok "构建布局已设置 (ohos-cross-libs → llvm 23 OHOS)"
 }
 
 # ─── 阶段5: bun install ─────────────────────────────────────────────────────
 phase_bun_install() {
   info "=== bun install ==="
-  export PATH="$LLVM21/bin:$PATH"
+  export PATH="$LLVM_HOME/bin:$PATH"
 
   cd "$REPO_ROOT"
   "$BUN" install 2>&1 | tail -3
@@ -323,30 +324,42 @@ phase_set_env() {
   local bin_dir="$REPO_ROOT/.bin"
   mkdir -p "$bin_dir"
 
-  # CC/CXX: Homebrew cc/c++ shims (llvm-gcc-compat → ohos-sdk wrapper → llvm@21)
+  # CC/CXX: Homebrew cc/c++ shims (llvm-gcc-compat → ohos-sdk clang, 子进程用)
   export CC="$HOMEBREW_PREFIX/bin/cc"
   export CXX="$HOMEBREW_PREFIX/bin/c++"
 
   # clang/clang++ wrapper (OHOS sysroot 用于 host 编译)
   cat > "$bin_dir/clang" << CLANG
 #!/bin/sh
-exec "$LLVM21/bin/clang" --sysroot="$SYSROOT" "\$@"
+exec "$LLVM_HOME/bin/clang" --sysroot="$SYSROOT" "\$@"
 CLANG
   chmod 755 "$bin_dir/clang"
   cat > "$bin_dir/clang++" << CLANGXX
 #!/bin/sh
-exec "$LLVM21/bin/clang++" --sysroot="$SYSROOT" "\$@"
+exec "$LLVM_HOME/bin/clang++" --sysroot="$SYSROOT" "\$@"
 CLANGXX
   chmod 755 "$bin_dir/clang++"
+  # brew 的 llvm 23 keg 不提供 aarch64-linux-ohos-clang* 三前缀链接; 补齐
+  # (--target 在显式传参时被覆盖, 值相同无副作用)
+  cat > "$bin_dir/aarch64-linux-ohos-clang" << CROSS
+#!/bin/sh
+exec "$LLVM_HOME/bin/clang" --target=aarch64-linux-ohos --sysroot="$SYSROOT" "\$@"
+CROSS
+  chmod 755 "$bin_dir/aarch64-linux-ohos-clang"
+  cat > "$bin_dir/aarch64-linux-ohos-clang++" << CROSSXX
+#!/bin/sh
+exec "$LLVM_HOME/bin/clang++" --target=aarch64-linux-ohos --sysroot="$SYSROOT" "\$@"
+CROSSXX
+  chmod 755 "$bin_dir/aarch64-linux-ohos-clang++"
 
   # strip → llvm-strip
-  ln -sf "$LLVM21/bin/llvm-strip" "$bin_dir/strip" 2>/dev/null || true
+  ln -sf "$LLVM_HOME/bin/llvm-strip" "$bin_dir/strip" 2>/dev/null || true
 
-  # PATH: .bin → nightly rust → llvm@21 → harmonybrew
-  export PATH="$bin_dir:$RUST_HOME/bin:$LLVM21/bin:$HOMEBREW_PREFIX/bin:$HOME/.cargo/bin:$PATH"
+  # PATH: .bin → nightly rust → llvm 23 → lld 23 → harmonybrew
+  export PATH="$bin_dir:$RUST_HOME/bin:$LLVM_HOME/bin:$LLD_HOME/bin:$HOMEBREW_PREFIX/bin:$HOME/.cargo/bin:$PATH"
 
   # LD_LIBRARY_PATH (lld 依赖 libxml2/zlib, cargo 链接 openssl@3)
-  export LD_LIBRARY_PATH="$HOMEBREW_PREFIX/opt/libxml2/lib:$HOMEBREW_PREFIX/opt/zlib/lib:$HOMEBREW_PREFIX/opt/openssl@3/lib:$LLVM21/lib"
+  export LD_LIBRARY_PATH="$HOMEBREW_PREFIX/opt/libxml2/lib:$HOMEBREW_PREFIX/opt/zlib/lib:$HOMEBREW_PREFIX/opt/openssl@3/lib:$LLVM_HOME/lib"
 
   # Rust 环境变量
   # CARGO_HOME: 统一使用 ~/.cargo (持久目录, 避免 /tmp 被清理;
@@ -402,7 +415,7 @@ phase_scan_stale_abi() {
   # 工具链用 __h 编译过 vendor 对象导致链接失败; 当前 SDK/llvm@21/设备
   # libc++_shared.so 已全部是 __n1, 推导法拿不到它, 必须硬编码兜底。
   local good_ns bad_ns
-  good_ns=$(nm -o "$LLVM21/lib/aarch64-linux-ohos/libc++_static.a" 2>/dev/null \
+  good_ns=$(nm -o "$LLVM_HOME/lib/aarch64-linux-ohos/libc++_static.a" 2>/dev/null \
     | grep -oE '_ZNSt[0-9]+__[a-z0-9]+' | sort -u)
   bad_ns=$(nm -o "$OHOS_SDK/native/llvm/lib/aarch64-linux-ohos/libc++_static.a" 2>/dev/null \
     | grep -oE '_ZNSt[0-9]+__[a-z0-9]+' | sort -u \
@@ -488,26 +501,6 @@ phase_build() {
     done
   }
 
-  # 统一工具链: configure 检测到的 clang 可能来自 llvm22.1.7 (系统 PATH 残留),
-  # 在 configure 后把 build.ninja 中所有 llvm22.1.7 替换为 llvm@21,
-  # 确保 cc/cxx/dep_host_cc/WebKit cmake 全部使用 llvm@21 (OHOS 官方工具链)
-  patch_ninja_llvm21() {
-    local nf="$OUTDIR/build.ninja"
-    [ -f "$nf" ] || return 0
-    if grep -qa 'llvm22.1.7' "$nf"; then
-      warn "build.ninja 含 llvm22.1.7 引用, 统一替换为 llvm@21..."
-      sed -i "s|/storage/Users/currentUser/usr/local/llvm22.1.7|$LLVM21|g" "$nf"
-      # 确认替换
-      if grep -qa 'llvm22.1.7' "$nf"; then
-        err "build.ninja 仍有 llvm22.1.7 残留"
-        return 1
-      fi
-      ok "build.ninja 已统一为 llvm@21"
-    else
-      ok "build.ninja 已使用 llvm@21"
-    fi
-  }
-
   local attempt=0
   local max_attempts=10
   while [ $attempt -lt $max_attempts ]; do
@@ -534,17 +527,13 @@ phase_build() {
       return 1
     fi
 
-    # 2. configure 检测到的 clang 可能来自 llvm22.1.7 (系统 PATH 残留),
-    #    统一替换为 llvm@21 (否则 ninja regen 会覆盖手动修改)
-    patch_ninja_llvm21 || return 1
-
-    # 3. 运行 ninja 编译 (并行度 NINJA_JOBS)
+    # 2. 运行 ninja 编译 (并行度 NINJA_JOBS)
     if ninja -C "$OUTDIR" -j"$NINJA_JOBS" bun 2>&1 | tee "$TMPDIR/build.log"; then
       ok "编译成功!"
       return 0
     fi
 
-    # 4. 检测可恢复错误 (Text file busy / Permission denied — build-script 签名问题)
+    # 3. 检测可恢复错误 (Text file busy / Permission denied — build-script 签名问题)
     if grep -qaE "Text file busy|Permission denied|could not execute process" "$TMPDIR/build.log"; then
       warn "检测到 build-script 签名问题, 修复后重试..."
       sign_build_scripts
