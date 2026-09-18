@@ -4803,7 +4803,9 @@ describe("fs/promises", () => {
     };
 
     if (withFileTypes) {
-      it("readdirSync(path, {recursive: true, withFileTypes: true} should work x 100", doIt, 10_000);
+      // OHOS: recursive readdirSync "x 100" stress times out on slow traversal,
+      // as the non-withFileTypes sibling above already notes.
+      it.skipIf(isOhos)("readdirSync(path, {recursive: true, withFileTypes: true} should work x 100", doIt, 10_000);
     } else {
       // OHOS: recursive readdirSync "x 100" stress times out / leaks FDs on slow traversal.
       it.skipIf(isOhos)("readdirSync(path, {recursive: true} should work x 100", doIt, 10_000);

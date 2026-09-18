@@ -170,10 +170,12 @@ const isClusterTest = p => {
   const u = p.replaceAll("\\", "/");
   return u.includes("js/node/cluster/test-") && u.endsWith(".ts");
 };
-// Test-file naming per the runner: `.test`, `_test_`, `.spec` or `_spec_` in
-// the filename. A bare `spec.` also matched scripts like http-spec.ts, which
-// `bun test` then refuses (Tests need ...), always FAILing 0/0.
-const isTestStrict = p => isJs(p) && /(\.test|_test_|\.spec|_spec_)/.test(basename(p));
+// Must stay identical to the isTestStrict in scripts/runner.node.mjs (line
+// ~2321): a broad `.test` / `spec.` substring match. Files it catches that are
+// not bun-test files (for example test/js/bun/http/http-spec.ts, an h1spec
+// driver) are executed as scripts below, as the upstream runner does for its
+// run drivers.
+const isTestStrict = p => isJs(p) && /\.test|spec\./.test(basename(p));
 const isHidden = p => /node_modules|node\.js/.test(dirname(p).replaceAll("\\", "/")) || /^\./.test(basename(p));
 const tests = [];
 const walk = (cwd, rel) => {
@@ -422,13 +424,26 @@ run_test() {
 
   attempt=1
   max_attempts=$((RETRIES + 1))
+  # Not every scheduled file is a bun-test file: the broad `spec.` rule also
+  # catches script drivers (http-spec.ts), which runner.node.mjs runs with
+  # `bun run`. Test-only flags --smol survives; the runner flags do not apply.
+  case "$(basename "$f")" in
+    *.test.*|*.spec.*|*_test_.*|*_spec_.*) _sub="test" ;;
+    *) _sub="run" ;;
+  esac
+  # The error-snapshot expectations embed ANSI; a non-TTY runner strips them.
+  _env_prefix=""
+  case "$f" in */snapshot-tests/snapshots/snapshot.test.ts) _env_prefix="FORCE_COLOR=1" ;; esac
   while [ $attempt -le $max_attempts ]; do
     out="$PDIR/out_${idx}_a${attempt}.tmp"
+    if [ "$_sub" = "run" ]; then _bt="--smol"; else _bt="$BT"; fi
     if [ -n "$WRAP" ]; then
       # OHOS CI 无 TTY，用 script 分配 PTY
-      $WRAP "$BUN test $BT \"$f\"" /dev/null > "$out" 2>&1 &
+      $WRAP "$BUN $_sub $_bt \"$f\"" /dev/null > "$out" 2>&1 &
+    elif [ -n "$_env_prefix" ]; then
+      env $_env_prefix $BUN $_sub $_bt "$f" > "$out" 2>&1 &
     else
-      $BUN test $BT "$f" > "$out" 2>&1 &
+      $BUN $_sub $_bt "$f" > "$out" 2>&1 &
     fi
     BUNPID=$!
     # Watchdog — graceful timeout: SIGTERM → 15s grace → SIGKILL

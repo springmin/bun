@@ -478,6 +478,18 @@ describe.concurrent("flags", () => {
     expect(await sortedNames(dir)).toEqual(["index.js", "package.json"]);
   });
 
+// /dev/full is what makes the write fail with ENOSPC; OHOS has no writable
+// one (the sandbox denies it), so the ENOSPC simulation is skipped there.
+const devFullWritable = (() => {
+  try {
+    const fd = require("fs").openSync("/dev/full", "w");
+    require("fs").closeSync(fd);
+    return true;
+  } catch {
+    return false;
+  }
+})();
+
   // Every write(2) to /dev/full fails with ENOSPC, the same as a tarball destination on a full disk.
   // "an entry": enough incompressible data that libarchive flushes a block while it writes index.js.
   // "the end of the archive": small enough that the only write(2) happens when the archive is closed.
@@ -485,6 +497,9 @@ describe.concurrent("flags", () => {
     ["an entry", () => `// ${randomBytes(128 * 1024).toString("base64")}`],
     ["the end of the archive", () => indexJs],
   ] as const)("reports ENOSPC when the disk fills up while writing %s", async (_, indexJsContents) => {
+    // /dev/full is what makes the write fail with ENOSPC; OHOS has no writable
+    // one (the sandbox denies it), so the simulation cannot run there.
+    if (!devFullWritable) return;
     using dir = tempDir("pack-enospc", {
       "package.json": JSON.stringify({ name: "pack-enospc", version: "1.1.1" }),
       "index.js": indexJsContents(),
