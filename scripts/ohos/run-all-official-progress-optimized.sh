@@ -107,6 +107,11 @@ _ohos_napi_prebuild() {
 }
 
 cleanup() {
+  # Subshells (workers, show_progress) inherit the EXIT trap: running the
+  # PDIR removal there deleted the shared progress dir mid-run the moment a
+  # subshell died (2026-09-18 17:52 run, after a progress.log parsing error).
+  # $$ is the main shell in every subshell of it; BASHPID is not.
+  [ "${BASHPID:-$$}" != "$$" ] && return 0
   local kids
   kids=$(jobs -p 2>/dev/null)
   [ -n "$kids" ] && kill $kids 2>/dev/null
@@ -574,6 +579,12 @@ show_progress() {
       _pl_total=$(wc -l < "$PDIR/progress.log" 2>/dev/null || echo 0)
       if [ "${_pl_total:-0}" -gt "$_pl_seen" ]; then
         while IFS=' ' read -r _st _cp _cf; do
+          # Concurrent appends on hmdfs can interleave (seen: "0PASS ..."),
+          # which used to abort this subshell mid-arithmetic; only accept
+          # well-formed lines.
+          case "$_st" in PASS|FAIL) ;; *) continue ;; esac
+          case "$_cp" in ''|*[!0-9]*) continue ;; esac
+          case "$_cf" in ''|*[!0-9]*) continue ;; esac
           completed=$((completed + 1))
           if [ "$_st" = "PASS" ]; then passed=$((passed + 1)); else failed=$((failed + 1)); fi
           case_pass=$((case_pass + _cp)); case_fail=$((case_fail + _cf))
