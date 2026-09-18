@@ -211,6 +211,11 @@ pub(crate) unsafe extern "C" fn main(argc: c_int, argv: *const *const c_char) ->
             };
             let _ = unsafe { std::env::set_var("TMPDIR", &fallback) };
         }
+
+        // OHOS forces the waiter thread; create its eventfd before user code
+        // runs so an FD baseline a script or test takes does not gain a stray
+        // +1 the first time a child is spawned (see WaiterThreadPosix::prewarm).
+        bun_spawn::process::WaiterThread::prewarm();
     }
 
     // 5. Per-thread stack-limit cache for the JS recursion guard.

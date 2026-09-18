@@ -1343,6 +1343,16 @@ pub mod waiter_thread_posix {
             bun_spawn_sys::waiter_thread_flag::set();
         }
 
+        /// OHOS: create the waiter thread's eventfd now, without starting the
+        /// thread. Callers otherwise gain the description on the first child
+        /// spawn — after any FD baseline a caller may have taken — so a
+        /// disposed graph's "no descriptor left behind" checks see a stray +1.
+        pub fn prewarm() {
+            if bun_spawn_sys::waiter_thread_flag::get() {
+                let _ = ensure_eventfd();
+            }
+        }
+
         #[inline]
         pub(crate) fn should_use_waiter_thread() -> bool {
             bun_spawn_sys::waiter_thread_flag::get()
@@ -1398,8 +1408,26 @@ pub mod waiter_thread_posix {
             return Ok(());
         }
 
+        ensure_eventfd()?;
+
+        let thread = std::thread::Builder::new()
+            .stack_size(STACK_SIZE)
+            .spawn(loop_)?;
+        drop(thread); // detach
+        Ok(())
+    }
+
+    /// Creates the waiter thread's eventfd if it does not exist yet. Split
+    /// from [`init`] so [`WaiterThreadPosix::prewarm`] can pay for the fd
+    /// before user code runs. Only the JS thread calls this (startup and the
+    /// first [`append`]), so the field write races no reader: the waiter
+    /// thread starts after it, and `append` runs after either caller.
+    pub(crate) fn ensure_eventfd() -> Result<(), std::io::Error> {
         #[cfg(any(target_os = "linux", target_os = "android"))]
         {
+            if instance_ref().eventfd.is_valid() {
+                return Ok(());
+            }
             // All by-value `c_uint`/`c_int` args; the kernel validates flags
             // and returns -1/errno on failure — no memory-safety preconditions,
             // so `safe fn` (Rust 2024) discharges the link-time proof.
@@ -1413,14 +1441,9 @@ pub mod waiter_thread_posix {
             if fd < 0 {
                 return Err(std::io::Error::last_os_error());
             }
-            // SAFETY: single-writer init path (guarded by fetch_max above).
+            // SAFETY: single-writer path (see the doc comment above).
             unsafe { (*instance()).eventfd = Fd::from_native(fd) };
         }
-
-        let thread = std::thread::Builder::new()
-            .stack_size(STACK_SIZE)
-            .spawn(loop_)?;
-        drop(thread); // detach
         Ok(())
     }
 
@@ -1491,6 +1514,7 @@ pub enum WaiterThread {}
 #[cfg(not(unix))]
 impl WaiterThread {
     pub fn set_should_use_waiter_thread() {}
+    pub fn prewarm() {}
 }
 
 // (PosixSpawnOptions / StdioKind / Dup2 / PosixStdio moved to bun_spawn_sys —
