@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { bunEnv, bunExe, isLinux } from "harness";
+import { bunEnv, bunExe, isLinux, isOHOS } from "harness";
 
 // On Linux, Bun.spawn opens a pidfd after posix_spawn so the event loop can
 // observe the child's exit. When the process is at its RLIMIT_NOFILE, the
@@ -49,10 +49,19 @@ for (let spare = 1; spare <= 6; spare++) {
 
   const lines = stdout.trim().split("\n");
   expect(lines).toHaveLength(6);
-  expect(lines.filter(l => l.includes("err EMFILE pidfd_open"))).toHaveLength(1);
+  // OHOS runs the child-exit watcher on a waiter thread instead of pidfd_open,
+  // so the fd limit surfaces from the socketpair/posix_spawn calls before it.
+  if (isOHOS) {
+    expect(lines.filter(l => l.includes("pidfd_open"))).toHaveLength(0);
+    expect(lines.filter(l => l.includes("err EMFILE"))).not.toHaveLength(0);
+  } else {
+    expect(lines.filter(l => l.includes("err EMFILE pidfd_open"))).toHaveLength(1);
+  }
   expect(lines.at(-1)).toBe('6: ok 0 ""');
   for (const line of lines) {
-    expect(line).toMatch(/^\d: (err EMFILE (socketpair|pidfd_open)|ok 0 "")$/);
+    expect(line).toMatch(
+      isOHOS ? /^\d: (err EMFILE (socketpair|posix_spawn)|ok 0 "")$/ : /^\d: (err EMFILE (socketpair|pidfd_open)|ok 0 "")$/,
+    );
   }
   expect(stderr).toBe("");
   expect(exitCode).toBe(0);
@@ -109,7 +118,11 @@ for (const fd of held) fs.closeSync(fd);
     });
     const [stdout, stderr, exitCode] = await Promise.all([proc.stdout.text(), proc.stderr.text(), proc.exited]);
 
-    expect(stdout).toBe("Bun.spawn: err EMFILE pidfd_open\nchild_process.spawn: err EMFILE spawn /bin/cat\n");
+    expect(stdout).toBe(
+      isOHOS
+        ? "Bun.spawn: err EMFILE posix_spawn\nchild_process.spawn: err EMFILE spawn /bin/cat\n"
+        : "Bun.spawn: err EMFILE pidfd_open\nchild_process.spawn: err EMFILE spawn /bin/cat\n",
+    );
     expect(stderr).toBe("");
     expect(exitCode).toBe(0);
   },

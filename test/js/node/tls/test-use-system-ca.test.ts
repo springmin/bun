@@ -1,6 +1,6 @@
 import { spawn } from "bun";
 import { describe, expect, test } from "bun:test";
-import { bunEnv, bunExe, isLinux, isWindows, tempDir } from "harness";
+import { bunEnv, bunExe, isLinux, isOHOS, isWindows, tempDir } from "harness";
 import { X509Certificate } from "node:crypto";
 import { existsSync, readFileSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
@@ -154,7 +154,11 @@ describe.skipIf(!isLinux)("tls.getCACertificates('system')", () => {
     );
   });
 
-  test("SSL_CERT_FILE can be a pipe", async () => {
+  // OHOS: a child's stdin is a socketpair there (the kernel's pipe-readiness
+  // defect forces the fallback), and /proc/self/fd/N cannot be reopened for a
+  // socket (ENXIO), so /dev/stdin is not readable by the loader. FIFOs named
+  // directly still work.
+  test.skipIf(isOHOS)("SSL_CERT_FILE can be a pipe", async () => {
     const ca1 = fixtureCert("ca1");
     const fingerprints = await systemFingerprints({ SSL_CERT_FILE: "/dev/stdin", SSL_CERT_DIR: "" }, new Blob([ca1]));
     expect(fingerprints).toEqual([fingerprint(ca1)]);

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { isASAN, isDebug } from "harness";
+import { isASAN, isDebug, isOHOS } from "harness";
 
 const asanIsSlowMultiplier = isASAN ? 0.2 : 1;
 const count = Math.floor(10000 * asanIsSlowMultiplier);
@@ -31,7 +31,10 @@ test(
     Bun.gc(true);
     Bun.unsafe.gcAggressionLevel(prev);
   },
-  isDebug || isASAN ? 20_000 : 5000,
+  // OHOS: 10,000 dynamic imports of one path take well over 5s on the device,
+  // especially under the full run's parallel load; the loop, not the clock, is
+  // what this pins down.
+  isDebug || isASAN ? 20_000 : isOHOS ? 20_000 : 5000,
 );
 
 test(`load the same empty JS file ${count} times`, async () => {

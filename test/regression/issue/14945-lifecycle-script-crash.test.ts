@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { bunEnv, bunExe, tempDir } from "harness";
+import { bunEnv, bunExe, isOHOS, tempDir } from "harness";
 
 test("lifecycle script should handle directory deletion gracefully", async () => {
   await using dir = tempDir("lifecycle-crash-test", {
@@ -7,7 +7,9 @@ test("lifecycle script should handle directory deletion gracefully", async () =>
       name: "test-package",
       version: "1.0.0",
       scripts: {
-        preinstall: process.platform === "win32" ? "rmdir /s /q ." : "rm -rf .",
+        // OHOS: toybox's `rm -rf .` leaves the directory (and some files) in place;
+        // deleting by absolute path is what actually makes the cwd disappear.
+        preinstall: process.platform === "win32" ? "rmdir /s /q ." : isOHOS ? 'rm -rf "$PWD"' : "rm -rf .",
         postinstall: "echo hello world",
       },
     }),
@@ -51,7 +53,9 @@ test("lifecycle script with optional dependency should handle directory deletion
       name: "optional-dep",
       version: "1.0.0",
       scripts: {
-        preinstall: process.platform === "win32" ? "rmdir /s /q ." : "rm -rf .",
+        // OHOS: toybox's `rm -rf .` leaves the directory (and some files) in place;
+        // deleting by absolute path is what actually makes the cwd disappear.
+        preinstall: process.platform === "win32" ? "rmdir /s /q ." : isOHOS ? 'rm -rf "$PWD"' : "rm -rf .",
         postinstall: "echo hello from optional dep",
       },
     }),

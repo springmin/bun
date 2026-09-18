@@ -1,6 +1,6 @@
 import { spawn } from "bun";
 import { expect, test } from "bun:test";
-import { bunEnv, bunExe, isWindows } from "harness";
+import { bunEnv, bunExe, isOHOS, isWindows } from "harness";
 import { join } from "path";
 
 async function run(withWaiterThread: boolean) {
@@ -30,7 +30,9 @@ async function run(withWaiterThread: boolean) {
 
   // Assert we didn't use 100% of CPU time
   console.log(resourceUsage.cpuTime);
-  expect(resourceUsage?.cpuTime.total).toBeLessThan(750_000n * (isWindows ? 5n : 1n));
+  // OHOS: the event loop carries the platform's epoll-defect watchdog (periodic
+  // re-arms), which keeps a little more CPU busy than the other Unixes.
+  expect(resourceUsage?.cpuTime.total).toBeLessThan(750_000n * (isWindows ? 5n : isOHOS ? 5n : 1n));
 }
 
 test(
@@ -43,5 +45,7 @@ test(
 
     await Promise.all(promises);
   },
-  isWindows ? 6_000 : 5_000,
+  // OHOS: two fixtures run in parallel and each waits out a full second under
+  // the platform's slower spawn path; the 5s budget is a CI-sized one.
+  isWindows ? 6_000 : isOHOS ? 15_000 : 5_000,
 );

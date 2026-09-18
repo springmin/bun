@@ -1,7 +1,7 @@
 import { $ } from "bun";
 import { describe, expect, it, test } from "bun:test";
 import { readFileSync, writeFileSync } from "fs";
-import { bunEnv, bunExe, DirectoryTree, isDebug, tempDir, tempDirWithFiles } from "harness";
+import { bunEnv, bunExe, DirectoryTree, isDebug, isOHOS, tempDir, tempDirWithFiles } from "harness";
 
 function test1000000(arg1: any, arg218718132: any) {}
 
@@ -185,7 +185,9 @@ class SnapshotTester {
     contents: string,
     opts: { shouldNotError?: boolean; shouldGrow?: boolean; skipSnapshot?: boolean } = {},
   ) {
-    test(label, async () => await this.update(contents, opts), isDebug ? 100_000 : 5_000);
+    // OHOS: the update cycle runs the inner `bun test` two or three times and
+    // each run takes seconds there, so the 5s budget only fits debug hosts.
+    test(label, async () => await this.update(contents, opts), isDebug ? 100_000 : isOHOS ? 30_000 : 5_000);
   }
   async update(
     contents: string,

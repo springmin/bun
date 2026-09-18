@@ -416,11 +416,17 @@ impl UDPSocketConfig {
                             .iter()
                             .all(|&c| c.is_ascii_alphanumeric() || matches!(c, b'.' | b'-' | b'_' | b'%' | b':' | b'[' | b']'))
                     {
-                        return Err(global_this.throw_value(
-                            bun_sys::Error::from_code_int(SystemErrno::EINVAL as c_int, bun_sys::Tag::open)
-                                .with_path(bytes)
-                                .to_js(global_this),
-                        ));
+                        // The name can never be accepted by the resolver, so give
+                        // the same error a failed lookup produces
+                        // (`getaddrinfo ENOTFOUND <hostname>` with syscall and
+                        // hostname set) rather than a raw EINVAL: callers match on
+                        // that shape.
+                        let err = crate::dns_jsc::cares_jsc::system_error_with_syscall_and_hostname(
+                            c_ares::Error::ENOTFOUND,
+                            b"getaddrinfo",
+                            bytes,
+                        );
+                        return Err(global_this.throw_value(err.to_error_instance(global_this)));
                     }
                 }
                 break 'brk s;

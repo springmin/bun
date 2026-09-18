@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { bunEnv, bunExe, isDebug, isLinux, isWindows, tempDir } from "harness";
+import { bunEnv, bunExe, isDebug, isLinux, isOHOS, isWindows, tempDir } from "harness";
 import { join } from "node:path";
 
 // On Windows, when the initial uv_read_start on a subprocess stdout/stderr
@@ -304,9 +304,17 @@ describe.skipIf(!isLinux || !cc)("a Bun.Terminal whose reader fails to register 
     test.concurrent.each([
       ["new Bun.Terminal()", "terminal"],
       ["Bun.spawn() with terminal options", "spawn-terminal"],
-    ])("%s throws and releases the pty", async (_, kind) => {
+    ])("%s reports the failure and releases the pty", async (_, kind) => {
       expect(await runFixture(kind, { FAIL_EPOLL_CTL: mode })).toEqual({
-        report: { error: { message: "Failed to start terminal reader" }, leakedFds: 0, leakedWrappers: 0 },
+        report: {
+          // OHOS: the kernel's epoll defect makes a failed pty-reader registration
+          // a normal event there (see EPOLL_REARM_WATCH in Terminal.rs), so start()
+          // does not throw -- the reader's exit is replayed instead. The pty must
+          // still be released, which the leak counters below pin down.
+          error: isOHOS ? null : { message: "Failed to start terminal reader" },
+          leakedFds: 0,
+          leakedWrappers: 0,
+        },
         stderr: "",
         exitCode: 0,
       });

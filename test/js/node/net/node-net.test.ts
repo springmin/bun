@@ -9,6 +9,7 @@ import {
   gc,
   isASAN,
   isDebug,
+  isOHOS,
   isWindows,
   tempDir,
   tls as tlsCert,
@@ -3044,8 +3045,15 @@ describe.skipIf(isWindows)("socket write while data is buffered natively", () =>
         sent.s = finalChunk.length;
       } else {
         // Leave a small (< 1MB) native remainder...
-        for (let attempt = 0; attempt < 64 && !sawPartial; attempt++) {
-          const C = Buffer.alloc(1024 * 1024, 0x61);
+        // OHOS: the loopback send buffer auto-tunes past 64 MB, so 1 MB chunks
+        // never fill it; 16 MB chunks (as in the loss phase) do.
+        const isOHOS =
+          process.env.BUN_OHOS === "1" ||
+          (process.platform === "linux" && require("node:fs").existsSync("/system/lib/ld-musl-aarch64.so.1"));
+        const chunkSize = isOHOS ? 16 * 1024 * 1024 : 1024 * 1024;
+        const attempts = isOHOS ? 8 : 64;
+        for (let attempt = 0; attempt < attempts && !sawPartial; attempt++) {
+          const C = Buffer.alloc(chunkSize, 0x61);
           sawPartial = !writeDirect(C);
           sent.a += C.length;
         }
@@ -3103,7 +3111,12 @@ describe.skipIf(isWindows)("socket write while data is buffered natively", () =>
 
       await using server = Bun.spawn({
         cmd: [bunExe(), "server-fixture.mjs"],
-        env: phase === "loss" ? { ...bunEnv, STALL_ON_ACCEPT: "1" } : bunEnv,
+        // OHOS: the loopback send buffer auto-tunes far past what a few MB can
+        // fill, so the client cannot make a write buffer natively while the peer
+        // drains eagerly; stalling the accept first (as the loss phase does)
+        // keeps the fill bounded.
+        env:
+          phase === "loss" || isOHOS ? { ...bunEnv, STALL_ON_ACCEPT: "1" } : bunEnv,
         cwd: String(dir),
         stdout: "pipe",
         stderr: "pipe",

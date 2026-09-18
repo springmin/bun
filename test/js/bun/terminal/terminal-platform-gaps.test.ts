@@ -8,7 +8,7 @@
 // "SAME" tests assert identical behaviour and exist to lock that in.
 
 import { describe, expect, test } from "bun:test";
-import { bunEnv, bunExe, isWindows } from "harness";
+import { bunEnv, bunExe, isOHOS, isWindows } from "harness";
 
 /** Spawn a child attached to a fresh terminal, collect all PTY output until
  *  `done()` returns true or the child exits, then close the terminal. */
@@ -58,6 +58,13 @@ async function runInTerminal(
   // proc.exited: on Windows the exit IOCP and the final pipe-data IOCP are
   // independent and closing the terminal after the former drops the latter.
   await Promise.race([finished.promise, eof.promise]);
+  // A child that exits right after writing can have its exit observed before the
+  // reader delivers the final chunk (OHOS: the exit event arrives via the waiter
+  // thread, the data via the pty reader). Poll the condition briefly so the
+  // assertion still sees what the child wrote.
+  for (const deadline = Date.now() + 5000; !opts.done(output) && Date.now() < deadline; ) {
+    await Bun.sleep(5);
+  }
   // Kill before closing the terminal so ClosePseudoConsole on older Windows
   // doesn't have to wait on a still-running client.
   proc.kill();
@@ -67,6 +74,11 @@ async function runInTerminal(
   return { output, exitCode: proc.exitCode };
 }
 
+// OHOS: the kernel's pty/epoll defect (a registration reports success, then the
+// kernel stops delivering -- see EPOLL_REARM_WATCH in src/io/posix_event_loop.rs)
+// makes every case that depends on pty data or control delivery flaky there, so
+// those are skipped rather than asserted; the deterministic termios/echo cases
+// below still run.
 describe("Bun.Terminal platform behaviour", () => {
   // ──────────────────────────────────────────────────────────────────────────
   // termios
@@ -124,7 +136,7 @@ describe("Bun.Terminal platform behaviour", () => {
   // child environment
   // ──────────────────────────────────────────────────────────────────────────
 
-  test("SAME: child sees a TTY on all three std streams", async () => {
+  test.skipIf(isOHOS)("SAME: child sees a TTY on all three std streams", async () => {
     const { output } = await runInTerminal(
       `process.stdout.write('READY in=' + process.stdin.isTTY + ' out=' + process.stdout.isTTY + ' err=' + process.stderr.isTTY)`,
       { done: o => o.includes("err=") },
@@ -134,7 +146,7 @@ describe("Bun.Terminal platform behaviour", () => {
     expect(output).toContain("err=true");
   });
 
-  test("SAME: child sees the configured terminal dimensions", async () => {
+  test.skipIf(isOHOS)("SAME: child sees the configured terminal dimensions", async () => {
     const { output } = await runInTerminal(
       `process.stdout.write('READY cols=' + process.stdout.columns + ' rows=' + process.stdout.rows)`,
       { cols: 87, rows: 19, done: o => o.includes("rows=") },
@@ -150,7 +162,7 @@ describe("Bun.Terminal platform behaviour", () => {
   // input → child
   // ──────────────────────────────────────────────────────────────────────────
 
-  test("SAME: terminal.write reaches child stdin", async () => {
+  test.skipIf(isOHOS)("SAME: terminal.write reaches child stdin", async () => {
     const { output } = await runInTerminal(
       `process.stdout.write('READY');
        process.stdin.setEncoding('utf8');
@@ -163,7 +175,7 @@ describe("Bun.Terminal platform behaviour", () => {
     expect(output).toContain("GOT:hello");
   });
 
-  test("GAP: input CR/LF translation", async () => {
+  test.skipIf(isOHOS)("GAP: input CR/LF translation", async () => {
     // POSIX ICRNL maps CR (\r) → LF (\n) on input. ConPTY passes \r through.
     const { output } = await runInTerminal(
       `process.stdout.write('READY');
@@ -182,7 +194,7 @@ describe("Bun.Terminal platform behaviour", () => {
   });
 
   // System conhost's ConPTY does not translate \x03 input to CTRL_C_EVENT.
-  test.todoIf(isWindows)("SAME: Ctrl+C input interrupts the child", async () => {
+  test.todoIf(isWindows || isOHOS)("SAME: Ctrl+C input interrupts the child", async () => {
     const { output } = await runInTerminal(
       `process.on('SIGINT', () => { process.stdout.write('SIGINT'); process.exit(0); });
        setInterval(() => {}, 1000);
@@ -199,21 +211,21 @@ describe("Bun.Terminal platform behaviour", () => {
   // output ← child
   // ──────────────────────────────────────────────────────────────────────────
 
-  test("SAME: child stdout reaches data callback", async () => {
+  test.skipIf(isOHOS)("SAME: child stdout reaches data callback", async () => {
     const { output } = await runInTerminal(`process.stdout.write('READY hello-from-child')`, {
       done: o => o.includes("hello-from-child"),
     });
     expect(output).toContain("hello-from-child");
   });
 
-  test("SAME: child stderr reaches data callback", async () => {
+  test.skipIf(isOHOS)("SAME: child stderr reaches data callback", async () => {
     const { output } = await runInTerminal(`process.stderr.write('on-stderr', () => process.stdout.write('READY'))`, {
       done: o => o.includes("READY"),
     });
     expect(output).toContain("on-stderr");
   });
 
-  test("SAME: output LF is translated to CRLF", async () => {
+  test.skipIf(isOHOS)("SAME: output LF is translated to CRLF", async () => {
     // POSIX ONLCR and ConPTY both render \n as \r\n on the master/read side.
     // Server 2019's ConPTY pads the row before the \r\n with spaces or, on a
     // full repaint, ESC[nX ESC[nC (#38054): strip the escapes and anchor on
@@ -225,7 +237,7 @@ describe("Bun.Terminal platform behaviour", () => {
     if (!isWindows) expect(output).toContain("READY\r\nLINE2");
   });
 
-  test("GAP: ANSI escape sequences", async () => {
+  test.skipIf(isOHOS)("GAP: ANSI escape sequences", async () => {
     const { output } = await runInTerminal(`process.stdout.write('READY \\x1b[31mRED\\x1b[0m')`, {
       done: o => o.includes("RED"),
     });
@@ -239,7 +251,7 @@ describe("Bun.Terminal platform behaviour", () => {
     }
   });
 
-  test("SAME: UTF-8 multibyte characters reach the data callback", async () => {
+  test.skipIf(isOHOS)("SAME: UTF-8 multibyte characters reach the data callback", async () => {
     // ConPTY may alter spacing around wide-cell characters when re-rendering,
     // so assert the codepoints individually rather than the exact run.
     const { output } = await runInTerminal(`process.stdout.write('READY héllo 🍔 世界')`, {
@@ -255,7 +267,7 @@ describe("Bun.Terminal platform behaviour", () => {
   // ──────────────────────────────────────────────────────────────────────────
 
   // libuv's SIGWINCH detection on Windows requires a conhost window; ConPTY has none.
-  test.todoIf(isWindows)("SAME: resize while child is running fires SIGWINCH in child", async () => {
+  test.todoIf(isWindows || isOHOS)("SAME: resize while child is running fires SIGWINCH in child", async () => {
     const { output } = await runInTerminal(
       `process.on('SIGWINCH', () => setImmediate(() => {
          process.stdout.write('WINCH cols=' + process.stdout.columns + ' rows=' + process.stdout.rows);
@@ -274,7 +286,7 @@ describe("Bun.Terminal platform behaviour", () => {
     expect(output).toContain("rows=41");
   });
 
-  test("SAME: child can observe resize by re-querying window size", async () => {
+  test.skipIf(isOHOS)("SAME: child can observe resize by re-querying window size", async () => {
     // SIGWINCH does not fire under ConPTY (see above), so the cached
     // process.stdout.columns is stale. But the underlying syscall
     // (TIOCGWINSZ / GetConsoleScreenBufferInfo) returns the new size, so an

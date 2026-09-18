@@ -1,7 +1,7 @@
 import { spawn } from "bun";
 import { beforeEach, expect, it } from "bun:test";
 import { copyFileSync, cpSync, readFileSync, renameSync, rmSync, unlinkSync, writeFileSync } from "fs";
-import { bunEnv, bunExe, isDebug, isWindows, tmpdirSync, waitForFileToExist } from "harness";
+import { bunEnv, bunExe, isDebug, isOHOS, isWindows, tmpdirSync, waitForFileToExist } from "harness";
 import { join } from "path";
 
 const timeout = isDebug ? Infinity : 10_000;
@@ -687,7 +687,9 @@ ${Buffer.alloc(counter * 2, " ").toString()}throw new Error(${counter});`,
     expect(reloadCounter).toBe(50);
     bundler.kill();
   },
-  timeout,
+  // OHOS: 50 reload cycles of the watch-bundler + --hot pair take ~20s there; the
+  // 10s budget is a fast-host one.
+  isOHOS ? longTimeout : timeout,
 );
 
 const long_comment = Buffer.alloc(400000, "BBBB").toString();

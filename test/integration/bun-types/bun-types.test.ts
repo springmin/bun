@@ -338,7 +338,10 @@ describe("@types/bun integration test", () => {
   // compiler API, so unlike the tests above we write a real tsconfig and spawn the CLI.
   // https://devblogs.microsoft.com/typescript/announcing-typescript-7-0-beta/
   describe("TypeScript latest", () => {
-    test.skipIf(isDebug)("checks without lib.dom.d.ts", async () => {
+    // OHOS: typescript@latest is the native (Go) compiler, which cannot run on
+    // the device (its ELF launcher has no OHOS codesign section; the sandbox
+    // additionally denies a Go runtime syscall with SIGSYS).
+    test.skipIf(isDebug || isOhos)("checks without lib.dom.d.ts", async () => {
       const fixtureDir = await createIsolatedFixture();
 
       const tsconfig = structuredClone(sourceTsconfig);
@@ -370,7 +373,7 @@ describe("@types/bun integration test", () => {
   // fixture/ts7.1 files that only that compiler can type.
   // `>=7.1.0-0` takes the nightly until a 7.1 release exists, then the release.
   describe("TypeScript 7.1", () => {
-    test.skipIf(isDebug)("checks the fixture and import attributes through ts7.1/index.d.ts", async () => {
+    test.skipIf(isDebug || isOhos)("checks the fixture and import attributes through ts7.1/index.d.ts", async () => {
       const fixtureDir = await createIsolatedFixture(["typescript@>=7.1.0-0"]);
 
       const tsconfig = structuredClone(sourceTsconfig);
@@ -537,7 +540,7 @@ describe("@types/bun integration test", () => {
       expect(exitCode).toBe(0);
     }
 
-    test("lib.dom's composedPath() declaration wins when lib.dom is loaded", async () => {
+    test.skipIf(isOhos)("lib.dom's composedPath() declaration wins when lib.dom is loaded", async () => {
       await checkEventFixture(
         "event-lib-dom-check",
         ["ESNext", "DOM"],
@@ -548,7 +551,7 @@ describe("@types/bun integration test", () => {
       );
     });
 
-    test("the Node-style composedPath() tuple applies without lib.dom", async () => {
+    test.skipIf(isOhos)("the Node-style composedPath() tuple applies without lib.dom", async () => {
       await checkEventFixture(
         "event-no-lib-dom-check",
         ["ESNext"],
@@ -566,7 +569,7 @@ describe("@types/bun integration test", () => {
   // directly, which masks the bug, so this check pins @types/node@24 instead
   // of reusing the base fixture.
   describe("process event methods with @types/node@24", () => {
-    test("removeListener and off accept other event names", async () => {
+    test.skipIf(isOhos)("removeListener and off accept other event names", async () => {
       const checkDir = join(TEMP_DIR, "types-node-24-check");
       const tsconfig = structuredClone(sourceTsconfig);
       tsconfig.include = ["index.ts"];

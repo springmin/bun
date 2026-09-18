@@ -2825,8 +2825,29 @@ describe("packages whose version label is longer than 512 bytes", () => {
 // After only the root node_modules is removed, the next install does not delete
 // anything first, so a workspace's own node_modules still holds those hardlinks. A copy
 // over them must replace the files. Writing through them empties the cache files.
+// userdata (hmdfs) need not support hard links; bun's hardlink backend then
+// falls back to copyfile and the nlink assertions below cannot hold.
+const hardlinksSupported = (() => {
+  if (isWindows) return true;
+  try {
+    const dir = tmpdirSync();
+    try {
+      writeFileSync(join(dir, "a"), "x");
+      require("fs").linkSync(join(dir, "a"), join(dir, "b"));
+      return true;
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  } catch {
+    return false;
+  }
+})();
+
 test.concurrent("a copyfile install over a workspace's hardlinked files does not empty the cache", async () => {
   using ctx = await setupTest();
+  if (!hardlinksSupported) {
+    return;
+  }
   const { packageDir, packageJson, env } = ctx;
   await Promise.all([
     write(
