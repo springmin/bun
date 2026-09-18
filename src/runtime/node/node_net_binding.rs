@@ -157,7 +157,10 @@ pub(crate) fn new_detached_socket(global: &JSGlobalObject, frame: &CallFrame) ->
             verify_error: JsCell::new(None),
             pending_fatal_send_errno: Cell::new(0),
         });
-        socket.get_this_value(global)
+        // Weak while idle: `_handle` owns it, and `this_value_for_connect` pins each attempt.
+        let value = socket.to_js(global);
+        socket.this_value.set(jsc::JsRef::init_weak(value));
+        value
     }
 
     Ok(if !is_ssl {

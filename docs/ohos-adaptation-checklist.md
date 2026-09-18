@@ -192,3 +192,4 @@ PATH="" bun install --no-save  # uses-what-bin-slow 场景
 | #37286 multi-run EOF fix | multi_run/filter_run drain_and_close_pipes | OHOS 分支同步 drain + force-end（不能整体跳过——detached 卡死；不能只 deinit——输出丢失） |
 | #37228 WebKit bump | webkit.ts 无 OHOS 支持 | 保留 OHOS cmake 块 + 更新版本号；WebKit 源码用上游干净版 |
 | c26e9d0aea c-bindings close_range | `#if` 块闭合 | 保留本地补丁 |
+| `fd8422ce47..367d939d9a`（12 提交，2026-09-19） | `test/cli/install/bun-update-transitive.test.ts`（上游新增 OUTAGES helper 并把用例改回 concurrent vs 我们的串行适配）；`test/js/bun/gc/gc-controller-cadence.test.ts`（imports：上游新增 afterAll/readFileSync/isWindows/join）| ① 取上游内容后重新应用「concurrent→串行」（文件内 concurrent 数归 0）② imports 取并集并保留 `isOhos`（skip 保留，行 506）③ **完整影响集 10 文件**（`src/runtime/node/node_net_binding.rs`、`src/runtime/socket/Listener.rs`、`src/runtime/socket/socket_body.rs`、`src/standalone_graph/StandaloneModuleGraph.rs` + 6 个测试）逐一校验：post-merge diff == 上游 diff（行数相等）、OHOS 标记数不变 |
