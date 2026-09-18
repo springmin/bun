@@ -307,7 +307,39 @@ const dir = String(
         const hostTimer = setInterval(() => hostTicks++, 1);
         closers.push(() => hostServer.stop(true), () => clearInterval(hostTimer));
         const load = (base, slot) => Atomics.load(i32, base + slot);
-        const fds = () => (process.platform === "linux" ? fs.readdirSync("/proc/self/fd").length : 0);
+        // OHOS: the platform's signal handler connects to its logging service
+        // (/dev/unix/socket/hilogInput) the first time JSC delivers its VM-suspend
+        // signal (SIGPWR), which happens when a busy worker is terminated; the client
+        // socket stays open afterwards. It is the platform's, not the graph's, so
+        // sockets whose peer is one of the platform's own services are not counted.
+        const isPlatformSocketFd = (() => {
+          if (process.platform !== "linux") return null;
+          try {
+            if (!fs.existsSync("/dev/unix/socket/hilogInput")) return null;
+          } catch {
+            return null;
+          }
+          const { dlopen, FFIType, ptr } = require("bun:ffi");
+          const getpeername = dlopen("libc.so", {
+            getpeername: { args: [FFIType.int, FFIType.ptr, FFIType.ptr], returns: FFIType.int },
+          }).symbols.getpeername;
+          const buf = new Uint8Array(128);
+          const len = new Int32Array(1);
+          getpeername(-1, ptr(buf), ptr(len)); // (resolve the symbol before any measurement)
+          return fd => {
+            len[0] = buf.length;
+            if (getpeername(fd, ptr(buf), ptr(len)) !== 0 || len[0] < 3) return false;
+            if (buf[0] !== 1 || buf[1] !== 0) return false; // AF_UNIX
+            return Buffer.from(buf.buffer, 2, Math.min(len[0], buf.length) - 2).toString().startsWith("/dev/unix/socket/");
+          };
+        })();
+        const countDescriptors = () => {
+          if (isPlatformSocketFd === null) return fs.readdirSync(process.platform === "linux" ? "/proc/self/fd" : "/dev/fd").length;
+          let count = 0;
+          for (const fd of fs.readdirSync("/proc/self/fd")) if (!isPlatformSocketFd(Number(fd))) count++;
+          return count;
+        };
+        const fds = () => (process.platform === "linux" ? countDescriptors() : 0);
 
         // The bystander's graph timer is the clock: it has ticked five more times, so it still works, and
         // anything of the subject's that was going to be heard has had the time to be.
