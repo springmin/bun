@@ -514,6 +514,17 @@ run_test() {
     echo "TIMEOUT=$TIMEOUT"
   } > "$PDIR/result_${idx}.tmp"
   mv "$PDIR/result_${idx}.tmp" "$PDIR/result_${idx}"
+  # 逐文件结果行在结果产生时立即写：show_progress 的收尾块若被提前杀掉就会丢整段
+  # （2026-09-18 15:53 的运行即如此），生成报告需要每行都在。
+  if [ "$TIMEOUT" = "1" ]; then _icon="⏰"; _str="TIMEOUT"
+  elif [ "$FILE_RESULT" = "PASS" ]; then _icon="✅"; _str="PASS"
+  else _icon="❌"; _str="FAIL"; fi
+  if [ -n "$DURATION_MS" ] && [ "$DURATION_MS" -gt 0 ]; then
+    _dur_fmt="$((DURATION_MS / 1000)).$(( (DURATION_MS % 1000) / 100 ))s"
+  else
+    _dur_fmt="?"
+  fi
+  echo "  $_icon [$idx/$TOTAL_FILES] $_str ${_dur_fmt} $f (cases: +${CASE_PASS}/-${CASE_FAIL})" >> "$REPORT"
   # running_${idx} 由主循环管理（基于 result_* 文件存在性），不在 worker 中删除
   # 进度用追加日志（每行一条结果），避免并发 read-modify-write 竞态丢计数：
   # 旧方案 source progress + 写回在 5 个 worker 并发时互相覆盖（DONE 少计数）。
@@ -637,6 +648,8 @@ show_progress() {
   for i in $(seq 1 $TOTAL_FILES); do
     res_file="$PDIR/result_${i}"
     [ -f "$res_file" ] || continue
+    # run_test 已在结果产生时写过这一行；这里只补它可能漏掉的
+    grep -aq "\[$i/$TOTAL_FILES\]" "$REPORT" && continue
     file_result=$(grep -a '^RESULT=' "$res_file" | cut -d= -f2)
     file_duration=$(grep -a '^DURATION_MS=' "$res_file" | cut -d= -f2)
     file_timeout=$(grep -a '^TIMEOUT=' "$res_file" | cut -d= -f2)
@@ -677,6 +690,7 @@ _ohos_force_result() {
     echo "TIMEOUT=1"
   } > "$PDIR/result_${_idx}.tmp"
   mv "$PDIR/result_${_idx}.tmp" "$PDIR/result_${_idx}"
+  echo "  ⏰ [$_idx/$TOTAL_FILES] TIMEOUT ? $_path (cases: +0/-0)" >> "$REPORT"
   # 更新进度计数（追加日志，与 run_test 一致，避免并发覆盖）
   printf 'FAIL 0 0\n' >> "$PDIR/progress.log" 2>>"$REPORT"
 }
