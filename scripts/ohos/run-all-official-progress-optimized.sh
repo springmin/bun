@@ -170,9 +170,9 @@ const isClusterTest = p => {
   const u = p.replaceAll("\\", "/");
   return u.includes("js/node/cluster/test-") && u.endsWith(".ts");
 };
-// Bun's own rule: `.test`, `_test_`, `.spec` or `_spec_` in the filename (a bare
-// `spec.` also matches scripts like http-spec.ts, which `bun test` then refuses
-// with "Tests need ...", always FAILing 0/0).
+// Test-file naming per the runner: `.test`, `_test_`, `.spec` or `_spec_` in
+// the filename. A bare `spec.` also matched scripts like http-spec.ts, which
+// `bun test` then refuses (Tests need ...), always FAILing 0/0.
 const isTestStrict = p => isJs(p) && /(\.test|_test_|\.spec|_spec_)/.test(basename(p));
 const isHidden = p => /node_modules|node\.js/.test(dirname(p).replaceAll("\\", "/")) || /^\./.test(basename(p));
 const tests = [];
