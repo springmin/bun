@@ -1816,6 +1816,13 @@ export function getSecret(name: string): string | undefined {
     return value;
   }
 
+  // OHOS has no Buildkite secret store and no external services behind these
+  // secrets; a missing secret means the service is unavailable, which the
+  // tests express with `describe.skipIf(!secret)`.
+  if (!value && isOhos) {
+    return undefined;
+  }
+
   // In Buildkite, secrets must be retrieved using the `buildkite-agent secret get` command
   if (!value && isBuildKite) {
     const { exitCode, stdout } = spawnSync({

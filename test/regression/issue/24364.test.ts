@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { bunEnv, bunExe, tempDir } from "harness";
+import { bunEnv, bunExe, isOhos, tempDir } from "harness";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -21,7 +21,18 @@ test("react-tailwind template passes tsc --noEmit", async () => {
 
   // Install typescript and bun types
   await using install = Bun.spawn({
-    cmd: [bunExe(), "add", "-d", "typescript", "@types/bun", "@types/react", "bun-plugin-tailwind"],
+    // OHOS: the npm `bun` package's postinstall rejects the platform, and
+    // typescript@latest is the native compiler with no OHOS build. Install with
+    // scripts off and the JS compiler.
+    cmd: [
+      bunExe(),
+      "add",
+      "-d",
+      ...(isOhos ? ["--ignore-scripts", "typescript@5"] : ["typescript"]),
+      "@types/bun",
+      "@types/react",
+      "bun-plugin-tailwind",
+    ],
     cwd: String(dir),
     env: bunEnv,
     stdout: "pipe",

@@ -1,8 +1,13 @@
 import { describe, expect, it } from "bun:test";
+import { isOhos } from "harness";
 import path from "path";
-import sharp from "sharp";
 
-describe("sharp integration tests", () => {
+// sharp's Linux prebuilds need libvips shared libraries that OHOS's loader
+// cannot resolve, and importing it throws on the failed load, so only import
+// it when it can work.
+const { default: sharp } = isOhos ? { default: null as any } : await import("sharp");
+
+describe.skipIf(isOhos)("sharp integration tests", () => {
   it("should resize an image", async () => {
     const inputBuffer = await sharp(path.join(import.meta.dir, "bun.png"))
       .resize(200, 200)

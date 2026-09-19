@@ -1,11 +1,12 @@
 import { expect, test } from "bun:test";
 import fs from "fs";
-import { bunExe, bunEnv as env, isASAN, tmpdirSync } from "harness";
+import { bunExe, bunEnv as env, isASAN, isOhos, tmpdirSync } from "harness";
 import path from "path";
 
 const ASAN_MULTIPLIER = isASAN ? 3 : 1;
 
-test(
+// vite bundles with esbuild, which ships no OpenHarmony binary.
+test.skipIf(isOhos)(
   "vite build works",
   async () => {
     const testDir = tmpdirSync();

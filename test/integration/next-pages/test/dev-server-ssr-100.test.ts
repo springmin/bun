@@ -6,7 +6,7 @@ import { cp, rm } from "fs/promises";
 import PQueue from "p-queue";
 import { join } from "path";
 import { StringDecoder } from "string_decoder";
-import { bunEnv, bunExe, tmpdirSync, toMatchNodeModulesAt } from "../../../harness";
+import { bunEnv, bunExe, isOhos, tmpdirSync, toMatchNodeModulesAt } from "../../../harness";
 const { parseLockfile } = install_test_helpers;
 
 expect.extend({ toMatchNodeModulesAt });
@@ -131,7 +131,9 @@ function stopDevServer() {
 afterAll(stopDevServer);
 
 const timeout = Bun.version.includes("debug") ? 1_000_000 : 100_000;
-test(
+// next's SWC native binary has no OpenHarmony build: the linux-gnu prebuilt is
+// rejected (glibc) and the linux-musl one cannot resolve libgcc_s.so.1.
+test.skipIf(isOhos)(
   "ssr works for 100-ish requests",
   async () => {
     using devServer = await startDevServer();

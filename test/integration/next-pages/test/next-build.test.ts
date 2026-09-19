@@ -3,7 +3,7 @@ import { expect, test } from "bun:test";
 import { copyFileSync, cpSync, promises as fs, readFileSync, rmSync } from "fs";
 import { cp } from "fs/promises";
 import { join } from "path";
-import { bunEnv, bunExe, isDebug, tmpdirSync, toMatchNodeModulesAt } from "../../../harness";
+import { bunEnv, bunExe, isDebug, isOhos, tmpdirSync, toMatchNodeModulesAt } from "../../../harness";
 const { parseLockfile } = install_test_helpers;
 
 expect.extend({ toMatchNodeModulesAt });
@@ -110,7 +110,9 @@ function normalizeOutput(stdout: string) {
   );
 }
 
-test(
+// next's SWC native binary has no OpenHarmony build: the linux-gnu prebuilt is
+// rejected (glibc) and the linux-musl one cannot resolve libgcc_s.so.1.
+test.skipIf(isOhos)(
   "next build works",
   async () => {
     rmSync(join(root, ".next"), { recursive: true, force: true });

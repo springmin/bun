@@ -1,9 +1,11 @@
 import { expect, it } from "bun:test";
-import { bunEnv, bunExe, tmpdirSync } from "harness";
+import { bunEnv, bunExe, isOhos, tmpdirSync } from "harness";
 import { cpSync } from "node:fs";
 import * as path from "node:path";
 
-it("successfully traverses pnpm-generated install directory", async () => {
+// The fixture's build step runs vite, which bundles with esbuild — no
+// OpenHarmony binary exists.
+it.skipIf(isOhos)("successfully traverses pnpm-generated install directory", async () => {
   const package_dir = tmpdirSync();
   console.log(package_dir);
 

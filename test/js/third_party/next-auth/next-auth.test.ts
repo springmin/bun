@@ -1,10 +1,12 @@
 import { describe, expect, it } from "bun:test";
 import { cpSync } from "fs";
-import { bunEnv, bunRun, isCI, isWindows, runBunInstall, tmpdirSync } from "harness";
+import { bunEnv, bunRun, isCI, isOhos, isWindows, runBunInstall, tmpdirSync } from "harness";
 import { join } from "path";
 describe("next-auth", () => {
-  // This test OOMs on Windows.
-  it.todoIf(isCI && isWindows)(
+  // This test OOMs on Windows; on OpenHarmony next's SWC native binary cannot
+  // load at all, so skip rather than run.
+  const it_ = isOhos ? it.skip : it.todoIf(isCI && isWindows);
+  it_(
     "should be able to call server action multiple times using auth middleware #18977",
     async () => {
       const testDir = tmpdirSync("next-auth-" + Date.now());

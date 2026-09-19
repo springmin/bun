@@ -1,12 +1,13 @@
 import { describe, expect, test } from "bun:test";
-import { bunEnv, bunExe, isWindows, tempDir } from "harness";
+import { bunEnv, bunExe, isOhos, isWindows, tempDir } from "harness";
 import { join } from "node:path";
 
 // @datadog/pprof@5.17.0 ships node-gyp-build prebuilds for linux-{x64,arm64}
 // (glibc + musl), darwin-{x64,arm64} and win32-x64 at ABI 147, matching Bun's
 // process.versions.modules. win32-arm64 has no prebuild — skip there rather
-// than fall through to a node-gyp source build.
-const hasPrebuild = !(isWindows && process.arch === "arm64");
+// than fall through to a node-gyp source build. OHOS cannot load the
+// glibc-targeted Linux prebuilds either, and there is no OpenHarmony build.
+const hasPrebuild = !(isWindows && process.arch === "arm64") && !isOhos;
 
 describe.skipIf(!hasPrebuild)("@datadog/pprof", () => {
   test("TimeProfiler start/stop returns a populated profile", async () => {

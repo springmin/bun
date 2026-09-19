@@ -1,9 +1,14 @@
 // Create an image, then print it as binary to stdout
-import { createCanvas, loadImage } from "@napi-rs/canvas";
 import { Jimp } from "jimp";
+import { isOhos } from "harness";
 import { join } from "path";
 
-describe("@napi-rs/canvas", () => {
+// @napi-rs/canvas's loader picks the glibc binding on OHOS (process.platform is
+// not "linux", so its musl probe never runs) and that binding cannot load, so
+// only import it when it can work.
+const { createCanvas, loadImage } = isOhos ? ({} as any) : await import("@napi-rs/canvas");
+
+describe.skipIf(isOhos)("@napi-rs/canvas", () => {
   it("produces correct output", async () => {
     const canvas = createCanvas(200, 200);
     const ctx = canvas.getContext("2d");

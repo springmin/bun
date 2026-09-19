@@ -113,6 +113,28 @@
 | `test/cli/run/garbage-env.test.ts` | `isOhos`（BUN_OHOS / musl loader 探测）下 binary-sign-tool 签名 | 上游改该测试时检查 |
 | `test/js/bun/spawn/spawn-ohos-node-userinfo.test.ts` | OHOS 专属测试 | 保留 |
 
+### 六-0、平台不支持类测试的 OHOS 跳过（2026-09-19 全量清零）
+
+设备无法运行为 Linux/glibc 或其它平台预编译的原生依赖（esbuild/@next/swc/libvips/glibc N-API），
+且无外部服务密钥。上游测试对这些情况用「平台条件 skip」表达，OHOS 同样处理；
+`getSecret` 在 OHOS 缺密钥时不再抛错（服务类测试按 `skipIf(!secret)` 跳过）。
+
+| 文件 | 内容 | merge 检查点 |
+|---|---|---|
+| `test/harness.ts`（`getSecret`） | OHOS 缺密钥返回 `undefined`（非 CI 抛错语义） | 上游改 getSecret 时保留 OHOS 分支 |
+| `test/integration/esbuild/esbuild.test.ts` | `unsupportedPlatform = (win32-arm64) \|\| isOhos` 两处 skip | 上游改 skip 条件时保留 isOhos |
+| `test/integration/vite-build/vite-build.test.ts` | `test.skipIf(isOhos)`（vite→esbuild 无 OHOS 二进制） | 同上 |
+| `test/integration/expo-app/expo.test.ts` | `test.skipIf(isOhos)`（export 管线原生依赖） | 同上 |
+| `test/integration/next-pages/test/next-build.test.ts`、`dev-server-ssr-100.test.ts` | `test.skipIf(isOhos)`（@next/swc gnu/musl 均不可用） | 同上 |
+| `test/integration/sharp/sharp.test.ts` | OHOS 下不静态导入 + `describe.skipIf(isOhos)`（libvips 依赖无法解析） | 上游改导入结构时保留 |
+| `test/integration/datadog-pprof/datadog-pprof.test.ts` | `hasPrebuild` 追加 `&& !isOhos`（glibc 预编译不可加载） | 同上 |
+| `test/js/third_party/@napi-rs/canvas/napi-rs-canvas.test.ts` | OHOS 不静态导入 + skip（loader 选 gnu 绑定；musl 绑定本身可加载） | 同上 |
+| `test/js/third_party/prisma/prisma.test.ts` | canvas 条件导入（CI 下其余用例本来就 skip） | 同上 |
+| `test/js/third_party/pnpm/pnpm.test.ts` | `it.skipIf(isOhos)`（fixture build 用 vite/esbuild） | 同上 |
+| `test/js/third_party/next-auth/next-auth.test.ts` | `it_ = isOhos ? it.skip : it.todoIf(CI&&Windows)`（next swc） | 同上 |
+| `test/js/third_party/grpc-js/test-resolver.test.ts` | IPv6 断言加 `&& !isOhos`（设备 hosts 只把 ::1 映射到 ip6-localhost） | 上游改该断言时保留 |
+| `test/regression/issue/24364.test.ts` | OHOS 用 `typescript@5 --ignore-scripts`（TS7 原生编译器无 OHOS 版、npm `bun` 包 postinstall 拒绝该平台） | 上游改安装参数时保留 |
+
 ### 六-1、全量测试收集逻辑差异（OHOS 脚本 vs 上游 CI）——2026-08-12 记录
 
 **结论：全量脚本 `run-all-official-progress-optimized.sh` 只跑 ~2025 个文件，而上游 CI 跑 5848 个，二者定义不同，非 bug。差异几乎全部来自 Node 官方测试目录。**
