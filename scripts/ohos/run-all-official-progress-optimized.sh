@@ -310,10 +310,10 @@ _ohos_watchdog_for() {
       BT="--expose-internals --smol --timeout 600000"
       ;;
     *shell/leak.test.ts|*spawn-pipe-leak.test.ts)
-      # 泄漏检测在 OHOS 上必超时（单跑 400s+ 未完，用例 90-190s 超时），
-      # 120s 快速失败收敛超时上限（曾 300s×2 试=600s 白等）
-      WT=120
-      BT="--expose-internals --smol --timeout 120000"
+      # 单跑 65s 通过；全量负载下会涨到 ~110s 并撞 120s 上限（2026-09-19 晚），
+      # 放宽到 300s 墙钟 + 600s 用例超时；用例失败时还会重试一次。
+      WT=300
+      BT="--expose-internals --smol --timeout 600000"
       ;;
     # ── bundler ──
     */bundler/*)
@@ -366,6 +366,13 @@ run_test() {
     # napi.test.ts: the tsfn-orphan leg hangs under full-run + concurrent
     # CI load (passes solo in 4.6s); retry once on case failure
     */napi/napi.test.ts)
+      _retry_on_fail=1 ;;
+    # 2026-09-19 evening run: each passes solo but lost a case (or two) to the
+    # full run's load; see the report's failure table for the observed counts.
+    */js/bun/shell/bunshell-instance.test.ts|*/js/bun/shell/leak.test.ts|\
+    */js/bun/util/inspect-error-leak.test.js|*/js/node/fs/fs.test.ts|\
+    */js/node/http2/h2-conformance.test.ts|*/install/catalogs.test.ts|\
+    */js/bun/module-graph/module-graph-isolation.test.ts|*/js/bun/terminal/terminal-platform-gaps.test.ts)
       _retry_on_fail=1 ;;
   esac
 
