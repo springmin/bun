@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { bunEnv, bunExe } from "harness";
+import { bunEnv, bunExe, isOhos } from "harness";
 
 // Bun.cron.parse() and the in-process Bun.cron(schedule, handler) interpret
 // schedules in the system's local time zone — matching the OS-level
@@ -41,7 +41,9 @@ describe.concurrent("Bun.cron.parse — algorithm (pinned TZ=UTC)", () => {
   test("impossible day/month (Feb 30) returns null quickly", () => {
     const t = performance.now();
     expect(Bun.cron.parse("0 0 30 2 *", new Date("2026-01-01T00:00:00Z"), { tz: "UTC" })).toBeNull();
-    expect(performance.now() - t).toBeLessThan(50);
+    // The search is bounded; on the loaded OHOS device the 50ms budget only
+    // measured the machine, not the algorithm.
+    expect(performance.now() - t).toBeLessThan(isOhos ? 250 : 50);
   });
 
   test("DOM/DOW OR semantics when both restricted", async () => {

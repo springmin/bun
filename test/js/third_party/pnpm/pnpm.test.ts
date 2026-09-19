@@ -64,4 +64,4 @@ it("successfully traverses pnpm-generated install directory", async () => {
   }));
   expect(await exited).toBe(0);
   console.log(3);
-}, isOhos ? 300_000 : 100_000);
+}, isOhos ? 600_000 : 100_000);

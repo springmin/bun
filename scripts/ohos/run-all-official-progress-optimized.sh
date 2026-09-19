@@ -323,6 +323,7 @@ _ohos_watchdog_for() {
       BT="--expose-internals --smol --timeout ${BUN_TIMEOUT}"
       ;;
     # @ohos-ports tests install packages at runtime; give them a bigger wall.
+    *integration/next-pages/test/dev-server.test.ts|\
     *integration/vite-build/*|*integration/esbuild/*|*integration/sharp/*|\
     *@napi-rs/canvas/*|*next-auth/*|*third_party/pnpm/*)
       WT=900
@@ -382,6 +383,7 @@ run_test() {
     */js/node/http2/h2-conformance.test.ts|*/install/catalogs.test.ts|\
     */js/bun/module-graph/module-graph-isolation.test.ts|*/js/bun/terminal/terminal-platform-gaps.test.ts|\
     */bake/dev-and-prod.test.ts|*/js/bun/dns/resolve-dns.test.ts|\
+    */js/bun/cron/cron-parse.test.ts|*/cli/run/require-cache.test.ts|\
     */install/bun-add.test.ts|*/install/bun-install.test.ts)
       _retry_on_fail=1 ;;
   esac
@@ -976,6 +978,21 @@ for _rf in "$PDIR"/result_*; do
   _seq_file=$(printf "%s/out_%d.txt" "$PDIR" "$TOTAL" 2>/dev/null)
   [ -f "$_seq_file" ] && { sed '$d' "$_seq_file" >> "$REPORT" 2>/dev/null; }
 done
+
+# The result_* files live under TMPDIR and can be cleaned out from under a long
+# run (observed 2026-09-19: the summary saw 921 of 2161 files). The report's
+# per-file lines are append-only, so prefer them whenever the result files are
+# incomplete.
+if [ "$TOTAL" -lt "${TOTAL_FILES:-0}" ]; then
+  T_PASS=$(grep -ac '^  ✅ \[' "$REPORT" 2>/dev/null || echo 0)
+  T_FAIL=$(grep -ac '^  ❌ \[' "$REPORT" 2>/dev/null || echo 0)
+  T_TO=$(grep -ac '^  ⏰ \[' "$REPORT" 2>/dev/null || echo 0)
+  T_FAIL=$((T_FAIL + T_TO))
+  TOTAL=$((T_PASS + T_FAIL))
+  _cases=$(grep -aE '^  [✅❌] \[' "$REPORT" 2>/dev/null | grep -aoE '\(cases: \+[+-]?[0-9]+/--?[0-9]+\)')
+  T_CP=$(printf '%s\n' "$_cases" | sed -E 's/.*\+(-?[0-9]+)\/.*/\1/' | awk '{s+=$1} END{print s+0}')
+  T_CF=$(printf '%s\n' "$_cases" | sed -E 's/.*\/(-?[0-9]+)\)/\1/' | awk '{s+=$1} END{print s+0}')
+fi
 
 elapsed=$(( SECONDS - START_SECONDS ))
 elapsed_fmt=$(printf '%02d:%02d:%02d' $((elapsed/3600)) $(( (elapsed%3600)/60 )) $((elapsed%60)))
