@@ -2668,10 +2668,60 @@ __attribute__((minsize)) static JSValue constructReportObjectComplete(VM& vm, Zi
     };
 
     auto constructSharedObjects = [&]() -> JSC::JSValue {
-        JSC::JSObject* sharedObjects = JSC::constructEmptyArray(globalObject, nullptr);
+        JSC::JSArray* sharedObjects = JSC::constructEmptyArray(globalObject, nullptr);
         RETURN_IF_EXCEPTION(scope, {});
 
-        // TODO:
+#if defined(__OHOS__)
+        // Packages that pick between the glibc and musl builds of their native
+        // binary (rollup, rolldown, @napi-rs/canvas, ...) probe this list for a
+        // `ld-musl-*` entry. An empty list makes them load the glibc prebuilt,
+        // which cannot run on OHOS.
+        if (int fd = open("/proc/self/maps", O_RDONLY | O_CLOEXEC); fd >= 0) {
+            constexpr size_t capacity = 1 << 20;
+            size_t length = 0;
+            char* contents = static_cast<char*>(malloc(capacity));
+            if (contents) {
+                ssize_t n;
+                while (length < capacity && (n = read(fd, contents + length, capacity - length)) > 0) {
+                    length += static_cast<size_t>(n);
+                }
+            }
+            close(fd);
+
+            if (contents) {
+                WTF::HashSet<WTF::String> seen;
+                for (size_t start = 0; start < length;) {
+                    size_t end = start;
+                    while (end < length && contents[end] != '\n') {
+                        end++;
+                    }
+                    // Each line ends in the mapped file's pathname, padded by
+                    // spaces up to a column.
+                    size_t pathEnd = end;
+                    while (pathEnd > start && contents[pathEnd - 1] == ' ') {
+                        pathEnd--;
+                    }
+                    size_t pathStart = pathEnd;
+                    while (pathStart > start && contents[pathStart - 1] != ' ') {
+                        pathStart--;
+                    }
+                    if (pathStart < pathEnd) {
+                        WTF::String path = WTF::String::fromUTF8(std::span { contents + pathStart, pathEnd - pathStart });
+                        if (path.contains(".so"_s)) {
+                            seen.add(path);
+                        }
+                    }
+                    start = end + 1;
+                }
+                free(contents);
+
+                for (auto& path : seen) {
+                    sharedObjects->push(globalObject, JSC::jsString(vm, path));
+                    RETURN_IF_EXCEPTION(scope, {});
+                }
+            }
+        }
+#endif
 
         return sharedObjects;
     };

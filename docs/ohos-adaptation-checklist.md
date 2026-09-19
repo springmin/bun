@@ -113,27 +113,29 @@
 | `test/cli/run/garbage-env.test.ts` | `isOhos`（BUN_OHOS / musl loader 探测）下 binary-sign-tool 签名 | 上游改该测试时检查 |
 | `test/js/bun/spawn/spawn-ohos-node-userinfo.test.ts` | OHOS 专属测试 | 保留 |
 
-### 六-0、平台不支持类测试的 OHOS 跳过（2026-09-19 全量清零）
+### 六-0、平台依赖测试的 OHOS 处理（2026-09-19，@ohos-ports 优先）
 
-设备无法运行为 Linux/glibc 或其它平台预编译的原生依赖（esbuild/@next/swc/libvips/glibc N-API），
-且无外部服务密钥。上游测试对这些情况用「平台条件 skip」表达，OHOS 同样处理；
-`getSecret` 在 OHOS 缺密钥时不再抛错（服务类测试按 `skipIf(!secret)` 跳过）。
+原则：**有鸿蒙适配包（`@ohos-ports/*`）优先使用，没有才回退 Linux musl 包**。
 
 | 文件 | 内容 | merge 检查点 |
 |---|---|---|
 | `test/harness.ts`（`getSecret`） | OHOS 缺密钥返回 `undefined`（非 CI 抛错语义） | 上游改 getSecret 时保留 OHOS 分支 |
-| `test/integration/esbuild/esbuild.test.ts` | `unsupportedPlatform = (win32-arm64) \|\| isOhos` 两处 skip | 上游改 skip 条件时保留 isOhos |
-| `test/integration/vite-build/vite-build.test.ts` | `test.skipIf(isOhos)`（vite→esbuild 无 OHOS 二进制） | 同上 |
-| `test/integration/expo-app/expo.test.ts` | `test.skipIf(isOhos)`（export 管线原生依赖） | 同上 |
-| `test/integration/next-pages/test/next-build.test.ts`、`dev-server-ssr-100.test.ts` | `test.skipIf(isOhos)`（@next/swc gnu/musl 均不可用） | 同上 |
-| `test/integration/sharp/sharp.test.ts` | OHOS 下不静态导入 + `describe.skipIf(isOhos)`（libvips 依赖无法解析） | 上游改导入结构时保留 |
-| `test/integration/datadog-pprof/datadog-pprof.test.ts` | `hasPrebuild` 追加 `&& !isOhos`（glibc 预编译不可加载） | 同上 |
-| `test/js/third_party/@napi-rs/canvas/napi-rs-canvas.test.ts` | OHOS 不静态导入 + skip（loader 选 gnu 绑定；musl 绑定本身可加载） | 同上 |
+| `test/integration/esbuild/esbuild.test.ts` | 装 `@ohos-ports/esbuild@0.25.5`（别名成 `esbuild`，`--os=openharmony --cpu=arm64`）；estrella 用 overrides；版本断言按 OHOS 调整 | 上游改安装/断言时保留 isOhos 分支 |
+| `test/integration/sharp/sharp.test.ts` | OHOS 临时目录装 `@ohos-ports/sharp`（`--os=openharmony`），覆盖 `process.platform` 后动态导入 | 上游改导入结构时保留 |
+| `test/js/third_party/@napi-rs/canvas/napi-rs-canvas.test.ts` | OHOS 装 `@ohos-ports/napi-rs-canvas`（自带 `skia.openharmony-arm64.node`），覆盖平台后导入 | 同上 |
+| `test/js/third_party/pnpm/pnpm.test.ts` | fixture 的 `pnpm.overrides` 把 esbuild 指向 OHOS 端口（vite5→esbuild；rollup 走 musl 回退） | 上游改 fixture 时保留 |
+| `test/js/third_party/next-auth/next-auth.test.ts` | OHOS 用 `@ohos-ports/next` + `next-swc-openharmony-arm64`；preload 覆盖 `process.platform` **和** `os.platform`；swc 包补 `@next/swc-openharmony-arm64` 别名与版本号；去掉 next16 已删除的 `eslint` 配置 | 上游改 fixture/超时 时保留 |
+| `test/integration/next-pages/test/next-build.test.ts`、`dev-server-ssr-100.test.ts` | 仍 skip：port 可用（`next build` 已验证可编译），但用例快照的是 28k 行 lockfile（平台相关），解除需平台化快照 | 上游改快照机制时再看 |
+| `test/integration/expo-app/expo.test.ts` | 仍 skip：`@ohos-ports/expo` 是 57.x，fixture 是 expo 51，跨度过大 | 上游升级 fixture 后重估 |
+| `test/integration/datadog-pprof/datadog-pprof.test.ts` | 仍 skip：`@ohos-ports/datadog-pprof` 有 OHOS 预编译，但该 addon 依赖 **V8 符号**（Bun 是 JSC）无法加载 | 除非上游 isOhos 化 |
 | `test/js/third_party/prisma/prisma.test.ts` | canvas 条件导入（CI 下其余用例本来就 skip） | 同上 |
-| `test/js/third_party/pnpm/pnpm.test.ts` | `it.skipIf(isOhos)`（fixture build 用 vite/esbuild） | 同上 |
-| `test/js/third_party/next-auth/next-auth.test.ts` | `it_ = isOhos ? it.skip : it.todoIf(CI&&Windows)`（next swc） | 同上 |
 | `test/js/third_party/grpc-js/test-resolver.test.ts` | IPv6 断言加 `&& !isOhos`（设备 hosts 只把 ::1 映射到 ip6-localhost） | 上游改该断言时保留 |
 | `test/regression/issue/24364.test.ts` | OHOS 用 `typescript@5 --ignore-scripts`（TS7 原生编译器无 OHOS 版、npm `bun` 包 postinstall 拒绝该平台） | 上游改安装参数时保留 |
+
+运行时配套（`src/jsc/bindings/BunProcess.cpp`）：OHOS 下 `process.report.getReport().sharedObjects`
+改为解析 `/proc/self/maps` 上报已加载 `.so`。rollup/rolldown/@napi-rs/canvas 等包用它探测
+musl（找 `ld-musl-*`）；为空数组时会误判 glibc 而加载不可运行的预编译包。该修复使
+vite-build（rolldown-vite）与 pnpm（vite5→rollup）走 Linux musl 回退即可运行。
 
 ### 六-1、全量测试收集逻辑差异（OHOS 脚本 vs 上游 CI）——2026-08-12 记录
 

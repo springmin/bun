@@ -5,8 +5,7 @@ import path from "path";
 
 const ASAN_MULTIPLIER = isASAN ? 3 : 1;
 
-// vite bundles with esbuild, which ships no OpenHarmony binary.
-test.skipIf(isOhos)(
+test(
   "vite build works",
   async () => {
     const testDir = tmpdirSync();
@@ -34,5 +33,7 @@ test.skipIf(isOhos)(
     const out = await stdout.text();
     expect(out).toContain("done");
   },
-  120_000 * ASAN_MULTIPLIER,
+  // The install of the fixture's dependencies takes ~2 minutes on the OHOS
+  // device.
+  (isOhos ? 480_000 : 120_000) * ASAN_MULTIPLIER,
 );
