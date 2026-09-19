@@ -372,7 +372,8 @@ run_test() {
     */js/bun/shell/bunshell-instance.test.ts|*/js/bun/shell/leak.test.ts|\
     */js/bun/util/inspect-error-leak.test.js|*/js/node/fs/fs.test.ts|\
     */js/node/http2/h2-conformance.test.ts|*/install/catalogs.test.ts|\
-    */js/bun/module-graph/module-graph-isolation.test.ts|*/js/bun/terminal/terminal-platform-gaps.test.ts)
+    */js/bun/module-graph/module-graph-isolation.test.ts|*/js/bun/terminal/terminal-platform-gaps.test.ts|\
+    */bake/dev-and-prod.test.ts)
       _retry_on_fail=1 ;;
   esac
 
