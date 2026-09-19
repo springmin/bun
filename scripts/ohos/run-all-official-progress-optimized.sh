@@ -376,12 +376,20 @@ run_test() {
     *socket.io/*|*grpc-js/*|*jsonwebtoken/*|*pg-gateway/*|*resvg/*|*@napi-rs/*|*@fastify/*|*@electric-sql/*)
       _serial=1 ;;
     # Load-sensitive under the full run's 5-way parallelism (each passes solo,
-    # but the 2026-09-18 final run had one fail): static source scans, FD-baseline
-    # sampling, timing-injected syscall faults, pty behaviour, S3 mock timings.
-    *source-lints/host-export-callers.test.ts|*module-graph/module-graph-isolation.test.ts|\
-    *shell/bunshell-instance.test.ts|*spawn/spawn-stdio-syscall-error.test.ts|\
-    *child_process/child_process_send_cb.test.js|*issue/27272.test.ts|\
-    *terminal/terminal-platform-gaps.test.ts|*s3/s3.test.ts|*s3/s3-list-objects.test.ts|*s3/s3.leak.test.ts)
+    # but the 2026-09-18/19 runs failed some): static source scans, FD-baseline
+    # sampling, timing-injected syscall faults, pty behaviour, S3 mock timings,
+    # lifecycle/fixture spawns. Serial was not enough for the ones below (they
+    # still failed whole-file with 0 cases, i.e. their first spawn/read lost to
+    # the machine's load), so they take the exclusive lock too: dispatch pauses
+    # and they run with the machine to themselves.
+    *source-lints/host-export-callers.test.ts|*shell/bunshell-instance.test.ts|\
+    *issue/27272.test.ts|*s3/s3.test.ts|*s3/s3-list-objects.test.ts|*s3/s3.leak.test.ts|\
+    *bake/dev-and-prod.test.ts)
+      _serial=1
+      _exclusive=1 ;;
+    # The rest of the load-sensitive set passed once serialized.
+    *module-graph/module-graph-isolation.test.ts|*spawn/spawn-stdio-syscall-error.test.ts|\
+    *child_process/child_process_send_cb.test.js|*terminal/terminal-platform-gaps.test.ts)
       _serial=1 ;;
     *fetch/fetch-http3-cold-post*|*hono/hello-world*|*wpt-h2/*|*canvas/*|*socket.io*|\
     *fetch/fetch-tcp-stress*)
