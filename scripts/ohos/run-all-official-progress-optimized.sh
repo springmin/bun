@@ -12,7 +12,9 @@
 # ── 根据 7/21 全量日志优化（OHOS 比 Linux 慢 5-10x） ──
 # 日志: 1868 files, 01:31:24, 92 timeouts (37 @300s)
 # 建议: 普通 300s, bundler 900s, 泄漏 1200s
-BUN="${BUN:-bun}"
+BUN_EXE="${BUN:-bun}"
+# bunshell-instance asserts the parent shell's $BUN is unset; do not leak ours.
+unset BUN
 PARALLEL=${PARALLEL:-3}
 RETRIES=${RETRIES:-1}
 TMOUT=${TMOUT:-300}
@@ -99,7 +101,7 @@ _ohos_napi_prebuild() {
     return 0
   fi
   echo "[NAPI] Prebuilding native addons..."
-  if ! $BUN "$_napi_root/prebuild.ts" $_napi_dirs >> "$REPORT" 2>&1; then
+  if ! $BUN_EXE "$_napi_root/prebuild.ts" $_napi_dirs >> "$REPORT" 2>&1; then
     echo "[NAPI] Prebuild failed (each NAPI test will build its own addon)"
   else
     echo "[NAPI] Prebuild done"
@@ -143,7 +145,7 @@ export SKIP_VENDORED_NODE_TESTS
 # ── 依赖检查 ──
 {
 echo "========== All Official Tests (optimized) =========="
-echo "Bun: $($BUN --version 2>/dev/null)"
+echo "Bun: $($BUN_EXE --version 2>/dev/null)"
 echo "Date: $(date)"
 echo "Parallel: $PARALLEL | Timeout: ${TMOUT}s (bundler: ${TMOUT_BUNDLER}s) | Retries: ${RETRIES}"
 echo "VendoredNodeTests: $([ "$SKIP_VENDORED_NODE_TESTS" = "1" ] && echo "EXCLUDED (original scope only)" || echo "INCLUDED (full upstream isTest)")"
@@ -160,7 +162,7 @@ mkdir -p "$PDIR"
 # 排除: node_modules / 隐藏文件与目录（同上游 isHidden）
 # 用 python 精确复刻上游 isTest（isNodeTest/isClusterTest/isTestStrict +
 # isHidden），避免 find 的 glob 与上游正则的边界差异。
-"$BUN" -e '
+"$BUN_EXE" -e '
 const { readdirSync } = require("fs");
 const { join, basename, dirname } = require("path");
 const skipVendored = process.env.SKIP_VENDORED_NODE_TESTS !== "0";
@@ -320,6 +322,12 @@ _ohos_watchdog_for() {
       WT=${TMOUT_BUNDLER}
       BT="--expose-internals --smol --timeout ${BUN_TIMEOUT}"
       ;;
+    # @ohos-ports tests install packages at runtime; give them a bigger wall.
+    *integration/vite-build/*|*integration/esbuild/*|*integration/sharp/*|\
+    *@napi-rs/canvas/*|*next-auth/*|*third_party/pnpm/*)
+      WT=900
+      BT="--expose-internals --smol --timeout 600000"
+      ;;
     # ── 默认 ──
     *)
       WT=${TMOUT}
@@ -373,7 +381,8 @@ run_test() {
     */js/bun/util/inspect-error-leak.test.js|*/js/node/fs/fs.test.ts|\
     */js/node/http2/h2-conformance.test.ts|*/install/catalogs.test.ts|\
     */js/bun/module-graph/module-graph-isolation.test.ts|*/js/bun/terminal/terminal-platform-gaps.test.ts|\
-    */bake/dev-and-prod.test.ts)
+    */bake/dev-and-prod.test.ts|*/js/bun/dns/resolve-dns.test.ts|\
+    */install/bun-add.test.ts|*/install/bun-install.test.ts)
       _retry_on_fail=1 ;;
   esac
 
@@ -391,12 +400,13 @@ run_test() {
     # the machine's load), so they take the exclusive lock too: dispatch pauses
     # and they run with the machine to themselves.
     *source-lints/host-export-callers.test.ts|*shell/bunshell-instance.test.ts|\
+    *module-graph/module-graph-isolation.test.ts|\
     *issue/27272.test.ts|*s3/s3.test.ts|*s3/s3-list-objects.test.ts|*s3/s3.leak.test.ts|\
     *bake/dev-and-prod.test.ts)
       _serial=1
       _exclusive=1 ;;
     # The rest of the load-sensitive set passed once serialized.
-    *module-graph/module-graph-isolation.test.ts|*spawn/spawn-stdio-syscall-error.test.ts|\
+    *spawn/spawn-stdio-syscall-error.test.ts|\
     *child_process/child_process_send_cb.test.js|*terminal/terminal-platform-gaps.test.ts)
       _serial=1 ;;
     *fetch/fetch-http3-cold-post*|*hono/hello-world*|*wpt-h2/*|*canvas/*|*socket.io*|\
@@ -468,11 +478,11 @@ run_test() {
     if [ "$_sub" = "run" ]; then _bt="--smol"; else _bt="$BT"; fi
     if [ -n "$WRAP" ]; then
       # OHOS CI 无 TTY，用 script 分配 PTY
-      $WRAP "$BUN $_sub $_bt \"$f\"" /dev/null > "$out" 2>&1 &
+      $WRAP "$BUN_EXE $_sub $_bt \"$f\"" /dev/null > "$out" 2>&1 &
     elif [ -n "$_env_prefix" ]; then
-      env $_env_prefix $BUN $_sub $_bt "$f" > "$out" 2>&1 &
+      env $_env_prefix $BUN_EXE $_sub $_bt "$f" > "$out" 2>&1 &
     else
-      $BUN $_sub $_bt "$f" > "$out" 2>&1 &
+      $BUN_EXE $_sub $_bt "$f" > "$out" 2>&1 &
     fi
     BUNPID=$!
     # Watchdog — graceful timeout: SIGTERM → 15s grace → SIGKILL
