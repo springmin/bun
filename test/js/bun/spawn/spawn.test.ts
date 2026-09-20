@@ -618,7 +618,7 @@ for (let [gcTick, label] of [
 // The waiter thread is the Linux fallback for kernels/sandboxes without pidfd;
 // kqueue platforms (macOS, FreeBSD) always have EVFILT_PROC and its non-Linux
 // loop has no wakeup for processes appended after it starts.
-it.skipIf(Boolean(process.env.BUN_FEATURE_FLAG_FORCE_WAITER_THREAD) || (!isLinux && !isAndroid) || isOhos)(
+it.skipIf(Boolean(process.env.BUN_FEATURE_FLAG_FORCE_WAITER_THREAD) || (!isLinux && !isAndroid))(
   "with BUN_FEATURE_FLAG_FORCE_WAITER_THREAD",
   async () => {
     const result = spawnSync({

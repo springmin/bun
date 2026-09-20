@@ -1,6 +1,6 @@
 import { crash_handler } from "bun:internal-for-testing";
 import { describe, expect, test } from "bun:test";
-import { bunEnv, bunExe, isDebug, isLinux, isPosix, isOhos, isWindows, mergeWindowEnvs, tempDir } from "harness";
+import { bunEnv, bunExe, isDebug, isLinux, isPosix, isWindows, mergeWindowEnvs, tempDir } from "harness";
 import { rmSync } from "node:fs";
 import { constants as osConstants } from "node:os";
 import path from "path";
@@ -545,7 +545,7 @@ describe.if(isPosix)("process.kill() aimed at the process itself is not reported
   // OHOS: the app sandbox filters group-directed kill(2) (kill(0) and
   // kill(-pgid) are silently dropped — the child exits 0), so the
   // group-self-signal semantics cannot be exercised there.
-  test.skipIf(isOhos).concurrent.each([
+  test.concurrent.each([
     ["process.kill(0, ...)", `process.kill(0, "SIGABRT")`],
     ["process.kill(-pgid, ...)", `process.kill(-process.pid, "SIGABRT")`],
   ])("%s aimed at the process's own group dies from the signal silently", async (_name, code) => {

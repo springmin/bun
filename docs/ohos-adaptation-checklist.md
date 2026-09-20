@@ -131,7 +131,7 @@
 | `test/js/third_party/prisma/prisma.test.ts` | canvas 条件导入（CI 下其余用例本来就 skip） | 同上 |
 | `test/js/third_party/grpc-js/test-resolver.test.ts` | IPv6 断言加 `&& !isOhos`（设备 hosts 只把 ::1 映射到 ip6-localhost） | 上游改该断言时保留 |
 | `test/js/bun/util/inspect-error-leak.test.js`、`test/cli/run/require-cache.test.ts` | 用例预算按 OHOS 放宽（10s→60s、60s→180s），负载下会超出 | 上游改超时参数时保留 |
-| **已撤销的 skip（2026-09-20 审计）** | `bun-add` git 用例、`bun-install-registry` git-dependencies 用例、`spawn-stdin-readable-stream` ×2、`cli/test/isolation` ×1 —— 解禁后通过（git 环境修复后可达 github） | 保留其余（unix socket/PTY Ctrl-Z/ELF 布局等仍失败） |
+| **已撤销的 skip（2026-09-20 审计，两批共 15 处）** | 第一批：`bun-add` git、`bun-install-registry` git-dependencies、`spawn-stdin-readable-stream` ×2、`cli/test/isolation`；第二批：`napi-value-ffi` ×3、`spawn`（FORCE_WAITER 用例）、`node-http-connect`、`run-crash-handler`（组信号用例实测通过）| 保留：unix socket（沙箱 EPERM）、PTY Ctrl-Z/Ctrl+C、ELF 布局、FUSE、TS7、napi bigints（负载 100x 慢）、http3 cold-post（时序敏感）|
 | `test/regression/issue/24364.test.ts` | OHOS 用 `typescript@5 --ignore-scripts`（TS7 原生编译器无 OHOS 版、npm `bun` 包 postinstall 拒绝该平台） | 上游改安装参数时保留 |
 
 **运行时缺陷（2026-09-20，已修复）**：在 PTY 终端的读取器仍活跃时执行
