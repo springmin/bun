@@ -291,6 +291,7 @@ pub mod bun_object {
 
     // --- Lazy property callbacks ---
     export_lazy_prop_callbacks! {
+        BunObject_lazyPropCb_ant => crate::api::ant::create,
         BunObject_lazyPropCb_Archive => super::get_archive_constructor,
         BunObject_lazyPropCb_CryptoHasher => Crypto::CryptoHasher::getter,
         BunObject_lazyPropCb_CSRF => super::get_csrf_object,

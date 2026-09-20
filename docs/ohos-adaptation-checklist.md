@@ -16,6 +16,7 @@
 | `scripts/ohos/run-all-official-progress-optimized.sh` | runner 的 PATH 追加 `/system/bin`：设备工具（`mkfifo` 等）不在默认 PATH，`module-graph-isolation` 的 fixture 需要 mkfifo | 上游新增依赖系统工具的 fixture 时检查 |
 | `src/ohos_sign/` | 纯字节签名库（descriptor/merkle/sha256、`sign_selfsign*`、`strip_codesign`、`is_validly_signed`、`is_elf64`）——**无 I/O、零依赖**（是 `bun_sys` 的依赖，不能反向依赖它） |
 | `src/sys/ohos_sign_io.rs` | 文件级签名 I/O（bun_sys，OHOS-only）：`ensure_signed_inplace`（(dev,ino,size,mtime) 缓存 + `is_validly_signed` 校验，仅失效才重签；4 字节 magic 先探，脚本不被整读）、temp+rename 写（兼容执行后不可变 inode）、`ohos_ensure_elf_signed` FFI |
+| `src/runtime/api/ant.rs` + `ant.classes.ts`（+ `test/js/bun/bun-object/ant.test.ts`） | `Bun.ant` 兼容层：Claude Code ≥ 2.1.272 依赖 Anthropic 内部构建（`@anthropic-ai/bun-internal`）的运行时 API——`setDumpable`（prctl）、`getPeerUid`/`getPeerPid`（SO_PEERCRED）、`memoryPressureLevel`（Linux PSI，1/2/4）、`CellSegmenter`（grapheme 用 `Bun__graphemeBreak`、宽度用 `Bun__visibleWidthExcludeANSI_utf16`，SGR/OSC8 池化，cells/runs 位域 + 负值扩容 + setCell/paint damage 打包） | 上游 Bun 若引入同名 API 时对齐；merge 时保留（上游无对应物） |
 | `src/runtime/api/bun/ohos_node_userinfo.rs` | node:os userInfo 沙箱 uid 适配 |
 | `src/install_types/resolver_hooks.rs` | OHOS 的 npm `os` 匹配 `CURRENT = LINUX`：`process.platform` 是 "linux" 且 libc 是 musl（同 Alpine），linux 声明的包必须继续匹配；**必须是单一 bit**（两 bit 会让 `os:["!linux"]` 仍经 openharmony 命中）；`openharmony` 名字保留在映射表 | 上游改 OperatingSystem/CURRENT 时检查；勿改回纯 OPENHARMONY（fixture 声明 os:[linux] 的上游 install 测试与真实包都会挂） |
 | `patches/zstd/ohos-qsort-r.patch` | zstd qsort_r 适配 |
