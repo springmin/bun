@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { bunRun, isOhos } from "harness";
+import { bunRun, isLinux, isOhos } from "harness";
 import path from "path";
 
 // Pass by not hanging
@@ -38,4 +38,12 @@ describe("pass", () => {
     // OHOS: the success fixtures run slower (spawn overhead); 700ms is too tight
     isOhos ? 5000 : 700,
   );
+});
+
+// Signal 40 is a Linux real-time signal, which Bun's signal table has no name
+// for. The command's exit code is still 128 + the signal; the shell used to
+// wait for it forever.
+test.skipIf(!isLinux)("a command killed by a signal with no name still completes", async () => {
+  const { exitCode } = await Bun.$`sh -c "kill -40 $$"`.nothrow().quiet();
+  expect(exitCode).toBe(128 + 40);
 });
