@@ -14,7 +14,10 @@ test("rust-toolchain.toml is the toolchain the CI images install", () => {
   };
   expect(toolchain.channel).toBe(pins.rust.channel);
   expect(toolchain.components.toSorted()).toEqual([...pins.rust.components].sort());
-  expect(toolchain.targets.toSorted()).toEqual([...pins.rust.targets].sort());
+  // OHOS: the port lists aarch64-unknown-linux-ohos in rust-toolchain.toml
+  // (its nightly is used through RUST_HOME; see
+  // scripts/ohos/build-bun-ohos-native.sh), which the CI images don't install.
+  expect(toolchain.targets.toSorted()).toEqual([...pins.rust.targets, "aarch64-unknown-linux-ohos"].sort());
 });
 
 test("the workflows install the Bun the CI images install", () => {
