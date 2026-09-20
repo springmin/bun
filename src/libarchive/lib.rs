@@ -1093,6 +1093,20 @@ fn open_dir_with_stat(dir_fd: Fd, sub_path: &[u8]) -> Option<(Fd, bun_sys::Stat)
     }
 }
 
+/// `bun_sys::symlinkat`, retried once on OHOS SELinux's intermittent EPERM/EACCES; parent dirs are pre-created by `create_deferred_symlinks`'s pre-pass, so no lazy `mkdir` is needed before the retry.
+#[cfg(unix)]
+fn symlinkat_ohos_retry(target: &ZStr, dirfd: Fd, dest: &ZStr) -> bun_sys::Maybe<()> {
+    let result = bun_sys::symlinkat(target, dirfd, dest);
+    if cfg!(target_env = "ohos") {
+        if let Err(e) = &result {
+            if e.get_errno() == bun_sys::E::EPERM || e.get_errno() == bun_sys::E::EACCES {
+                return bun_sys::symlinkat(target, dirfd, dest);
+            }
+        }
+    }
+    result
+}
+
 #[cfg(unix)]
 pub fn create_deferred_symlinks(dir_fd: Fd, symlinks: &[DeferredSymlink], log: bool) -> u32 {
     let mut parents: Vec<Option<bun_sys::Stat>> = Vec::with_capacity(symlinks.len());
@@ -1114,7 +1128,7 @@ pub fn create_deferred_symlinks(dir_fd: Fd, symlinks: &[DeferredSymlink], log: b
         let dirname = bun_paths::dirname_simple(symlink.path.as_bytes());
         let target = symlink.target.as_zstr();
         let result = if dirname.is_empty() {
-            bun_sys::symlinkat(target, dir_fd, symlink.path.as_zstr())
+            symlinkat_ohos_retry(target, dir_fd, symlink.path.as_zstr())
         } else {
             let name =
                 ZStr::from_slice_with_nul(&symlink.path.as_bytes_with_nul()[dirname.len() + 1..]);
@@ -1122,7 +1136,7 @@ pub fn create_deferred_symlinks(dir_fd: Fd, symlinks: &[DeferredSymlink], log: b
                 (Some((parent, st)), Some(expected))
                     if st.st_dev == expected.st_dev && st.st_ino == expected.st_ino =>
                 {
-                    let result = bun_sys::symlinkat(target, parent, name);
+                    let result = symlinkat_ohos_retry(target, parent, name);
                     parent.close();
                     result
                 }

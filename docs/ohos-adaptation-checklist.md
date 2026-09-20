@@ -11,8 +11,7 @@
 | 路径 | 用途 |
 |---|---|
 | `scripts/ohos/build-bun-ohos-native.sh` | 原生编译脚本（brew llvm 23 + lld 23 工具链、签名） |
-| `scripts/ohos/build-bun-ohos.sh` | 交叉编译脚本（CI 模式） |
-| `scripts/ohos/build-bun-ohos.sh` / `run-all-official*.sh` / `patch-node-gyp.sh` | 构建/测试辅助（`build.sh`/`prepare-cross-libs.sh` 于 2026-09-16 删除：旧 SDK 布局 + 已废弃） |
+| `scripts/ohos/patch-node-gyp.sh` | 构建辅助（`build.sh`/`prepare-cross-libs.sh` 于 2026-09-16 删除；`build-bun-ohos.sh`/`run-all-official.sh` 于 2026-09-20 删除：已被 native 构建脚本与 optimized runner 取代） |
 | `scripts/ohos/run-all-official-progress-optimized.sh` | runner 的 PATH 追加 `/system/bin`：设备工具（`mkfifo` 等）不在默认 PATH，`module-graph-isolation` 的 fixture 需要 mkfifo | 上游新增依赖系统工具的 fixture 时检查 |
 | `src/ohos_sign/` | 纯字节签名库（descriptor/merkle/sha256、`sign_selfsign*`、`strip_codesign`、`is_validly_signed`、`is_elf64`）——**无 I/O、零依赖**（是 `bun_sys` 的依赖，不能反向依赖它） |
 | `src/sys/ohos_sign_io.rs` | 文件级签名 I/O（bun_sys，OHOS-only）：`ensure_signed_inplace`（(dev,ino,size,mtime) 缓存 + `is_validly_signed` 校验，仅失效才重签；4 字节 magic 先探，脚本不被整读）、temp+rename 写（兼容执行后不可变 inode）、`ohos_ensure_elf_signed` FFI |
@@ -43,7 +42,7 @@
 | `test/js/bun/module-graph/module-graph-{isolation,workers}.test.ts` | fixture 的 FD 基线过滤**平台 socket**：OHOS 系统预载的 DFX 处理器（`libdfx_signalhandler.z.so`）在 **JSC 首次投递 SIGPWR**（GC 线程挂起信号，忙 worker 被 terminate 时）惰性连接 `/dev/unix/socket/hilogInput`（另见 faultloggerd），客户端 socket 随后常驻——`getpeername` 可确认对端路径。它不是 graph 的资源，故 `fds()`/`descriptors()` 用 `bun:ffi` 的 `getpeername` 排除对端为 `/dev/unix/socket/*` 的 fd（仅当 `/dev/unix/socket/hilogInput` 存在时启用；Linux/macOS 走原逻辑）| 上游改 fixture 的 FD 计数或 OHOS DFX 行为变化时复测；两文件现 479/412 全通过 |
 | `src/runtime/napi/libc_check.rs` | OHOS 保留 glibc-addon 预检查（`IS_MUSL` 在 OHOS 为 true）：glibc 链接的 `.node` 在 OHOS 同样无法加载，应报 "linked against glibc" 而非 loader 的 Permission denied；提示语在 `BunProcess.cpp` 有 `#if defined(__OHOS__)` 专属分支 | 上游改该探测或其消息时检查两处分支 |
 | `scripts/build.ts` / `bun.ts` / `config.ts` / `source.ts` / `shims.ts` / `tools.ts` / `deps/{cares,zstd}.ts` | OHOS 平台分支（工具链路径、依赖构建）；`bun.ts` 的 `systemLibs` 用**显式 `.a` 路径**链接本地 WebKit 的 OHOS ICU（`-licu*` 会优先 keg 里的 `.so`，把无 rpath 的 `DT_NEEDED libicu*.so.78` 烘进二进制） | 上游改构建管线/OHOS 库列表时检查 |
-| OHOS 构建入口（`scripts/ohos/build-bun-ohos-native.sh`、`build-bun-ohos.sh`、`build.sh`、`.github/workflows/ohos-build-*.yml`） | 显式 `--lto=off`：上游 config.ts 把 ThinLTO 默认对所有 release 打开（原先只对 linux/darwin-cross/windows-cross），OHOS 从未用 LTO 验证过，且会翻转 WebKit 的 CMAKE_BUILD_TYPE（RelWithDebInfo→Release）使既有 WebKit 构建目录失效 | ⚠️ 上游再改 LTO 默认或 WebKit buildType 时重新评估 |
+| OHOS 构建入口（`scripts/ohos/build-bun-ohos-native.sh`、`.github/workflows/ohos-build-*.yml`） | 显式 `--lto=off`：上游 config.ts 把 ThinLTO 默认对所有 release 打开（原先只对 linux/darwin-cross/windows-cross），OHOS 从未用 LTO 验证过，且会翻转 WebKit 的 CMAKE_BUILD_TYPE（RelWithDebInfo→Release）使既有 WebKit 构建目录失效 | ⚠️ 上游再改 LTO 默认或 WebKit buildType 时重新评估 |
 | `scripts/build/source.ts` | 依赖编译的 PIC 策略：OHOS 与 Android 一样必须 `-fPIC`（上游 #42556 把 `-fno-pic -fno-pie` 默认推广到所有 unix；OHOS 上非 PIC 依赖会让链接器发 R_AARCH64_COPY，OHOS musl 不填充这些 libc 数据 → 启动即 abort） | ⚠️ 上游改 PIC 策略/新增依赖时检查 |
 | `rust-toolchain.toml` | nightly-2026-07-20（OHOS Tier3 需 build-std） | ⚠️ 上游 bump 时需确认 OHOS 可用 |
 | `.rust-nightly-version` | nightly-2026-07-20 | 同上 |
