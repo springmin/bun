@@ -224,12 +224,14 @@ _ohos_watchdog_for() {
   local f="$1"
   case "$f" in
     # ── 已知连续多日 600s 超时文件：快速失败（120s 就杀，不白等 600s）──
-    # 这些文件在 OHOS 上持续超时（repl/streams 连续 3+ 次全量），降低 WT
+    # 这些文件在 OHOS 上持续超时（repl 连续 3+ 次全量），降低 WT
     # 让失败尽早暴露，同时省下 ~480s/文件 的等待时间。
     # 08-06 新增：import-attributes/snapshot/spawn.ipc.bun-node/26286 均 600s TIMEOUT
+    # 09-21 移出 streams.test.js：根因是 FIFO 以 O_APPEND 打开被拒（见
+    # bun-streams-test-fifo.sh），修复后按默认超时运行。
     */cli/run/env.test.ts|\
     */js/bun/repl/repl.test.ts|\
-    */js/web/streams/streams.test.js|*/js/bun/shell/shell-cmdsub-crash.test.ts|\
+    */js/bun/shell/shell-cmdsub-crash.test.ts|\
     */js/bun/import-attributes/import-attributes.test.ts|\
     */js/bun/test/snapshot-tests/snapshots/snapshot.test.ts|\
     */js/bun/spawn/spawn.ipc.bun-node.test.ts|*/regression/issue/26286.test.ts)

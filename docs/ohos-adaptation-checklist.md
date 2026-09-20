@@ -136,6 +136,7 @@
 | **已撤销的 skip（2026-09-20 审计，两批共 11 处）** | 第一批：`bun-add` git、`bun-install-registry` git-dependencies、`spawn-stdin-readable-stream` ×2、`cli/test/isolation`；第二批：`napi-value-ffi` ×3、`spawn`（FORCE_WAITER 用例）、`node-http-connect`、`run-crash-handler`（组信号用例实测通过）| 保留：unix socket（沙箱 EPERM）、PTY Ctrl-Z/Ctrl+C、ELF 布局、FUSE、TS7、napi bigints（负载 100x 慢）、http3 cold-post（时序敏感）|
 | `test/regression/issue/24364.test.ts` | OHOS 用 `typescript@5 --ignore-scripts`（TS7 原生编译器无 OHOS 版、npm `bun` 包 postinstall 拒绝该平台） | 上游改安装参数时保留 |
 | `test/internal/source-lints/build-rust.test.ts`、`ci-image-pins.test.ts` | `rust-toolchain.toml` 多出 `aarch64-unknown-linux-ohos`（OHOS Tier3 target，构建用）；两处 lint 断言都把该 triple 计入期望集合（build-rust 加在 prebuilt 列表，ci-image-pins 加在 CI image pins 列表） | 上游改这两个 lint 或 rust-toolchain 时保留 |
+| `test/js/web/streams/bun-streams-test-fifo.sh` | OHOS 拒绝以 `O_APPEND` 打开 FIFO（bash `>>` 报 EACCES），读取端随后永久阻塞 → 整个 `streams.test.js` 超时；改为 `>`（FIFO 上语义相同）；runner 同步把该文件移出 120s 快速失败列表 | 上游改该脚本或 streams 用例时保留 |
 
 **运行时缺陷（2026-09-20，已修复）**：在 PTY 终端的读取器仍活跃时执行
 `Bun.Terminal.close()`（典型：`Bun.spawn({terminal})` → `kill()` → `await exited` → `proc.terminal.close()`），
