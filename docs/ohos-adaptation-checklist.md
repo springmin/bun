@@ -130,7 +130,17 @@
 | `test/integration/datadog-pprof/datadog-pprof.test.ts` | 仍 skip：`@ohos-ports/datadog-pprof` 有 OHOS 预编译，但该 addon 依赖 **V8 符号**（Bun 是 JSC）无法加载 | 除非上游 isOhos 化 |
 | `test/js/third_party/prisma/prisma.test.ts` | canvas 条件导入（CI 下其余用例本来就 skip） | 同上 |
 | `test/js/third_party/grpc-js/test-resolver.test.ts` | IPv6 断言加 `&& !isOhos`（设备 hosts 只把 ::1 映射到 ip6-localhost） | 上游改该断言时保留 |
+| `test/js/bun/util/inspect-error-leak.test.js`、`test/cli/run/require-cache.test.ts` | 用例预算按 OHOS 放宽（10s→60s、60s→180s），负载下会超出 | 上游改超时参数时保留 |
+| **已撤销的 skip（2026-09-20 审计）** | `bun-add` git 用例、`bun-install-registry` git-dependencies 用例、`spawn-stdin-readable-stream` ×2、`cli/test/isolation` ×1 —— 解禁后通过（git 环境修复后可达 github） | 保留其余（unix socket/PTY Ctrl-Z/ELF 布局等仍失败） |
 | `test/regression/issue/24364.test.ts` | OHOS 用 `typescript@5 --ignore-scripts`（TS7 原生编译器无 OHOS 版、npm `bun` 包 postinstall 拒绝该平台） | 上游改安装参数时保留 |
+
+**运行时缺陷（2026-09-20，已修复）**：在 PTY 终端的读取器仍活跃时执行
+`Bun.Terminal.close()`（典型：`Bun.spawn({terminal})` → `kill()` → `await exited` → `proc.terminal.close()`），
+内核侧对该 fd 的 epoll 注册会残留；下一次 PTY 的 fd 复用同一号码后，其 reader 注册无法收发数据
+（子进程 `isatty(0/1/2)` 均为 true、能运行，但父端 `data` 回调永不触发）。两个场景的最小复现与
+「先占住若干 fd 避免复用即可恢复」已验证。**修法**：`src/io/posix_event_loop.rs` 的
+`register_with_fd_impl` 在 OHOS 下对 `epoll_ctl(ADD)` 的 `EEXIST` 先 `DEL` 再重试一次；
+`tty.test.ts` 原样（含 kill+close）复测 **7/0 通过**，测试侧无需规避。
 
 运行时配套（`src/jsc/bindings/BunProcess.cpp`）：OHOS 下 `process.report.getReport().sharedObjects`
 改为解析 `/proc/self/maps` 上报已加载 `.so`。rollup/rolldown/@napi-rs/canvas 等包用它探测

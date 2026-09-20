@@ -1377,9 +1377,7 @@ describe("bundledDependencies", () => {
       await check();
     });
 
-    test.skipIf(isOhos)(`(${textLockfile ? "bun.lock" : "bun.lockb"}) git dependencies`, async () => {
-      // OHOS: clones dylan-conway/bundled-install-test from github.com, which
-      // the app sandbox cannot reach (git+ssh/https both hang until timeout).
+    test(`(${textLockfile ? "bun.lock" : "bun.lockb"}) git dependencies`, async () => {
       await Promise.all([
         write(
           packageJson,

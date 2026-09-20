@@ -468,7 +468,7 @@ describe.concurrent("bun test --isolate", () => {
     }
   });
 
-  test.skipIf(isOhos)("with --isolate, leaked outbound socket is closed before next file", async () => {
+  test("with --isolate, leaked outbound socket is closed before next file", async () => {
     using dir = tempDir("isolate-socket", {
       "a-connect.test.ts": `
         import { test, expect } from "bun:test";

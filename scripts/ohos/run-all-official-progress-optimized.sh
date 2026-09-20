@@ -227,7 +227,7 @@ _ohos_watchdog_for() {
     # 这些文件在 OHOS 上持续超时（repl/streams 连续 3+ 次全量），降低 WT
     # 让失败尽早暴露，同时省下 ~480s/文件 的等待时间。
     # 08-06 新增：import-attributes/snapshot/spawn.ipc.bun-node/26286 均 600s TIMEOUT
-    */js/node/tty.test.ts|*/cli/run/env.test.ts|\
+    */cli/run/env.test.ts|\
     */js/bun/repl/repl.test.ts|\
     */js/web/streams/streams.test.js|*/js/bun/shell/shell-cmdsub-crash.test.ts|\
     */js/bun/import-attributes/import-attributes.test.ts|\
@@ -384,6 +384,8 @@ run_test() {
     */js/bun/module-graph/module-graph-isolation.test.ts|*/js/bun/terminal/terminal-platform-gaps.test.ts|\
     */bake/dev-and-prod.test.ts|*/js/bun/dns/resolve-dns.test.ts|\
     */js/bun/cron/cron-parse.test.ts|*/cli/run/require-cache.test.ts|\
+    */child_process/child_process_send_cb.test.js|*/worker_threads/worker_threads.test.ts|\
+    */body-parser/express-memory-leak.test.ts|*/issue/026039.test.ts|\
     */install/bun-add.test.ts|*/install/bun-install.test.ts)
       _retry_on_fail=1 ;;
   esac

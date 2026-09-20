@@ -2,7 +2,7 @@ import type { BunLockFile } from "bun";
 import { $, file, spawn } from "bun";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, setDefaultTimeout, test } from "bun:test";
 import { access, appendFile, copyFile, mkdir, readlink, rm, writeFile } from "fs/promises";
-import { bunExe, bunEnv as env, readdirSorted, tmpdirSync, toBeValidBin, toBeWorkspaceLink, toHaveBins, isOhos } from "harness";
+import { bunExe, bunEnv as env, readdirSorted, tmpdirSync, toBeValidBin, toBeWorkspaceLink, toHaveBins } from "harness";
 import { join, relative, resolve } from "path";
 import { pathToFileURL } from "url";
 import {
@@ -1522,7 +1522,7 @@ const gitNameTests = [
 for (const { desc, dep } of gitNameTests) {
   // OHOS: these clone dylan-conway/install-test-3 from github.com, which the
   // app sandbox cannot reach (72s timeout observed).
-  it.skipIf(isOhos)(desc, async () => {
+  it(desc, async () => {
     await Bun.write(
       join(package_dir, "package.json"),
       JSON.stringify({
