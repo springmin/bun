@@ -7,7 +7,7 @@ import {
   readableStreamToText,
 } from "bun";
 import { describe, expect, it, test } from "bun:test";
-import { bunEnv, bunExe, isASAN, isDebug, isLinux, isMacOS, isWindows, tempDir, tmpdirSync } from "harness";
+import { bunEnv, bunExe, isASAN, isDebug, isLinux, isMacOS, isOhos, isWindows, tempDir, tmpdirSync } from "harness";
 import { mkfifo } from "mkfifo";
 import { closeSync, createReadStream, openSync, realpathSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -2529,7 +2529,10 @@ it("Bun.file().stream() read text from large file", async () => {
 // libuv, where the error always lands on a pending read.
 describe.skipIf(isWindows)("Bun.file().stream() surfaces read() errors", () => {
   // read(2) on /proc/self/mem fails with EIO: nothing is mapped at address 0.
+  // OHOS denies the open/read of /proc/self/mem outright (EACCES); the error
+  // still surfaces through the same path, so only its code changes.
   const eioPath = "/proc/self/mem";
+  const eioCode = isOhos ? "EACCES" : "EIO";
   const itEIO = isLinux ? it : it.skip;
 
   async function expectReadError(promise, code) {
@@ -2548,13 +2551,13 @@ describe.skipIf(isWindows)("Bun.file().stream() surfaces read() errors", () => {
       (async () => {
         for await (const chunk of Bun.file(eioPath).stream()) chunks.push(chunk);
       })(),
-      "EIO",
+      eioCode,
     );
     expect(chunks).toHaveLength(0);
   });
 
   itEIO("getReader().read() rejects with the read error", async () => {
-    await expectReadError(Bun.file(eioPath).stream().getReader().read(), "EIO");
+    await expectReadError(Bun.file(eioPath).stream().getReader().read(), eioCode);
   });
 
   itEIO("pipeTo() rejects with the read error", async () => {
@@ -2562,12 +2565,12 @@ describe.skipIf(isWindows)("Bun.file().stream() surfaces read() errors", () => {
       Bun.file(eioPath)
         .stream()
         .pipeTo(new WritableStream({ write() {} })),
-      "EIO",
+      eioCode,
     );
   });
 
   itEIO("Bun.file().text() reports the same read error", async () => {
-    const err = await expectReadError(Bun.file(eioPath).text(), "EIO");
+    const err = await expectReadError(Bun.file(eioPath).text(), eioCode);
     expect(err.syscall).toBe("read");
   });
 

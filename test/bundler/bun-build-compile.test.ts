@@ -25,7 +25,9 @@ describe("Bun.build compile", () => {
 
     const os = isMacOS ? "darwin" : isLinux ? "linux" : isWindows ? "windows" : "unknown";
     const arch = isArm64 ? "aarch64" : "x64";
-    const musl = isMusl ? "-musl" : "";
+    // OHOS: the port's compile target carries its own libc suffix ("-ohos"),
+    // and that target is what `Bun.build` treats as the host platform here.
+    const musl = isOhos ? "-ohos" : isMusl ? "-musl" : "";
     const target = `bun-${os}-${arch}${musl}` as any;
     const outdir = join(dir + "", "out");
 
