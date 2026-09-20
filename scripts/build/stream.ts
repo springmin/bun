@@ -51,7 +51,7 @@
  */
 
 import { spawn, spawnSync } from "node:child_process";
-import { closeSync, createWriteStream, openSync, writeSync } from "node:fs";
+import { closeSync, createWriteStream, existsSync, openSync, writeSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { formatElapsed, nameColor } from "./tty.ts";
 
@@ -244,8 +244,29 @@ function main(): void {
   //
   // Only in interactive mode — piped output has no status-line race.
   const lead = interactive ? "\r\x1b[K" : "";
+  // OHOS: the runtime's async WriteStream stalls on a full pipe (the kernel
+  // never reports pipe writability to epoll — the same T50 defect the spawn
+  // paths work around), silently dropping most of the output and, once the
+  // retry budget is spent, crashing inside writeAll. Write synchronously,
+  // retrying EAGAIN: the loop supplies the backpressure the async path never
+  // gets. Other platforms keep the original async writes.
+  const syncWrites =
+    process.platform === "linux" && existsSync("/system/lib/ld-musl-aarch64.so.1");
   const write = (text: string): void => {
-    out.write(lead + text);
+    if (!syncWrites) return void out.write(lead + text);
+    const buf = Buffer.from(lead + text);
+    let off = 0;
+    while (off < buf.length) {
+      try {
+        off += writeSync(outFd, buf, off, buf.length - off);
+      } catch (err: any) {
+        if (err?.code === "EAGAIN") {
+          Bun.sleepSync(1);
+          continue;
+        }
+        throw err;
+      }
+    }
   };
 
   // Line-split + prefix + forward. readline handles partial lines at EOF
