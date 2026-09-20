@@ -474,6 +474,10 @@ impl ReadFile {
     /// Queue `do_read_loop` on the work pool; caller must already own the read loop.
     #[cfg(not(windows))]
     fn schedule_read_loop(&mut self) {
+        // SAFETY: the same crossing as the two direct `WorkPool::schedule`
+        // sites in `on_ready`/`on_io_error` (both already inventoried): it
+        // queues this instance's `task`, adds no state to the payload, and the
+        // completion returns to the JS thread through the existing callback.
         self.task = WorkPoolTask {
             node: Default::default(),
             callback: Self::do_read_loop_task,

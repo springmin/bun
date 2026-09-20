@@ -98,12 +98,13 @@
 | `src/resolver/lib.rs` / `src/resolver/resolver.rs` | OHOS 目录权限 fallback | 上游改 resolver 时检查 |
 | `src/runtime/api/bun/js_bun_spawn_bindings.rs` | OHOS node userInfo env 注入（ohos_node_userinfo，1015） | 上游改 spawn env 时检查 |
 | `src/runtime/shell/subproc.rs` | OHOS spawn 差异 | 上游改 shell 时检查 |
-| `src/runtime/webcore/blob/read_file.rs` | OHOS 读文件差异 | 上游改 blob 时检查 |
+| `src/runtime/webcore/blob/read_file.rs` | OHOS socketpair stdio 截断修复：读循环串行化（`read_loop_state` IDLE/RUNNING/RUNNING_PENDING + `schedule_read_loop`），同一 fd 不再被并发 `do_read_loop` 争抢；该文件因此新增 1 处 `WorkPool::schedule`，`vm-thread-door` 库存随之为 3 | 上游改读循环时检查；库存用 `bun ./test/internal/source-lints/vm-thread-door.test.ts --update` 再生成 |
 | `src/spawn/process.rs` | OHOS watcher/pidfd 差异 | 上游改 spawn 时检查 |
 | `src/crash_handler/lib.rs` | OHOS crash 处理 | 上游改时检查 |
 | `src/dns/lib.rs` / `src/runtime/dns_jsc/dns.rs` | OHOS DNS | 上游改时检查 |
 | `src/standalone_graph/StandaloneModuleGraph.rs` | OHOS 差异 | 上游改时检查 |
 | `src/options_types/context.rs` | OHOS 差异 | 上游改时检查 |
+| `src/options_types/compile_target.rs` | `Libc::Ohos`：默认编译目标带 `-ohos` libc 后缀并接受 `target` 里的 `ohos` token；**`process.platform` 折叠为 `"linux"`**（与运行时一致——若折叠成 `"openharmony"`，同一编译产物里静态折叠值与动态取值会不一致，`platform-specific-binary` 用例会失败） | 上游改 CompileTarget/define 折叠时检查；`test/bundler/bundler_compile.test.ts` 的 `compile/platform-specific-binary*` 必须保持通过 |
 | `src/runtime/bin_entry/mod.rs` | OHOS 入口差异（TMPDIR 回退等） | 上游改时检查 |
 | `src/runtime/api.rs` | OHOS API 注册 | 上游改时检查 |
 

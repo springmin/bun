@@ -433,9 +433,11 @@ impl CompileTarget {
         // `OperatingSystem` / `Architecture` / `Libc` is a compile error here,
         // not a runtime panic behind a wildcard arm.
         let platform: &'static [u8] = match self.libc {
-            // process.platform: Node reports "android" on Android, "openharmony" on OHOS.
+            // process.platform: Node reports "android" on Android. OHOS reports
+            // "linux" at runtime (the npm `os` field matches Linux there), so a
+            // compiled OHOS binary has to fold to the same value.
             Libc::Android => b"\"android\"",
-            Libc::Ohos => b"\"openharmony\"",
+            Libc::Ohos => b"\"linux\"",
             Libc::Default | Libc::Musl => match self.os {
                 OperatingSystem::Mac => b"\"darwin\"",
                 OperatingSystem::Linux => b"\"linux\"",
