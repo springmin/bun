@@ -139,6 +139,8 @@
 | `test/js/web/streams/bun-streams-test-fifo.sh` | OHOS 拒绝以 `O_APPEND` 打开 FIFO（bash `>>` 报 EACCES），读取端随后永久阻塞 → 整个 `streams.test.js` 超时；改为 `>`（FIFO 上语义相同）；runner 同步把该文件移出 120s 快速失败列表 | 上游改该脚本或 streams 用例时保留 |
 | `test/js/web/streams/streams.test.js` | 「Bun.file().stream() surfaces read() errors」四个用例：OHOS 沙箱拒绝读 `/proc/self/mem`（EACCES）而非 Linux 的 EIO → `eioCode = isOhos ? "EACCES" : "EIO"`（错误上抛路径不变） | 上游改这些断言时保留 |
 | `test/bundler/bun-build-compile.test.ts` | 「compile with current platform target string」在 OHOS 需构造宿主目标串 `bun-<os>-<arch>-ohos`（`Libc::Ohos` 的 `-ohos` 后缀），否则被当作跨目标而触发下载 | 上游改目标构造时保留 |
+| `test/js/bun/module-graph/module-graph-isolation.test.ts` | 「every property of Bun is classified」：新增 `Bun.ant` 后需在 pure 列表登记 `ant`；该文件的 fixture 需要 `mkfifo`（runner 已把 `/system/bin` 加进 PATH） | 上游给 `Bun` 加属性时同步登记 |
+| `test/js/bun/util/filesink.test.ts` | 「writer() whose registration fails closes the dup exactly once」依赖 epoll `ADD` 报 EEXIST 失败，而 OHOS 的 `register_with_fd_impl` 已改为 DEL+重试（见上文 pty/epoll 修复）→ OHOS 跳过该用例 | 上游改 registration 语义时复评 |
 
 **运行时缺陷（2026-09-20，已修复）**：在 PTY 终端的读取器仍活跃时执行
 `Bun.Terminal.close()`（典型：`Bun.spawn({terminal})` → `kill()` → `await exited` → `proc.terminal.close()`），

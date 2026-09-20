@@ -678,7 +678,7 @@ it("Bun.file(fd).writer() write/end under GC pressure does not crash", async () 
 // closed from under it survives as long as the file does and the next dup that
 // lands on that number fails with EEXIST. kqueue drops the registration with
 // the fd, so this cannot be set up on macOS.
-it.skipIf(!isLinux)("Bun.file(fd).writer() whose registration fails closes the dup exactly once", async () => {
+it.skipIf(!isLinux || isOhos)("Bun.file(fd).writer() whose registration fails closes the dup exactly once", async () => {
   const fifoPath = join(tmpdirSync(), "parking.fifo");
   mkfifo(fifoPath, 0o666);
   const src = `

@@ -3985,6 +3985,7 @@ test("ModuleGraph isolation: every property of Bun is classified", () => {
         "XML",
         "YAML",
         "allocUnsafe",
+        "ant",
         "color",
         "concatArrayBuffers",
         "deepEquals",
