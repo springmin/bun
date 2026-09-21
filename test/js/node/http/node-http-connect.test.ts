@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { bunEnv, bunExe, bunRun, isLinux, isWindows, nodeExe, tempDir, tls as tlsCert } from "harness";
+import { bunEnv, bunExe, bunRun, isLinux, isOhos, isWindows, nodeExe, tempDir, tls as tlsCert } from "harness";
 import http from "http";
 
 import { once } from "node:events";
@@ -782,7 +782,10 @@ describe("Should be compatible with node.js", () => {
     await closed;
   });
 
-  test(
+  // OHOS: the device's node is not the CI node — it answers the
+  // http://-prefixed CONNECT in the proxy package's fixture with 500, not the
+  // 404 the fixture expects, so only the bun leg runs here.
+  test.skipIf(isOhos)(
     "tests should run on node.js",
     async () => {
     const process = Bun.spawn({

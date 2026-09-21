@@ -600,7 +600,7 @@ for (let [gcTick, label] of [
             const out = await proc.stdout.text();
             expect(out).not.toBe("");
           }
-        });
+        }, isOhos ? 30_000 : 5_000);
       });
 
       it("throws errors for invalid arguments", async () => {

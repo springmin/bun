@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { bunEnv, bunExe } from "harness";
+import { bunEnv, bunExe, isOhos } from "harness";
 
 // `computeHasPendingActivity` used to return `true` whenever `ipc_data` was
 // non-null. Nothing ever set `ipc_data` back to `null`, so every
@@ -77,4 +77,4 @@ test("Subprocess with ipc is collectable after the child exits", async () => {
   // and with `Bun.sleep(0)` on POSIX), so tolerate N-1.
   expect(collected).toBeGreaterThanOrEqual(iters - 1);
   expect(exitCode).toBe(0);
-}, 60_000);
+}, isOhos ? 120_000 : 60_000);

@@ -387,7 +387,7 @@ describe.skipIf(isDebug || isASAN)("the last idle collection drops code that can
       expect(same, log).toBe(true);
       expect(exitCode).toBe(0);
     },
-    15_000, // It may be the one that writes the executable, of 100 MB and more.
+    isOhos ? 60_000 : 15_000, // It may be the one that writes the executable, of 100 MB and more.
   );
 
   // The first of two is a collection like any other: it has run, and the code is still there.
@@ -399,7 +399,7 @@ describe.skipIf(isDebug || isASAN)("the last idle collection drops code that can
       expect(idleCollections, log).toBe(1);
       expect(after, log).toBeGreaterThan(before - 40);
     },
-    15_000,
+    isOhos ? 60_000 : 15_000,
   );
 });
 

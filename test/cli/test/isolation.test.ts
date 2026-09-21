@@ -492,14 +492,15 @@ describe.concurrent("bun test --isolate", () => {
         test("server saw the disconnect", async () => {
           const closeFile = process.env.CLOSE_FILE!;
           // OHOS propagates the isolate-forced close more slowly (sandbox
-          // TCP teardown); the runner passes a longer budget there.
-          const iterations = Number(process.env.ISOLATE_CLOSE_WAIT_MS ?? 2000) / 10;
-          for (let i = 0; i < iterations; i++) {
+          // TCP teardown); the runner passes a longer budget there. The
+          // test's own timeout has to cover that budget.
+          const waitMs = Number(process.env.ISOLATE_CLOSE_WAIT_MS ?? 2000);
+          for (let i = 0; i < waitMs / 10; i++) {
             if (fs.existsSync(closeFile)) break;
             await Bun.sleep(10);
           }
           expect(fs.existsSync(closeFile)).toBe(true);
-        });
+        }, Number(process.env.ISOLATE_CLOSE_WAIT_MS ?? 2000) + 5000);
       `,
     });
 

@@ -141,6 +141,13 @@
 | `test/bundler/bun-build-compile.test.ts` | 「compile with current platform target string」在 OHOS 需构造宿主目标串 `bun-<os>-<arch>-ohos`（`Libc::Ohos` 的 `-ohos` 后缀），否则被当作跨目标而触发下载 | 上游改目标构造时保留 |
 | `test/js/bun/module-graph/module-graph-isolation.test.ts` | 「every property of Bun is classified」：新增 `Bun.ant` 后需在 pure 列表登记 `ant`；该文件的 fixture 需要 `mkfifo`（runner 已把 `/system/bin` 加进 PATH） | 上游给 `Bun` 加属性时同步登记 |
 | `test/js/bun/util/filesink.test.ts` | 「writer() whose registration fails closes the dup exactly once」依赖 epoll `ADD` 报 EEXIST 失败，而 OHOS 的 `register_with_fd_impl` 已改为 DEL+重试（见上文 pty/epoll 修复）→ OHOS 跳过该用例 | 上游改 registration 语义时复评 |
+| `test/cli/test/isolation.test.ts` | `--isolate` 泄漏 socket 子用例：子测试的自超时跟随 `ISOLATE_CLOSE_WAIT_MS` 预算（OHOS 8s + 5s），否则预算大于默认 5s 超时 | 上游改该子测试时保留 |
+| `test/js/bun/gc/gc-controller-cadence.test.ts` | 两个「idle collection drops code」用例在 OHOS 放宽到 60s（需 `bun build --compile --bytecode` 100MB+ 并等待空闲 GC） | 上游改超时时保留 |
+| `test/js/bun/spawn/spawn-ipc-gc.test.ts` | IPC 可回收用例 OHOS 放宽到 120s（负载下 8 次 spawn + GC 轮询） | 同上 |
+| `test/regression/issue/02499/02499.test.ts` | 40 次 spawn+fetch：OHOS 预算 10s→25s、外框 30s→60s | 同上 |
+| `test/cli/init/init.test.ts` | `bun init works` 与 `--yes` 回退用例 OHOS 预算 30s→90s（内嵌 `bun install` 在慢网络/负载下超时） | 同上 |
+| `test/js/bun/spawn/spawn.test.ts` | `gcTick > pipe > should allow reading stdout` OHOS 放宽到 30s（50 次 spawn+读；连带 FORCE_WAITER 嵌套跑） | 同上 |
+| `test/js/node/http/node-http-connect.test.ts` | node 侧用例在 OHOS 跳过（设备 node 对 `http://` 前缀 CONNECT 返回 500，CI node 返回 404）；Bun 侧 7 例保留 | 设备 node 版本变化时复评 |
 
 **运行时缺陷（2026-09-20，已修复）**：在 PTY 终端的读取器仍活跃时执行
 `Bun.Terminal.close()`（典型：`Bun.spawn({terminal})` → `kill()` → `await exited` → `proc.terminal.close()`），

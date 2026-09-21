@@ -61,7 +61,7 @@ const initEnv = { ...bunEnv, BUN_AGENT_RULE_DISABLED: "1" };
     expect(fs.existsSync(path.join(temp, ".gitignore"))).toBe(true);
     expect(fs.existsSync(path.join(temp, "node_modules"))).toBe(true);
     expect(fs.existsSync(path.join(temp, "tsconfig.json"))).toBe(true);
-  }, 30_000);
+  }, isOhos ? 90_000 : 30_000);
 
   test("bun init falls back to --yes when stdin is not a TTY", async () => {
     await using temp = tempDir("bun-init-no-tty", {});
@@ -88,7 +88,7 @@ const initEnv = { ...bunEnv, BUN_AGENT_RULE_DISABLED: "1" };
     expect(fs.existsSync(path.join(temp, "package.json"))).toBe(true);
     expect(fs.existsSync(path.join(temp, "index.ts"))).toBe(true);
     expect(fs.existsSync(path.join(temp, "tsconfig.json"))).toBe(true);
-  }, 30_000);
+  }, isOhos ? 90_000 : 30_000);
 
   // Ctrl-D is EOF only on a POSIX tty; the Windows console has no equivalent
   // key that ends a cooked-mode read.

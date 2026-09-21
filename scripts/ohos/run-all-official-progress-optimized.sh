@@ -390,6 +390,12 @@ run_test() {
     */body-parser/express-memory-leak.test.ts|*/issue/026039.test.ts|\
     */install/bun-add.test.ts|*/install/bun-install.test.ts)
       _retry_on_fail=1 ;;
+    # 2026-09-21 全量：系统负载下的时序项（单跑均通过；已按 OHOS 放宽
+    # 用例预算，再给一次重试吸收抖动）
+    */cli/test/isolation.test.ts|*/js/bun/gc/gc-controller-cadence.test.ts|\
+    */js/bun/spawn/spawn-ipc-gc.test.ts|*/regression/issue/02499/02499.test.ts|\
+    */cli/init/init.test.ts|*/js/bun/spawn/spawn.test.ts)
+      _retry_on_fail=1 ;;
   esac
 
   # ── 串行标记：这些测试并行跑会冲突导致 subshell 死 ──
