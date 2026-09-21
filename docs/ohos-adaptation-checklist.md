@@ -148,6 +148,7 @@
 | `test/cli/init/init.test.ts` | `bun init works` 与 `--yes` 回退用例 OHOS 预算 30s→90s（内嵌 `bun install` 在慢网络/负载下超时） | 同上 |
 | `test/js/bun/spawn/spawn.test.ts` | `gcTick > pipe > should allow reading stdout` OHOS 放宽到 30s（50 次 spawn+读；连带 FORCE_WAITER 嵌套跑） | 同上 |
 | `test/js/node/http/node-http-connect.test.ts` | node 侧用例在 OHOS 跳过（设备 node 对 `http://` 前缀 CONNECT 返回 500，CI node 返回 404）；Bun 侧 7 例保留 | 设备 node 版本变化时复评 |
+| `test/js/third_party/body-parser/express-memory-leak.test.ts` | 三个 50,000 请求的泄漏检查用例在 OHOS 放宽 20s→60s（`isOhos ? 1000 * 60 : 1000 * 20`） | 上游改超时/请求量时保留 |
 
 **运行时缺陷（2026-09-20，已修复）**：在 PTY 终端的读取器仍活跃时执行
 `Bun.Terminal.close()`（典型：`Bun.spawn({terminal})` → `kill()` → `await exited` → `proc.terminal.close()`），
