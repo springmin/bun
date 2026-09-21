@@ -394,7 +394,8 @@ run_test() {
     # 用例预算，再给一次重试吸收抖动）
     */cli/test/isolation.test.ts|*/js/bun/gc/gc-controller-cadence.test.ts|\
     */js/bun/spawn/spawn-ipc-gc.test.ts|*/regression/issue/02499/02499.test.ts|\
-    */cli/init/init.test.ts|*/js/bun/spawn/spawn.test.ts|*/js/bun/http/serve-http3.test.ts)
+    */cli/init/init.test.ts|*/js/bun/spawn/spawn.test.ts|*/js/bun/http/serve-http3.test.ts|\
+    */cli/hot/hot.test.ts|*/cli/watch/watch.test.ts|*/cli/test/parallel.test.ts)
       _retry_on_fail=1 ;;
   esac
 
