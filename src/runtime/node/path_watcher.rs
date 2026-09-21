@@ -187,7 +187,7 @@ impl PathWatcherManager {
 // PathWatcher
 // ────────────────────────────────────────────────────────────────────────────────
 
-pub struct PathWatcher {
+pub(crate) struct PathWatcher {
     manager: Option<&'static PathWatcherManager>,
 
     /// Canonical absolute path (realpath of the user-supplied path). Owned.
@@ -1309,7 +1309,7 @@ fn attrib_shadowed_by_create(buf: &[u8], mut off: usize, wd: i32, name: &[u8]) -
 /// libuv), so `fs.watch()` no longer spins up a second kqueue thread.
 #[cfg(target_os = "macos")]
 #[derive(Default)]
-pub struct Darwin {
+pub(crate) struct Darwin {
     // No manager-level state — FSEvents has its own process-global loop.
 }
 
