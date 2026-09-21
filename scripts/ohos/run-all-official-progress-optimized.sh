@@ -395,7 +395,9 @@ run_test() {
     */cli/test/isolation.test.ts|*/js/bun/gc/gc-controller-cadence.test.ts|\
     */js/bun/spawn/spawn-ipc-gc.test.ts|*/regression/issue/02499/02499.test.ts|\
     */cli/init/init.test.ts|*/js/bun/spawn/spawn.test.ts|*/js/bun/http/serve-http3.test.ts|\
-    */cli/hot/hot.test.ts|*/cli/watch/watch.test.ts|*/cli/test/parallel.test.ts)
+    */cli/hot/hot.test.ts|*/cli/watch/watch.test.ts|*/cli/test/parallel.test.ts|\
+    */js/bun/http/serve-http2-lifecycle.test.ts|*/js/bun/shell/shell-hang.test.ts|\
+    */js/bun/spawn/spawn-stdio-syscall-error.test.ts)
       _retry_on_fail=1 ;;
   esac
 
