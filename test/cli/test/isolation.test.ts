@@ -519,7 +519,7 @@ describe.concurrent("bun test --isolate", () => {
           ...bunEnv,
           PORT: String(port),
           CLOSE_FILE: closeFile,
-          ISOLATE_CLOSE_WAIT_MS: isOhos ? "8000" : "2000",
+          ISOLATE_CLOSE_WAIT_MS: isOhos ? "20000" : "2000",
         },
         cwd: String(dir),
         stderr: "pipe",

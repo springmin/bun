@@ -2,7 +2,7 @@ import type { BunLockFile } from "bun";
 import { $, file, spawn } from "bun";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, setDefaultTimeout, test } from "bun:test";
 import { access, appendFile, copyFile, mkdir, readlink, rm, writeFile } from "fs/promises";
-import { bunExe, bunEnv as env, readdirSorted, tmpdirSync, toBeValidBin, toBeWorkspaceLink, toHaveBins } from "harness";
+import { bunExe, bunEnv as env, isOhos, readdirSorted, tmpdirSync, toBeValidBin, toBeWorkspaceLink, toHaveBins } from "harness";
 import { join, relative, resolve } from "path";
 import { pathToFileURL } from "url";
 import {
@@ -1911,7 +1911,7 @@ it("should handle Git URL in dependencies (SCP-style)", async () => {
   expect(await exited2).toBe(0);
   expect(urls.sort()).toBeEmpty();
   expect(requested).toBe(0);
-}, 20000);
+}, isOhos ? 60_000 : 20_000);
 
 it("should not save git urls twice", async () => {
   const urls: string[] = [];
@@ -1954,7 +1954,7 @@ it("should not save git urls twice", async () => {
   expect(package_json_content2.dependencies).toEqual({
     "test-repo": "https://github.com/liz3/empty-bun-repo",
   });
-}, 20000);
+}, isOhos ? 60_000 : 20_000);
 
 it("should prefer optionalDependencies over dependencies of the same name", async () => {
   const urls: string[] = [];
