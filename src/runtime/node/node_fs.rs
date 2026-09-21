@@ -41,6 +41,7 @@ pub(crate) trait MaybeSysResultExt<R>: Sized {
         syscall: sys::Tag,
         path: impl AsRef<[u8]>,
     ) -> Option<Self>;
+    #[cfg(not(target_env = "ohos"))]
     fn errno_sys_pd<Rc: sys::GetErrno>(
         rc: Rc,
         syscall: sys::Tag,
@@ -98,6 +99,7 @@ impl<R> MaybeSysResultExt<R> for Maybe<R> {
         }
     }
     #[inline]
+    #[cfg(not(target_env = "ohos"))]
     fn errno_sys_pd<Rc: sys::GetErrno>(
         rc: Rc,
         syscall: sys::Tag,

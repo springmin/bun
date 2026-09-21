@@ -1596,12 +1596,11 @@ export const linkerFlags: Flag[] = [
   {
     flag: c => [
       "-Wl,-Bsymbolic-functions",
-      "-rdynamic",
-      `-Wl,--dynamic-list=${c.cwd}/src/symbols.dyn`,
-      `-Wl,--version-script=${c.cwd}/src/linker.lds`,
+      `-Wl,--export-dynamic-symbol-list=${exportListPath(c)}`,
+      `-Wl,--version-script=${versionScriptPath(c)}`,
     ],
     when: c => c.ohos,
-    desc: "OHOS: dynamic symbol list + version script (mirror linux block; exposes napi_/node_api_ for .node dlopen)",
+    desc: "OHOS: export list + version script (mirror linux block; exposes napi_/node_api_ for .node dlopen)",
   },
 ];
 

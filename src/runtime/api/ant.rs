@@ -213,7 +213,7 @@ struct Tables {
 }
 
 #[bun_jsc::JsClass]
-pub struct CellSegmenter {
+pub(crate) struct CellSegmenter {
     ambiguous_is_narrow: bool,
     screen: ScreenOptions,
     state: RefCell<Tables>,

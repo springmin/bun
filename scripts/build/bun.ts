@@ -1025,7 +1025,7 @@ function windowsSysrootIncludeDirs(winsysroot: string): string[] {
  */
 function linkImplicitInputs(cfg: Config): string[] {
   // The ELF export list is the version script's `global:` block, written here so the link can take it as a file.
-  if (cfg.linux || cfg.freebsd) writeIfChanged(exportListPath(cfg), exportList(versionScriptPath(cfg)));
+  if (cfg.linux || cfg.freebsd || cfg.ohos) writeIfChanged(exportListPath(cfg), exportList(versionScriptPath(cfg)));
   return linkDepends(cfg);
 }
 

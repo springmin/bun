@@ -59,7 +59,10 @@ pub(crate) enum Stdio {
     Dup2(Dup2),
     Path(PathLike<'static>),
     Blob(webcore::blob::Any),
-    #[cfg_attr(not(any(target_os = "linux", target_os = "android")), allow(dead_code))]
+    #[cfg_attr(
+        any(not(any(target_os = "linux", target_os = "android")), target_env = "ohos"),
+        allow(dead_code)
+    )]
     Memfd(Fd),
     Pipe,
     /// Like `Pipe` at indices >= 3, but the parent end of the socketpair is

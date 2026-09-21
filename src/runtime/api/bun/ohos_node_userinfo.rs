@@ -437,11 +437,11 @@ fn write_all(fd: sys::Fd, mut buf: &[u8]) -> bool {
 /// than one stale copy in an inherited array); `username` is `None` when the
 /// shim lookup failed, in which case the preload's own `$USER`/`$LOGNAME`
 /// fallback still applies and nothing needs to be pushed for it.
-pub struct Injection {
+pub(crate) struct Injection {
     /// `"NODE_OPTIONS=<merged value>"`, no trailing NUL.
-    pub node_options: Vec<u8>,
+    pub(crate) node_options: Vec<u8>,
     /// `"BUN_OHOS_USERNAME=<name>"`, no trailing NUL.
-    pub username: Option<Vec<u8>>,
+    pub(crate) username: Option<Vec<u8>>,
 }
 
 /// Call after argv0 is resolved and before the child's env array is
@@ -452,7 +452,7 @@ pub struct Injection {
 /// whatever storage mechanism it owns. The two call sites (`Bun.spawn`'s
 /// `Vec<ZBox>` vs. the shell interpreter's bump arena) don't share a storage
 /// type, so ownership has to stay on their side.
-pub fn compute(argv0: &[u8], env_array: &[*const c_char]) -> Option<Injection> {
+pub(crate) fn compute(argv0: &[u8], env_array: &[*const c_char]) -> Option<Injection> {
     if !is_node_like(basename(argv0)) {
         return None;
     }
@@ -497,7 +497,7 @@ pub fn compute(argv0: &[u8], env_array: &[*const c_char]) -> Option<Injection> {
 /// the *first* match, so an appended-only entry would silently lose to a
 /// stale one earlier in the array (same hazard the PWD block in
 /// `js_bun_spawn_bindings.rs` documents at its `is_pwd_key` closure).
-pub fn is_managed_key(ptr: *const c_char) -> bool {
+pub(crate) fn is_managed_key(ptr: *const c_char) -> bool {
     if ptr.is_null() {
         return false;
     }
