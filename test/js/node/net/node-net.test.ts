@@ -1371,7 +1371,8 @@ describe("Socket fd adoption", () => {
   // node's `new Socket({ fd })` accepts besides TCP sockets is a pipe.
   function openFifo(name: string) {
     const path = join(tmpdirSync(), name);
-    execFileSync("mkfifo", [path]);
+    // OHOS: $PATH has no /bin, which is where mkfifo lives.
+    execFileSync(isOHOS ? "/bin/mkfifo" : "mkfifo", [path]);
     const rfd = fs.openSync(path, fs.constants.O_RDONLY | fs.constants.O_NONBLOCK);
     const wfd = fs.openSync(path, "w");
     return { rfd, wfd };
