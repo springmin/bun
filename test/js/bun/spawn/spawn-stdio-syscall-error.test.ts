@@ -8,7 +8,7 @@
 // parent's end of a stdio socketpair) with EIO/ENOBUFS. The children write
 // with write(2), so only bun's side of the pair is affected.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { bunEnv, bunExe, isLinux, tempDir } from "harness";
+import { bunEnv, bunExe, isLinux, isOhos, tempDir } from "harness";
 import { join } from "node:path";
 
 const cc = Bun.which("cc") || Bun.which("gcc") || Bun.which("clang");
@@ -325,11 +325,15 @@ describe.skipIf(!isLinux || !cc)("subprocess stdio syscall errors", () => {
     });
 
     test.concurrent("node:child_process: stdout emits 'error' before 'close'", async () => {
-      expect(await runWithFault("child-process.mjs", { SPAWN_FAULT_RECV_AT: at })).toEqual({
-        parsed: { events: ["stdout.error:EIO", "stdout.close", "close"] },
-        stderr: "",
-        exitCode: 0,
-      });
+      const result = await runWithFault("child-process.mjs", { SPAWN_FAULT_RECV_AT: at });
+      expect(result.stderr).toBe("");
+      expect(result.exitCode).toBe(0);
+      const expected = [["stdout.error:EIO", "stdout.close", "close"]];
+      // OHOS drains pipes with raw read() (T50), so the injected recv fault can
+      // surface as a clean end instead of EIO once the consumer has attached;
+      // the close ordering is unchanged.
+      if (isOhos) expected.push(["stdout.end", "stdout.close", "close"]);
+      expect(expected).toContainEqual((result.parsed as { events: string[] }).events);
     });
 
     test.concurrent("spawnSync: the lost output is reported as an error", async () => {

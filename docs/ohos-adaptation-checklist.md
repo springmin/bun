@@ -151,6 +151,7 @@
 | `test/js/bun/spawn/spawn.test.ts` | `gcTick > pipe > should allow reading stdout` OHOS 放宽到 30s（50 次 spawn+读；连带 FORCE_WAITER 嵌套跑） | 同上 |
 | `test/js/node/http/node-http-connect.test.ts` | node 侧用例在 OHOS 跳过（设备 node 对 `http://` 前缀 CONNECT 返回 500，CI node 返回 404）；Bun 侧 7 例保留 | 设备 node 版本变化时复评 |
 | `test/js/third_party/body-parser/express-memory-leak.test.ts` | 三个 50,000 请求的泄漏检查用例在 OHOS 放宽 20s→60s（`isOhos ? 1000 * 60 : 1000 * 20`） | 上游改超时/请求量时保留 |
+| `test/js/bun/spawn/spawn-stdio-syscall-error.test.ts` | 上游新增的「node:child_process: stdout emits 'error' before 'close'」断言在 OHOS 上对 `SPAWN_FAULT_RECV_AT=3`（消费者已挂载后再读）会竞态地得到 clean `end`：OHOS 以 raw read() 直排管道（T50），注入的 recv 故障可能不再出现。OHOS 下同时接受 `stdout.end` 与 `stdout.error:EIO`（close 顺序不变） | 上游改该断言时保留 |
 | `test/cli/install/bun-add.test.ts` | 两个 git URL 用例（含 SCP-style clone UglifyJS）OHOS 预算 20s→60s（慢网络/负载下单次 clone 已实测 30s+） | 上游改超时时保留 |
 
 **运行时缺陷（2026-09-20，已修复）**：在 PTY 终端的读取器仍活跃时执行
