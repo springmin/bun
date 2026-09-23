@@ -135,6 +135,7 @@ _BASE_TMP="${TMPDIR:-/tmp}"
 # was deleted mid-run twice, once at ~2h and once at ~1h in, breaking every
 # later write). Tests keep using TMPDIR; this directory only holds text state.
 PDIR="${RUNNER_PROGRESS_DIR:-${_BASE_TMP}/bun_test_progress_$$}"
+_ensure_pdir() { [ -d "$PDIR" ] || { mkdir -p "$PDIR" 2>/dev/null || true; }; }
 START_SECONDS=$SECONDS
 
 # ── vendored node 测试排除开关 ──
@@ -468,14 +469,16 @@ run_test() {
   # ── 串行锁 ──
   if [ "$_serial" -eq 1 ]; then
     # 等待串行锁（每次只允许一个串行测试跑）
-    while ! mkdir "$PDIR/serial.lock" 2>/dev/null; do sleep 1; done
+    _ensure_pdir
+    while ! mkdir "$PDIR/serial.lock" 2>/dev/null; do sleep 1; _ensure_pdir; done
     # 记录本测试持有锁，方便释放
     echo "$$" > "$PDIR/serial_holder" 2>/dev/null
   fi
 
   # ── 独占锁 ──
   if [ "${_exclusive:-0}" -eq 1 ]; then
-    while ! mkdir "$PDIR/exclusive.lock" 2>/dev/null; do sleep 1; done
+    _ensure_pdir
+    while ! mkdir "$PDIR/exclusive.lock" 2>/dev/null; do sleep 1; _ensure_pdir; done
   fi
 
   START_TS=$(date +%s%N)
@@ -495,6 +498,7 @@ run_test() {
   while [ $attempt -le $max_attempts ]; do
     out="$PDIR/out_${idx}_a${attempt}.tmp"
     if [ "$_sub" = "run" ]; then _bt="--smol"; else _bt="$BT"; fi
+    _ensure_pdir
     if [ -n "$WRAP" ]; then
       # OHOS CI 无 TTY，用 script 分配 PTY
       $WRAP "$BUN_EXE $_sub $_bt \"$f\"" /dev/null > "$out" 2>&1 &
@@ -571,6 +575,7 @@ run_test() {
 
   [ $TIMEOUT -eq 1 ] && CASE_PASS=-1 && CASE_FAIL=-1
 
+  _ensure_pdir
   cat "$LAST_OUT" > "$PDIR/out_${idx}.txt"
   echo "EXIT_CODE:$EXIT" >> "$PDIR/out_${idx}.txt"
   rm -f "$LAST_OUT"
@@ -604,6 +609,7 @@ run_test() {
   # 格式: <PASS|FAIL> <case_pass> <case_fail>
   _np=$CASE_PASS; _nf=$CASE_FAIL
   [ "$TIMEOUT" = "1" ] && _np=0 && _nf=0
+  _ensure_pdir
   {
     if [ "$FILE_RESULT" = PASS ]; then printf 'PASS %d %d\n' "$_np" "$_nf"; else printf 'FAIL %d %d\n' "$_np" "$_nf"; fi
   } >> "$PDIR/progress.log" 2>>"$REPORT"
@@ -785,6 +791,7 @@ _ohos_last_sweep=$SECONDS
 i=1
 _g_max_wt=0
 while IFS= read -r f; do
+  _ensure_pdir
   echo "$f" > "$PDIR/running_${i}"
   # 保存该测试的 watchdog 超时（秒），供调度循环超时判断
   # 必须与 run_test 中的 case 保持一致
