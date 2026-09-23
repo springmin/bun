@@ -130,7 +130,11 @@ pkill -f "verdaccio" 2>/dev/null || true
 TS=$(date +%Y%m%d_%H%M%S)
 REPORT="all-official-report-${TS}.txt"
 _BASE_TMP="${TMPDIR:-/tmp}"
-PDIR="${_BASE_TMP}/bun_test_progress_$$"
+# Progress/state dir. Override with RUNNER_PROGRESS_DIR to keep it out of a
+# shared temp tree that external cleanups sweep (2026-09-23/24 runs: the dir
+# was deleted mid-run twice, once at ~2h and once at ~1h in, breaking every
+# later write). Tests keep using TMPDIR; this directory only holds text state.
+PDIR="${RUNNER_PROGRESS_DIR:-${_BASE_TMP}/bun_test_progress_$$}"
 START_SECONDS=$SECONDS
 
 # ── vendored node 测试排除开关 ──
