@@ -18,16 +18,17 @@ function setup() {
   const install_cache_dir = tmpdirSync();
   const current_tmpdir = tmpdirSync();
   const x_dir = tmpdirSync();
-  return {
-    x_dir,
-    env: {
-      ...bunEnv,
-      TEMP: current_tmpdir,
-      BUN_TMPDIR: current_tmpdir,
-      TMPDIR: current_tmpdir,
-      BUN_INSTALL_CACHE_DIR: install_cache_dir,
-    } as Record<string, string>,
-  };
+  const env = {
+    ...bunEnv,
+    TEMP: current_tmpdir,
+    BUN_TMPDIR: current_tmpdir,
+    TMPDIR: current_tmpdir,
+    BUN_INSTALL_CACHE_DIR: install_cache_dir,
+  } as Record<string, string>;
+  // Bun only sets npm_config_user_agent when it is not already present, so a
+  // value inherited from the caller would leak into the "set to bun" assertion.
+  delete env.npm_config_user_agent;
+  return { x_dir, env };
 }
 
 // Drop every PATH entry that already provides `name`, so `bunx <name>` cannot

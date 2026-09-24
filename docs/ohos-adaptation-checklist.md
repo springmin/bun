@@ -166,6 +166,8 @@
 | `test/js/bun/repl/repl.test.ts` | `waitFor` 5s→15s、`waitForScreen` 3s→10s（PTY 屏幕刷新在慢设备上超出原预算） | 同上 |
 | `test/cli/install/bun-add.test.ts` | `git dep without package.json and with default branch`、`should handle Git URL in dependencies (SCP-style)` 在 OHOS 跳过（设备无法访问 github.com；原 60s 预算仍失败） | 设备可访问 github 时复评 |
 | `test/cli/install/bun-install-registry.test.ts` | `bundledDependencies > git dependencies` 在 OHOS 跳过（fixture 解析 `git+ssh://git@github.com`，设备不可达） | 同上 |
+| `test/cli/install/bun-link.test.ts` | 安装输出断言的时长后缀正则 `[0-9\.]+ms` 改为 `[0-9\.]+m?s`（慢设备上安装耗时以 `[N.NNs]` 输出，原正则剥不掉导致数组多一项） | 上游改这些断言时保留 |
+| `test/cli/install/bunx.test.ts` | `setup()` 的 env 显式 `delete env.npm_config_user_agent`（Bun 仅在变量缺失时写入自己的 UA；调用方继承的 UA 会让 “set to bun” 断言失败） | 上游改 setup 时保留 |
 
 **运行时缺陷（2026-09-20，已修复）**：在 PTY 终端的读取器仍活跃时执行
 `Bun.Terminal.close()`（典型：`Bun.spawn({terminal})` → `kill()` → `await exited` → `proc.terminal.close()`），
