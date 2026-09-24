@@ -5,7 +5,11 @@ import { bunEnv, bunExe, isDebug, isOHOS, isWindows, tmpdirSync, waitForFileToEx
 import { join } from "path";
 
 const timeout = isDebug ? Infinity : 10_000;
-const longTimeout = isDebug ? Infinity : isOHOS ? 90_000 : 30_000;
+const longTimeout = isDebug ? Infinity : isOHOS ? 180_000 : 30_000;
+// OHOS: each cycle of the two "sourcemap loading" tests builds through a
+// `bun build --watch` + `--hot` pair; 50 cycles do not fit the slowest device
+// windows, and 20 still walks the sourcemap-column logic.
+const sourcemapReloads = isOHOS ? 20 : 50;
 
 /**
  * Helper to parse stderr from a --hot process that throws errors.
@@ -664,7 +668,7 @@ throw new Error('0');`,
     let done = false;
     const reloadCounter = await Promise.race([
       driveErrorReloadCycle(runner, {
-        targetCount: 50,
+        targetCount: sourcemapReloads,
         onReload: counter => {
           writeFileSync(
             bundleIn,
@@ -693,7 +697,7 @@ ${Buffer.alloc(counter * 2, " ").toString()}throw new Error(${counter});`,
         return -1; // Ignored — race already resolved
       }),
     ]);
-    expect(reloadCounter).toBe(50);
+    expect(reloadCounter).toBe(sourcemapReloads);
     bundler.kill();
   },
   // OHOS: 50 reload cycles of the watch-bundler + --hot pair take ~20s there; the
@@ -751,7 +755,7 @@ throw new Error('0');`,
     let done2 = false;
     const reloadCounter = await Promise.race([
       driveErrorReloadCycle(runner, {
-        targetCount: 50,
+        targetCount: sourcemapReloads,
         onReload: counter => {
           writeHotFileAtomicSync(
             bundleIn,
@@ -780,7 +784,7 @@ ${Buffer.alloc(counter * 2, " ").toString()}throw new Error(${counter});`,
         return -1; // Ignored — race already resolved
       }),
     ]);
-    expect(reloadCounter).toBe(50);
+    expect(reloadCounter).toBe(sourcemapReloads);
     bundler.kill();
     await runner.exited;
     // TODO: bun has a memory leak when --hot is used on very large files

@@ -155,7 +155,7 @@
 | `test/js/node/net/node-net.test.ts` | 上游新增的「Socket fd adoption」4 个用例经 `openFifo` 调 `mkfifo`；设备 `/bin` 是 `/system/bin` 的软链，但裸 `bun test`（PATH 无 `/bin`/`/system/bin`）会 ENOENT（runner 会补 `/system/bin`）→ `isOHOS ? "/bin/mkfifo" : "mkfifo"` | 上游改 `openFifo` 时保留 |
 | `test/js/bun/spawn/fixtures/fd-nonblock-probe.js` | 上游 #43814 新增的 `the ipc fd is blocking` 断言依赖 `/proc/self/fdinfo/<fd>`；OHOS 沙箱下该目录存在但条目读取报 ENOENT → 先探测可读性，失败则回退 `dlopen("libc.so.6")` + `fcntl(F_GETFL)`（实测 fd3 flags=2 → blocking，断言成立）。该 fixture 也被 `node/child_process/child-process-stdio.test.js` 使用 | 上游改 fixture 时保留 |
 | `test/cli/install/bun-add.test.ts` | 两个 git URL 用例（含 SCP-style clone UglifyJS）OHOS 预算 20s→60s（慢网络/负载下单次 clone 已实测 30s+） | 上游改超时时保留 |
-| `test/cli/hot/hot.test.ts` | `--hot` 的两个 sourcemap 用例在 OHOS 用 90s 预算（本机 50 次重载循环 >30s）；`should hot reload when a file is deleted and rewritten` 在 OHOS 接受 `reloadCounter >= 3`（负载下两条重载行会合并进同一次读取，循环可能越过 3） | 上游改这些用例时保留 |
+| `test/cli/hot/hot.test.ts` | `--hot` 的两个 sourcemap 用例在 OHOS 用 180s 预算且重载轮数 50→20（每轮走 `bun build --watch` + `--hot` 对，50 轮在负载下超 90s）；`should hot reload when a file is deleted and rewritten` 在 OHOS 接受 `reloadCounter >= 3`（负载下两条重载行会合并进同一次读取，循环可能越过 3） | 上游改这些用例时保留 |
 | `test/cli/watch/watch.test.ts` | `should watch files`（含 non-ascii）OHOS 预算 10s→30s（11 次 watch 往返在慢设备上超过 10s） | 同上 |
 | `test/cli/test/isolation.test.ts` | 文件默认超时 OHOS 30s→60s；`leaked outbound socket is closed before next file` 的 `ISOLATE_CLOSE_WAIT_MS` OHOS 20s→45s、该用例显式超时 120s（沙箱 TCP 拆除更慢） | 上游改 isolation 用例时保留 |
 | `test/cli/test/parallel.test.ts` | `partitions by directory` 在 OHOS 允许 `firstDirs.size >= byPid.size - 1`（晚启动的 worker 可能复用目录）；`SIGTERM on coordinator` 的等待窗口 OHOS 200→1200 次（30s） | 同上 |
