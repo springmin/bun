@@ -31,6 +31,11 @@ export TMPDIR="${TMPDIR:-/data/storage/el2/base/tmp}"
 # "Error loading shared library libxml2.so.16 ... xmlFreeDoc: symbol not
 # found". Point the loader at the SDK's own copy (the opt/ symlink survives
 # SDK version bumps).
+# harmonybrew/lib carries libgcc_s.so.1, which third-party prebuilt .node
+# modules (resvg, rollup-v4, astro's rollup) link against; without it dlopen
+# fails with "Error loading shared library libgcc_s.so.1".
+_HB_LIB="/storage/Users/currentUser/.harmonybrew/lib"
+case ":$LD_LIBRARY_PATH:" in *":$_HB_LIB:"*) ;; *) LD_LIBRARY_PATH="$_HB_LIB${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" ;; esac
 export LD_LIBRARY_PATH="/storage/Users/currentUser/.harmonybrew/opt/ohos-sdk/native/llvm/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 
 # ── node-gyp 环境 ──
@@ -410,7 +415,11 @@ run_test() {
     */js/bun/test/snapshot-tests/snapshots/snapshot.test.ts|\
     */js/node/child_process/child_process.test.ts|\
     */cli/install/bun-install-registry.test.ts|\
-    */js/bun/repl/repl.test.ts)
+    */js/bun/repl/repl.test.ts|\
+    */js/bun/module-graph/module-graph-workers.test.ts|\
+    */js/bun/module-graph/module-graph.test.ts|\
+    */cli/test/bun-test.test.ts|\
+    */js/bun/http/bun-serve-file.test.ts)
       _retry_on_fail=1 ;;
   esac
 

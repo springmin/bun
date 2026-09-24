@@ -168,6 +168,8 @@
 | `test/cli/install/bun-install-registry.test.ts` | `bundledDependencies > git dependencies` 在 OHOS 跳过（fixture 解析 `git+ssh://git@github.com`，设备不可达） | 同上 |
 | `test/cli/install/bun-link.test.ts` | 安装输出断言的时长后缀正则 `[0-9\.]+ms` 改为 `[0-9\.]+m?s`（慢设备上安装耗时以 `[N.NNs]` 输出，原正则剥不掉导致数组多一项） | 上游改这些断言时保留 |
 | `test/cli/install/bunx.test.ts` | `setup()` 的 env 显式 `delete env.npm_config_user_agent`（Bun 仅在变量缺失时写入自己的 UA；调用方继承的 UA 会让 “set to bun” 断言失败） | 上游改 setup 时保留 |
+| `scripts/ohos/run-all-official-progress-optimized.sh` | runner 的 `LD_LIBRARY_PATH` 补上 `/storage/Users/currentUser/.harmonybrew/lib`（内含 `libgcc_s.so.1`）：第三方预编译 `.node`（resvg、rollup-v4、astro、vitest）dlopen 报 `Error loading shared library libgcc_s.so.1`，补上后 4 项均通过 | 上游新增依赖预编译原生模块的第三方测试时保留 |
+| runner 重试名单（2026-09-24 追加） | 追加 `module-graph-workers`、`module-graph`、`cli/test/bun-test`、`js/bun/http/bun-serve-file`（高负载下文件级超时；单跑均通过） | 同上 |
 
 **运行时缺陷（2026-09-20，已修复）**：在 PTY 终端的读取器仍活跃时执行
 `Bun.Terminal.close()`（典型：`Bun.spawn({terminal})` → `kill()` → `await exited` → `proc.terminal.close()`），
