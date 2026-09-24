@@ -7,7 +7,7 @@ import { join } from "node:path";
 // Every case spawns at least one full `bun test --isolate` child; the heavy
 // ones (8-file leak fixtures, 500-2000-export module_info modules) exceed the
 // 5s default on debug/ASAN runners.
-setDefaultTimeout(isASAN ? 120_000 : 30_000);
+setDefaultTimeout(isASAN ? 120_000 : isOhos ? 60_000 : 30_000);
 
 // Two test files where the first leaks state and the second observes it.
 // Under --isolate the second file must see a clean world.
@@ -519,7 +519,7 @@ describe.concurrent("bun test --isolate", () => {
           ...bunEnv,
           PORT: String(port),
           CLOSE_FILE: closeFile,
-          ISOLATE_CLOSE_WAIT_MS: isOhos ? "20000" : "2000",
+          ISOLATE_CLOSE_WAIT_MS: isOhos ? "45000" : "2000",
         },
         cwd: String(dir),
         stderr: "pipe",
@@ -532,7 +532,8 @@ describe.concurrent("bun test --isolate", () => {
     } finally {
       server.close();
     }
-  });
+    // The inner budget (ISOLATE_CLOSE_WAIT_MS + 5s on OHOS) must fit here.
+  }, isOhos ? 120_000 : 30_000);
 
   test("with --isolate, what a leaked listener's close handler opens is closed before next file", async () => {
     using dir = tempDir("isolate-close-handler", {

@@ -1,6 +1,6 @@
 // Tests for Bun REPL
 import { describe, expect, test } from "bun:test";
-import { bunEnv, bunExe, isWindows, normalizeBunSnapshot, tempDir } from "harness";
+import { bunEnv, bunExe, isOhos, isWindows, normalizeBunSnapshot, tempDir } from "harness";
 import { chmodSync, statSync } from "node:fs";
 import path from "path";
 
@@ -254,7 +254,7 @@ async function withTerminalRepl(
 
   const send = (text: string) => terminal.write(text);
 
-  const waitFor = async (pattern: string | RegExp, timeoutMs = 5000): Promise<string> => {
+  const waitFor = async (pattern: string | RegExp, timeoutMs = isOhos ? 15_000 : 5000): Promise<string> => {
     const deadline = Date.now() + timeoutMs;
     while (true) {
       const all = received.join("");
@@ -286,7 +286,7 @@ async function withTerminalRepl(
   const renderReceived = () => {
     while (modelled < received.length) model.feed(received[modelled++]);
   };
-  const waitForScreen = async (ready: (screen: Screen) => boolean, timeoutMs = 3000): Promise<Screen> => {
+  const waitForScreen = async (ready: (screen: Screen) => boolean, timeoutMs = isOhos ? 10_000 : 3000): Promise<Screen> => {
     const deadline = Date.now() + timeoutMs;
     while (true) {
       renderReceived();

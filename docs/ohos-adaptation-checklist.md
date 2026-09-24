@@ -155,6 +155,17 @@
 | `test/js/node/net/node-net.test.ts` | 上游新增的「Socket fd adoption」4 个用例经 `openFifo` 调 `mkfifo`；设备 `/bin` 是 `/system/bin` 的软链，但裸 `bun test`（PATH 无 `/bin`/`/system/bin`）会 ENOENT（runner 会补 `/system/bin`）→ `isOHOS ? "/bin/mkfifo" : "mkfifo"` | 上游改 `openFifo` 时保留 |
 | `test/js/bun/spawn/fixtures/fd-nonblock-probe.js` | 上游 #43814 新增的 `the ipc fd is blocking` 断言依赖 `/proc/self/fdinfo/<fd>`；OHOS 沙箱下该目录存在但条目读取报 ENOENT → 先探测可读性，失败则回退 `dlopen("libc.so.6")` + `fcntl(F_GETFL)`（实测 fd3 flags=2 → blocking，断言成立）。该 fixture 也被 `node/child_process/child-process-stdio.test.js` 使用 | 上游改 fixture 时保留 |
 | `test/cli/install/bun-add.test.ts` | 两个 git URL 用例（含 SCP-style clone UglifyJS）OHOS 预算 20s→60s（慢网络/负载下单次 clone 已实测 30s+） | 上游改超时时保留 |
+| `test/cli/hot/hot.test.ts` | `--hot` 的两个 sourcemap 用例在 OHOS 用 90s 预算（本机 50 次重载循环 >30s）；`should hot reload when a file is deleted and rewritten` 在 OHOS 接受 `reloadCounter >= 3`（负载下两条重载行会合并进同一次读取，循环可能越过 3） | 上游改这些用例时保留 |
+| `test/cli/watch/watch.test.ts` | `should watch files`（含 non-ascii）OHOS 预算 10s→30s（11 次 watch 往返在慢设备上超过 10s） | 同上 |
+| `test/cli/test/isolation.test.ts` | 文件默认超时 OHOS 30s→60s；`leaked outbound socket is closed before next file` 的 `ISOLATE_CLOSE_WAIT_MS` OHOS 20s→45s、该用例显式超时 120s（沙箱 TCP 拆除更慢） | 上游改 isolation 用例时保留 |
+| `test/cli/test/parallel.test.ts` | `partitions by directory` 在 OHOS 允许 `firstDirs.size >= byPid.size - 1`（晚启动的 worker 可能复用目录）；`SIGTERM on coordinator` 的等待窗口 OHOS 200→1200 次（30s） | 同上 |
+| `test/js/bun/module-graph/module-graph-isolation.test.ts` | fixture 的 “still running” 看门狗 3s→15s（OHOS 下 dispose 可超 3s）；`until()` 轮询 deadline 3s→15s | 上游改 fixture 时保留 |
+| `test/regression/issue/32492.test.ts` | OHOS：并发 24→6、轮次 16→4、阈值 9s→12s、用例超时 120s→300s。实测单次 build 1.2s / 4 并发 3.7s / 6 并发 5.5s / 24 并发 18.2s（24 并发已越过 10s stall 底线，无法区分回归）；6 并发下健康轮 ~5.5s、stall（固定 10s idle-futex）~15.5s，12s 仍可区分 | 上游改该回归测试参数时复评 |
+| `test/js/node/child_process/child_process.test.ts` | `it accepts stdio passthrough`（`bun install` npm-run-all + run-p）OHOS 30s→90s | 同上 |
+| `test/js/bun/dns/resolve-dns.test.ts` | 无效主机名用例在 OHOS 接受 `EAI_AGAIN`（无可用 DNS 服务器时 getaddrinfo 先返回临时失败，而非 DNS_ENOTFOUND） | 上游改该断言时保留 |
+| `test/js/bun/repl/repl.test.ts` | `waitFor` 5s→15s、`waitForScreen` 3s→10s（PTY 屏幕刷新在慢设备上超出原预算） | 同上 |
+| `test/cli/install/bun-add.test.ts` | `git dep without package.json and with default branch`、`should handle Git URL in dependencies (SCP-style)` 在 OHOS 跳过（设备无法访问 github.com；原 60s 预算仍失败） | 设备可访问 github 时复评 |
+| `test/cli/install/bun-install-registry.test.ts` | `bundledDependencies > git dependencies` 在 OHOS 跳过（fixture 解析 `git+ssh://git@github.com`，设备不可达） | 同上 |
 
 **运行时缺陷（2026-09-20，已修复）**：在 PTY 终端的读取器仍活跃时执行
 `Bun.Terminal.close()`（典型：`Bun.spawn({terminal})` → `kill()` → `await exited` → `proc.terminal.close()`），

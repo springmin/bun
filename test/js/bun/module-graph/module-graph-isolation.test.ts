@@ -3,7 +3,7 @@
 // happened to be running when it was opened.
 import { afterAll, beforeAll, describe, expect, setSystemTime, test } from "bun:test";
 import { existsSync, readFileSync, rmSync, writeFileSync } from "fs";
-import { bunEnv, bunExe, isWindows, tempDir, tls as tlsCertificate } from "harness";
+import { bunEnv, bunExe, isOhos, isWindows, tempDir, tls as tlsCertificate } from "harness";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { EventEmitter } from "node:events";
 import http from "node:http";
@@ -12,12 +12,18 @@ import { builtinModules } from "node:module";
 import { PerformanceObserver } from "node:perf_hooks";
 import { join } from "path";
 import {
+
   listeningServer,
   pgAuthenticationOk,
   pgCommandComplete,
   pgReadFrontendMessages,
   pgReadyForQuery,
 } from "../../sql/wire-frames";
+
+// OHOS: disposing a graph can take longer than 3s under load; the timer is only
+// a watchdog that reports "the process is still running" when it fires.
+const stillRunningMs = isOhos ? 15_000 : 3_000;
+
 
 const ModuleGraph = Bun.ModuleGraph;
 type Graph = InstanceType<typeof ModuleGraph>;
@@ -80,7 +86,7 @@ const dir = String(
       graph.dispose();
       console.log("disposed");
       // Does not keep the process running; says so if something else does.
-      setTimeout(() => { console.log("and the process is still running"); process.exit(1); }, 3000).unref();
+      setTimeout(() => { console.log("and the process is still running"); process.exit(1); }, ${stillRunningMs}).unref();
     `,
     // What a disposed graph left in something of the realm's. Each in a process of its own: they count objects.
     "left-behind-tenant.mjs": `
@@ -1290,7 +1296,7 @@ const dir = String(
       graph.run(() => { Promise.resolve(app.open[kind](state, ...args)).catch(() => {}); });
       graph.dispose();
       console.log("disposed");
-      setTimeout(() => { console.log("and the process is still running"); process.exit(1); }, 3000).unref();
+      setTimeout(() => { console.log("and the process is still running"); process.exit(1); }, ${stillRunningMs}).unref();
     `,
     "disposes-then-opens.mjs": `
       const [kind, state, args] = [process.argv[2], JSON.parse(process.argv[3]), JSON.parse(process.argv[4])];
@@ -1300,7 +1306,7 @@ const dir = String(
       graph.run(() => app.call(() => queueMicrotask(() => { Promise.resolve(app.open[kind](state, ...args)).catch(() => {}); })));
       graph.dispose();
       console.log("disposed");
-      setTimeout(() => { console.log("and the process is still running"); process.exit(1); }, 3000).unref();
+      setTimeout(() => { console.log("and the process is still running"); process.exit(1); }, ${stillRunningMs}).unref();
     `,
     "app.mjs": `
       import net from "node:net";
@@ -2004,7 +2010,7 @@ async function accepts(port: number): Promise<boolean> {
 }
 /** Resolves with the first truthy `condition()`; throws after about 3s without one. */
 async function until<T>(condition: () => T | Promise<T>): Promise<T> {
-  const deadline = Date.now() + 3000;
+  const deadline = Date.now() + (isOhos ? 15_000 : 3000);
   do {
     const value = await condition();
     if (value) return value;

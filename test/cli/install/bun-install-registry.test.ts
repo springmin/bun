@@ -1377,7 +1377,8 @@ describe("bundledDependencies", () => {
       await check();
     });
 
-    test(`(${textLockfile ? "bun.lock" : "bun.lockb"}) git dependencies`, async () => {
+    // OHOS: the fixture resolves git+ssh://git@github.com, which the device cannot reach.
+    test.skipIf(isOhos)(`(${textLockfile ? "bun.lock" : "bun.lockb"}) git dependencies`, async () => {
       await Promise.all([
         write(
           packageJson,

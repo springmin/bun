@@ -5,6 +5,7 @@ import {
   bunEnv,
   bunExe,
   isLinux,
+  isOhos,
   isPosix,
   isWindows,
   nodeExe,
@@ -952,7 +953,7 @@ it("it accepts stdio passthrough", async () => {
     console.error({ exitCode, err, out });
     throw e;
   }
-}, 30_000);
+}, isOhos ? 90_000 : 30_000);
 
 it.if(!isWindows)("spawnSync correctly reports signal codes", () => {
   const trapCode = `

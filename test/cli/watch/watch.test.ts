@@ -1,7 +1,7 @@
 import type { Subprocess } from "bun";
 import { spawn } from "bun";
 import { afterEach, expect, it } from "bun:test";
-import { bunEnv, bunExe, isBroken, isLinux, isMacOS, isWindows, tempDir, tmpdirSync } from "harness";
+import { bunEnv, bunExe, isBroken, isLinux, isMacOS, isOhos, isWindows, tempDir, tmpdirSync } from "harness";
 import { readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
 
@@ -56,7 +56,8 @@ for (const dir of ["dir", "©️"]) {
       }
       rmSync(path);
     },
-    10000,
+    // OHOS: 11 watch round-trips at slow-device startup exceed 10s.
+    isOhos ? 30_000 : 10_000,
   );
 }
 

@@ -404,6 +404,14 @@ run_test() {
     */js/bun/http/serve-http2-lifecycle.test.ts|*/js/bun/shell/shell-hang.test.ts|\
     */js/bun/spawn/spawn-stdio-syscall-error.test.ts)
       _retry_on_fail=1 ;;
+    # 2026-09-24 全量：重型/负载敏感文件（单跑均通过；高负载下会文件级超时或丢用例）
+    */js/bun/import-attributes/import-attributes.test.ts|\
+    */js/bun/module-graph/module-graph-compile.test.ts|\
+    */js/bun/test/snapshot-tests/snapshots/snapshot.test.ts|\
+    */js/node/child_process/child_process.test.ts|\
+    */cli/install/bun-install-registry.test.ts|\
+    */js/bun/repl/repl.test.ts)
+      _retry_on_fail=1 ;;
   esac
 
   # ── 串行标记：这些测试并行跑会冲突导致 subshell 死 ──

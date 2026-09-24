@@ -1552,7 +1552,8 @@ for (const { desc, dep } of gitNameTests) {
   });
 }
 
-it("git dep without package.json and with default branch", async () => {
+// OHOS: clones git@github.com, which the device cannot reach.
+it.skipIf(isOhos)("git dep without package.json and with default branch", async () => {
   await Bun.write(
     join(package_dir, "package.json"),
     JSON.stringify({
@@ -1812,7 +1813,7 @@ it("should install version tagged with `latest` by default", async () => {
   await access(join(package_dir, "bun.lockb"));
 });
 
-it("should handle Git URL in dependencies (SCP-style)", async () => {
+it.skipIf(isOhos)("should handle Git URL in dependencies (SCP-style)", async () => {
   const urls: string[] = [];
   setHandler(dummyRegistry(urls));
   await writeFile(

@@ -114,6 +114,14 @@ describe("dns", () => {
     // state); run them concurrently so the system resolver's ~4s negative-lookup
     // timeouts overlap instead of stacking.
     test.concurrent.each(invalidHostnames)("%s", async hostname => {
+      // OHOS: without a reachable DNS server getaddrinfo fails EAI_AGAIN before
+      // the resolver can report that the name does not exist.
+      if (Bun.env.BUN_OHOS === "1") {
+        await expect(dns.lookup(hostname, { backend })).rejects.toMatchObject({
+          code: expect.stringMatching(/^DNS_ENOTFOUND|EAI_AGAIN$/),
+        });
+        return;
+      }
       // @ts-expect-error
       await expect(dns.lookup(hostname, { backend })).rejects.toMatchObject({
         code: "DNS_ENOTFOUND",
