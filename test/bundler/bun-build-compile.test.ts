@@ -818,9 +818,9 @@ console.log(JSON.stringify({ n, anonKB: anon }));`,
           });
           const args = ["--format=esm", "--splitting", "app.js"];
           expect(await buildIn(String(dir), args, exe("plain"))).toEqual({ stderr: "", exitCode: 0 });
-          const record = async (name: string) => {
+          const record = async (name: string, program: string = exe("plain")) => {
             const out = join(String(dir), name);
-            expect(await runIn(String(dir), exe("plain"), [], { BUN_BYTECODE_ORDER_OUT: out })).toEqual({
+            expect(await runIn(String(dir), program, [], { BUN_BYTECODE_ORDER_OUT: out })).toEqual({
               stdout: "4\n",
               stderr: "",
               stats: undefined,
@@ -848,9 +848,13 @@ console.log(JSON.stringify({ n, anonKB: anon }));`,
             edited++;
           }
           expect(edited).toBe(1);
-          writeFileSync(outfile, file);
+          // OHOS: a file that has been executed refuses writes afterwards
+          // (open() -> EPERM), so the edit goes to a copy that is then run.
+          const editedName = exe("plain-edited");
+          writeFileSync(join(String(dir), editedName), file);
+          chmodSync(join(String(dir), editedName), 0o755);
 
-          const unused = await record("unused.order");
+          const unused = await record("unused.order", editedName);
           // app.js ran from its bytecode; lazy.js is neither evaluated nor not, and none of its functions is listed.
           expect({ M: unused.M, N: unused.N }).toEqual({ M: used.M.filter(line => unused.M.includes(line)), N: [] });
           expect(unused.M.length).toBe(1);
@@ -1566,7 +1570,8 @@ console.log(JSON.stringify({ n, anonKB: anon }));`,
       }, 60_000);
 
       // The file is read once, front to back.
-      test.skipIf(!isPosix)(
+      // OHOS has no /dev/stdin (the sandbox's /dev is minimal).
+      test.skipIf(!isPosix || isOhos)(
         "an order file that is a pipe",
         async () => {
           const { plain, order } = shared;
@@ -1815,8 +1820,12 @@ server.close();`;
           const { recordAt, regionEnds } = linkedLayout(outfile);
           const file = readFileSync(outfile);
           file.writeUInt32LE(regionEnds[1] + 1, recordAt + 8);
-          writeFileSync(outfile, file);
-          const edited = await runInternals(outfile);
+          // OHOS: writing to a file that has been executed is denied (EPERM);
+          // apply the edit to a copy and run that.
+          const editedFile = outfile + "-edited";
+          writeFileSync(editedFile, file);
+          chmodSync(editedFile, 0o755);
+          const edited = await runInternals(editedFile);
           expect({ joined: edited.joined, fromBytecode: edited.fromBytecode }).toEqual({
             joined: unordered.joined,
             fromBytecode: 0,
