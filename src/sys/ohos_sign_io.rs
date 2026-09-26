@@ -61,8 +61,17 @@ fn stat_path(path: &Path) -> Maybe<Stat> {
     with_zstr(path, Tag::fstatat, |z| crate::stat(z))
 }
 
+/// Open `path` read-only above stdio. `openat` takes the lowest free number,
+/// and a descriptor at 0/1/2 is never closed by `Fd::close` or `File`'s drop
+/// (both refuse stdio numbers), so a caller that closed its own fd 0/1/2 would
+/// leave the file open at that number.
+fn open_above_stdio(path: &Path) -> Maybe<File> {
+    let fd = crate::openat_a(Fd::cwd(), path_bytes(path), O::RDONLY | O::CLOEXEC, 0)?;
+    Ok(File::from_fd(crate::move_above_stdio(fd)))
+}
+
 fn read_file(path: &Path) -> Maybe<Vec<u8>> {
-    let f = File::openat(Fd::cwd(), path_bytes(path), O::RDONLY | O::CLOEXEC, 0)?;
+    let f = open_above_stdio(path)?;
     let out = f.read_to_end();
     let _ = f.close();
     out
@@ -71,7 +80,7 @@ fn read_file(path: &Path) -> Maybe<Vec<u8>> {
 /// True when `path` starts with the ELF magic. Reads four bytes, never the
 /// whole file: the spawn paths call this on every target, including scripts.
 fn has_elf_magic(path: &Path) -> bool {
-    let Ok(f) = File::openat(Fd::cwd(), path_bytes(path), O::RDONLY | O::CLOEXEC, 0) else {
+    let Ok(f) = open_above_stdio(path) else {
         return false;
     };
     let mut magic = [0u8; 4];

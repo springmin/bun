@@ -2288,7 +2288,9 @@ describe.skipIf(!isPosix)("a spawn while fd 0, 1 or 2 is closed", () => {
     });
   });
 
-  it.concurrent.skipIf(!isLinux)("a stdin memfd that is moved off fd 1 keeps its close-on-exec state", async () => {
+  // OHOS: memfd stdio is disabled there (memfd-backed stdio makes children abort),
+  // so stdin is a socketpair and there is no memfd to look at.
+  it.concurrent.skipIf(!isLinux || isOhos)("a stdin memfd that is moved off fd 1 keeps its close-on-exec state", async () => {
     // /proc/self/fdinfo shows FD_CLOEXEC of the parent's memfd as O_CLOEXEC in "flags".
     const stdinMemfd = (closeFirst: boolean) =>
       run(`
@@ -2313,7 +2315,9 @@ describe.skipIf(!isPosix)("a spawn while fd 0, 1 or 2 is closed", () => {
     expect(moved).toEqual(inPlace);
   });
 
-  it.concurrent.skipIf(!isLinux)(
+  // OHOS: the spawn path needs more than one free descriptor at the limit (the
+  // exit watcher and the pre-exec signing open), so a single free fd is EMFILE.
+  it.concurrent.skipIf(!isLinux || isOhos)(
     "at the descriptor limit a spawn still works when only the closed fd 1 is free",
     async () => {
       // No number at 3 or above is free, so the pidfd (or the waiter thread's eventfd) cannot move.
