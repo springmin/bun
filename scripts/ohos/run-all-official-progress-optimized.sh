@@ -317,6 +317,16 @@ _ohos_watchdog_for() {
       WT=$((TMOUT * 4))       # 1200s
       BT="--expose-internals --smol --timeout ${BUN_TIMEOUT}"
       ;;
+    # ── module-graph 家族：单跑 2-3 分钟，全量高负载下多次撞 600s 看门狗
+    # （2026-09-24 下午轮 3 个文件同时超时；2026-09-26 验证轮 module-graph-io
+    # 又超时）──
+    */js/bun/module-graph/module-graph.test.ts|\
+    */js/bun/module-graph/module-graph-io.test.ts|\
+    */js/bun/module-graph/module-graph-compile.test.ts|\
+    */js/bun/module-graph/module-graph-workers.test.ts)
+      WT=$((TMOUT * 3))       # 900s
+      BT="--expose-internals --smol --timeout ${BUN_TIMEOUT}"
+      ;;
     # ── 泄漏/长时间测试 ──
     # shell/leak、spawn-pipe-leak 连续多日 FAIL（386-400s），降为 300s 快速失败
     *serve-body-leak*|*handle-leak*|*no-orphans*)
@@ -417,9 +427,11 @@ run_test() {
     */cli/install/bun-install-registry.test.ts|\
     */js/bun/repl/repl.test.ts|\
     */js/bun/module-graph/module-graph-workers.test.ts|\
+    */js/bun/module-graph/module-graph-io.test.ts|\
     */js/bun/module-graph/module-graph.test.ts|\
     */cli/test/bun-test.test.ts|\
-    */js/bun/http/bun-serve-file.test.ts)
+    */js/bun/http/bun-serve-file.test.ts|\
+    */regression/issue/026039.test.ts)
       _retry_on_fail=1 ;;
   esac
 
