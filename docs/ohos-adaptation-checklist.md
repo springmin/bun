@@ -178,6 +178,11 @@
 | `test/js/node/http/node-http-req-complete.test.ts` | 「all tests pass in Node.js」对照用例在 OHOS 跳过：设备 node（v26.8.1）在本文件有 2 个 `res.end(chunk) after the client went away` 子测试失败，不能作为基准 | 设备 node 版本/行为变化时复评 |
 | `test/cli/install/bun-install.test.ts` | 3 个网络依赖用例在 OHOS 跳过：`should handle Git URL with existing lockfile`、`should perform bin-linking across multiple dependencies`（registry 下载）、`should handle modified git resolutions in bun.lock`（克隆 github.com） | 设备可访问网络时复评 |
 | `test/js/bun/shell/leak.test.ts` | `fd leak`/`mem leak` 的 100s 用例预算在 OHOS 负载下不足（多例 100.0s 超时）→ OHOS 提到 300s | 上游改预算时保留 |
+| `scripts/build/config.ts`（构建适配） | 上游 #44091 新增「clang 与 rustc 的 LLVM 主版本必须一致」硬校验；OHOS 端钉死的 rustc 为 **LLVM 22.1.8**、OHOS SDK clang 为 **23.1.1**，且本环境无法更换 nightly → 在 OHOS 上豁免该检查（链接只读取 rustc 的**较旧** bitcode，新 lld 可读；且 OHOS 构建传 `--lto=off`） | 上游改该检查或 rust nightly 可升级时复评 |
+| `test/internal/build-rust-toolchain-probe.test.ts` | 上游把探针 fixture 的 LLVM 版本改为 23.1.1 并要求 clang/rustc 一致；OHOS 端保留 `echo`（设备 `/bin/sh` 无 `printf` 内建）+ 取上游的 23.1.1 | 上游改 fixture 时保留 |
+| `src/runtime/api/bun/spawn/stdio.rs` / `src/sys/lib.rs` | 上游 #44086「真实 #[cfg] 取代存根」重构：memfd 相关函数改为**函数级** `#[cfg(any(linux, android))]`（无存根）；OHOS 端采用其 cfg + 保留「OHOS 一律不可用 memfd」的提前返回（`Memfd` 变体加 `allow(dead_code)`） | 上游再改这些 cfg 时保留 OHOS 早退 |
+| `src/spawn/process.rs` | 上游移除 Windows 存根（真实 cfg）；OHOS 端的 `prewarm()` 调用在 `#[cfg(target_env = "ohos")]` 块内 → 接受上游的删除 | 同上 |
+| `test/internal/source-lints/dead-code-escape-limits.json` | 上游删除该 lint 与其清单（测试改为自算）→ 接受删除，不再维护 OHOS 版清单 | 上游恢复该 lint 时复评 |
 | runner 看门狗（2026-09-26 追加） | module-graph 家族（`module-graph`/`-io`/`-compile`/`-workers`）WT 600→**900s**（单跑 2-3 分钟，全量高负载下多次超时）；重试名单再补 `module-graph-io`、`026039` | 同上 |
 
 **运行时缺陷（2026-09-20，已修复）**：在 PTY 终端的读取器仍活跃时执行

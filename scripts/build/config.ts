@@ -1005,7 +1005,17 @@ export function resolveConfig(partial: PartialConfig, toolchain: Toolchain): Con
   // emitRust() reports that.
   const clangMajor = majorOf(toolchain.clangVersion);
   const rustLlvmMajor = majorOf(toolchain.rustLlvmVersion);
-  if (clangMajor !== undefined && rustLlvmMajor !== undefined && clangMajor !== rustLlvmMajor) {
+  // OHOS: the port's pinned rustc answers LLVM 22 while the OHOS SDK ships clang
+  // 23, and the nightly cannot be moved in this environment. The link reads only
+  // rustc's *older* bitcode, which a newer lld reads fine (LLVM bitcode is
+  // forward-compatible), and the OHOS build passes `--lto=off`.
+  const llvmMajorsMayDiffer = ohos;
+  if (
+    !llvmMajorsMayDiffer &&
+    clangMajor !== undefined &&
+    rustLlvmMajor !== undefined &&
+    clangMajor !== rustLlvmMajor
+  ) {
     throw new BuildError(
       `clang is LLVM ${toolchain.clangVersion} and rustc's LLVM is ${toolchain.rustLlvmVersion}; they have to be the same major version`,
       {
