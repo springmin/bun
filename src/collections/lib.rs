@@ -8,7 +8,7 @@
     allocator_api,
     core_intrinsics
 )]
-#![allow(incomplete_features)]
+#![allow(incomplete_features, internal_features)]
 #![warn(unused_must_use)]
 
 pub mod hive_array;
