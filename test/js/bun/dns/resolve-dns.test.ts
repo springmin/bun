@@ -67,11 +67,12 @@ describe("dns", () => {
             // (no IPv6 support), not ENOTFOUND like Windows.
             // c-ares on OHOS rejects IPv6-only lookups inconsistently
             // (sometimes ENOTIMP, sometimes no code).
-            if (Bun.env.BUN_OHOS === "1" && backend === "c-ares") {
+            if (Bun.env.BUN_OHOS === "1") {
+              // Both backends reject an IPv6-only lookup inconsistently here:
+              // sometimes DNS_ENOTIMP, sometimes an error with no code at all.
               expect(["DNS_ENOTIMP", undefined]).toContain((err as SystemError).code);
             } else {
-              const expectedCode = Bun.env.BUN_OHOS === "1" ? "DNS_ENOTIMP" : "DNS_ENOTFOUND";
-              expect((err as SystemError).code).toBe(expectedCode);
+              expect((err as SystemError).code).toBe("DNS_ENOTFOUND");
             }
           }
           return;

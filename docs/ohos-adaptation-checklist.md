@@ -173,6 +173,9 @@
 | `test/bundler/bun-build-compile.test.ts` | OHOS 上**被执行的二进制不可再写入**（`open()` → EPERM）：`a module whose bytecode the run did not use…` 与 `a payload record that does not check out` 改为把编辑写入**副本**并运行副本（`chmodSync 0755` 保持可执行）；`an order file that is a pipe`（`--bytecode-order=/dev/stdin`）在 OHOS 跳过（沙箱无 `/dev/stdin`） | 上游改这些用例时保留 |
 | `test/regression/issue/026039.test.ts` | 无 DNS 时错误为 `DNSResolveFailed`（消息中无 registry URL）→ OHOS 接受该错误、跳过 URL 断言 | 设备可解析 DNS 时复评 |
 | `src/sys/ohos_sign_io.rs`（运行时修复） | `has_elf_magic`/`read_file` 的 `openat` 会拿到**最低空闲编号**：当调用方关掉了自己的 fd 0/1/2 时，打开的签名目标落在该编号上，而 `FdExt::close` 与 `File` 的 Drop 都会**跳过 stdio 编号**（防误关 stdin/stdout/stderr）→ fd 永不关闭。改为 `open_above_stdio`（`openat` 后用 `bun_sys::move_above_stdio` 移到 ≥3 再返回）。上游 `spawn while fd 0,1,2 is closed` 13 个新用例由此转绿 | 上游改 `FdExt::close` 的 stdio 策略或该文件时复评 |
+| `test/js/bun/test/test-test.test.ts` | 无效语法用例的时长归一化正则只处理 `[Nms]`，慢设备报告 `[N.NNs]` → OHOS 上先把 `[N.NNs]` 折成 `[xx ms]` | 上游改该快照时保留 |
+| `test/js/bun/dns/resolve-dns.test.ts` | IPv6-only 查询在 OHOS 的两个 backend 都可能返回**无 code 的错误** → OHOS 统一接受 `DNS_ENOTIMP` 或 `undefined` | 设备支持 IPv6 时复评 |
+| `test/js/node/http/node-http-req-complete.test.ts` | 「all tests pass in Node.js」对照用例在 OHOS 跳过：设备 node（v26.8.1）在本文件有 2 个 `res.end(chunk) after the client went away` 子测试失败，不能作为基准 | 设备 node 版本/行为变化时复评 |
 | runner 看门狗（2026-09-26 追加） | module-graph 家族（`module-graph`/`-io`/`-compile`/`-workers`）WT 600→**900s**（单跑 2-3 分钟，全量高负载下多次超时）；重试名单再补 `module-graph-io`、`026039` | 同上 |
 
 **运行时缺陷（2026-09-20，已修复）**：在 PTY 终端的读取器仍活跃时执行

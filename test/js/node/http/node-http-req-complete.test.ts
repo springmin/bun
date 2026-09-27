@@ -403,7 +403,10 @@ if (typeof Bun !== "undefined") {
   const node = nodeExe();
 
   describe("Node.js compatibility", () => {
-    (node ? test : test.skip)("all tests pass in Node.js", async () => {
+    // OHOS: the device's node build fails two of this file's subtests
+    // (res.end(chunk) after the client went away), so it cannot serve as the
+    // reference the comparison assumes.
+    (node && !(Bun.env.BUN_OHOS === "1") ? test : test.skip)("all tests pass in Node.js", async () => {
       // A direct run, not `node --test`: the runner mode forks a second node
       // process per file. node:test still exits non-zero on any failure.
       await using proc = Bun.spawn({

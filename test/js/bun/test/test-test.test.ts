@@ -300,7 +300,10 @@ it("should return non-zero exit code for invalid syntax", async () => {
       env: bunEnv,
     });
     const err = (await stderr.text()).replaceAll("\\", "/");
-    expect(err.replaceAll(test_dir.replaceAll("\\", "/"), "<dir>").replaceAll(/\[(.*)\ms\]/g, "[xx ms]"))
+    // OHOS: a slow file reports its duration in seconds ("[1.23s]"); fold it
+    // into the same placeholder the millisecond form uses.
+    const durations = Bun.env.BUN_OHOS === "1" ? err.replaceAll(/\[[0-9.]+s\]/g, "[xx ms]") : err;
+    expect(durations.replaceAll(test_dir.replaceAll("\\", "/"), "<dir>").replaceAll(/\[(.*)\ms\]/g, "[xx ms]"))
       .toMatchInlineSnapshot(`
       "
       bad.test.js:
