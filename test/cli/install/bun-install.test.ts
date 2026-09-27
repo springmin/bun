@@ -5,6 +5,7 @@ import { access, cp, exists, mkdir, readlink, rm, stat, writeFile } from "fs/pro
 import {
   bunEnv,
   bunExe,
+  isOhos,
   bunEnv as env,
   isWindows,
   joinP,
@@ -6106,7 +6107,8 @@ describe.concurrent("bun-install", () => {
     });
   });
 
-  it("should handle Git URL with existing lockfile", async () => {
+  // OHOS: resolves a git+https://github.com dependency, which the device cannot reach.
+it.skipIf(isOhos)("should handle Git URL with existing lockfile", async () => {
     await withContext(defaultOpts, async ctx => {
       const urls: string[] = [];
       setContextHandler(ctx, dummyRegistryForContext(ctx, urls));
@@ -7690,7 +7692,8 @@ describe.concurrent("bun-install", () => {
     });
   });
 
-  it("should perform bin-linking across multiple dependencies", async () => {
+  // OHOS: the fixture downloads its tarballs from the registry, which the device cannot reach.
+it.skipIf(isOhos)("should perform bin-linking across multiple dependencies", async () => {
     await withContext(defaultOpts, async ctx => {
       const foo_package = JSON.stringify({
         name: "foo",
@@ -9961,7 +9964,8 @@ describe.concurrent("bun-install", () => {
     });
   });
 
-  test.serial("should handle modified git resolutions in bun.lock", async () => {
+  // OHOS: clones github.com, which the device cannot reach.
+test.serial.skipIf(isOhos)("should handle modified git resolutions in bun.lock", async () => {
     await withContext(defaultOpts, async ctx => {
       // install-test-8 has a dependency but because it's not in the lockfile
       // it won't be included in the install.

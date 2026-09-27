@@ -176,6 +176,8 @@
 | `test/js/bun/test/test-test.test.ts` | 无效语法用例的时长归一化正则只处理 `[Nms]`，慢设备报告 `[N.NNs]` → OHOS 上先把 `[N.NNs]` 折成 `[xx ms]` | 上游改该快照时保留 |
 | `test/js/bun/dns/resolve-dns.test.ts` | IPv6-only 查询在 OHOS 的两个 backend 都可能返回**无 code 的错误** → OHOS 统一接受 `DNS_ENOTIMP` 或 `undefined` | 设备支持 IPv6 时复评 |
 | `test/js/node/http/node-http-req-complete.test.ts` | 「all tests pass in Node.js」对照用例在 OHOS 跳过：设备 node（v26.8.1）在本文件有 2 个 `res.end(chunk) after the client went away` 子测试失败，不能作为基准 | 设备 node 版本/行为变化时复评 |
+| `test/cli/install/bun-install.test.ts` | 3 个网络依赖用例在 OHOS 跳过：`should handle Git URL with existing lockfile`、`should perform bin-linking across multiple dependencies`（registry 下载）、`should handle modified git resolutions in bun.lock`（克隆 github.com） | 设备可访问网络时复评 |
+| `test/js/bun/shell/leak.test.ts` | `fd leak`/`mem leak` 的 100s 用例预算在 OHOS 负载下不足（多例 100.0s 超时）→ OHOS 提到 300s | 上游改预算时保留 |
 | runner 看门狗（2026-09-26 追加） | module-graph 家族（`module-graph`/`-io`/`-compile`/`-workers`）WT 600→**900s**（单跑 2-3 分钟，全量高负载下多次超时）；重试名单再补 `module-graph-io`、`026039` | 同上 |
 
 **运行时缺陷（2026-09-20，已修复）**：在 PTY 终端的读取器仍活跃时执行
