@@ -38,14 +38,11 @@ pub use posix_spawn::WaitPidResult;
 /// higher-tier callers (`bun_runtime::api::bun_spawn::stdio`, `Terminal`)
 /// keep their `bun_spawn::process::spawn_sys::*` import path.
 pub mod spawn_sys {
-    // POSIX-only — memfd / FD_CLOEXEC have no Windows equivalent
-    // (`can_use_memfd` is always-false there and `set_close_on_exec` is a
-    // no-op since Win32 handles default to non-inheritable). Gated so the
-    // re-export resolves without `bun_sys` having to ship Windows stubs.
-    #[cfg(any(target_os = "linux", target_os = "android"))]
-    pub use bun_sys::{MemfdFlags, MemfdFlags as MemfdFlag, memfd_create};
+    // memfd is Linux; FD_CLOEXEC is POSIX (Win32 handles are non-inheritable unless asked).
     #[cfg(unix)]
-    pub use bun_sys::{can_use_memfd, set_close_on_exec};
+    pub use bun_sys::set_close_on_exec;
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    pub use bun_sys::{MemfdFlags, MemfdFlags as MemfdFlag, can_use_memfd, memfd_create};
 }
 
 bun_core::declare_scope!(PROCESS, visible);
@@ -54,12 +51,14 @@ bun_core::declare_scope!(PROCESS, visible);
 // The raw OS spawn layer (option/result structs, `Rusage`, `spawn_process_posix`)
 // moved into the leaf `bun_spawn_sys` crate so it has no event-loop dependency.
 // Re-export here so existing `bun_spawn::process::*` paths keep resolving.
+#[cfg(any(target_os = "linux", target_os = "android"))]
+pub use bun_spawn_sys::PidFdType;
 pub use bun_spawn_sys::spawn_process::rusage_zeroed;
 #[cfg(windows)]
 pub use bun_spawn_sys::uv_getrusage;
 pub use bun_spawn_sys::{
-    Argv, CStrPtr, Dup2, Envp, ExtraPipe, PidFdType, PidT, PosixSpawnOptions, PosixSpawnResult,
-    PosixStdio, Rusage, StdioKind,
+    Argv, CStrPtr, Dup2, Envp, ExtraPipe, PidT, PosixSpawnOptions, PosixSpawnResult, PosixStdio,
+    Rusage, StdioKind,
 };
 
 /// Whether the process-exit poll should be registered one-shot.
@@ -1462,18 +1461,6 @@ pub mod waiter_thread_posix {
     }
 }
 
-/// Windows stub mirroring the unix `WaiterThreadPosix as WaiterThread` re-export.
-/// An uninhabited type with associated fns so callers can use
-/// `WaiterThread::should_use_waiter_thread()` uniformly on both platforms.
-#[cfg(not(unix))]
-pub enum WaiterThread {}
-
-#[cfg(not(unix))]
-impl WaiterThread {
-    pub fn set_should_use_waiter_thread() {}
-    pub fn prewarm() {}
-}
-
 // (PosixSpawnOptions / StdioKind / Dup2 / PosixStdio moved to bun_spawn_sys —
 // re-exported above. Windows option/result types stay here: they embed
 // `*mut Process` / `EventLoopHandle` and so cannot live in the leaf -sys crate.)
@@ -2351,8 +2338,6 @@ mod spawn_process_body {
 
             #[cfg(windows)]
             pub windows: WindowsOptions,
-            #[cfg(not(windows))]
-            pub windows: (),
         }
 
         #[derive(Clone, Copy, PartialEq, Eq)]
@@ -2418,8 +2403,6 @@ mod spawn_process_body {
                     argv0: None,
                     #[cfg(windows)]
                     windows: Default::default(),
-                    #[cfg(not(windows))]
-                    windows: (),
                 }
             }
         }
@@ -2439,8 +2422,6 @@ mod spawn_process_body {
                     new_process_group,
                     #[cfg(windows)]
                     windows: self.windows.clone(),
-                    #[cfg(not(windows))]
-                    windows: (),
                     ..Default::default()
                 }
             }
@@ -3041,7 +3022,10 @@ mod spawn_process_body {
             /// returns, and on resume gives the terminal back to the script (only
             /// if the shell `fg`'d us — for `bg` the shell keeps foreground and
             /// the script runs as a background pgroup like any other job).
-            #[cfg(all(any(target_os = "linux", target_os = "android", target_os = "macos"), not(target_env = "ohos")))]
+            #[cfg(all(
+                any(target_os = "linux", target_os = "android", target_os = "macos"),
+                not(target_env = "ohos")
+            ))]
             fn on_child_stopped(&self) {
                 if self.prev <= 0 {
                     return; // non-TTY: never asked for stop reports
@@ -3300,7 +3284,10 @@ mod spawn_process_body {
                         &mut out_fds_to_wait_for,
                         &mut out_fds,
                     );
-                    #[cfg(all(any(target_os = "linux", target_os = "android"), not(target_env = "ohos")))]
+                    #[cfg(all(
+                        any(target_os = "linux", target_os = "android"),
+                        not(target_env = "ohos")
+                    ))]
                     let r: Option<Maybe<Status>> = wait_linux_signalfd(
                         process.pid,
                         ppid,
@@ -3705,7 +3692,10 @@ mod spawn_process_body {
             }
         }
 
-        #[cfg(all(any(target_os = "linux", target_os = "android"), not(target_env = "ohos")))]
+        #[cfg(all(
+            any(target_os = "linux", target_os = "android"),
+            not(target_env = "ohos")
+        ))]
         fn wait_linux_signalfd(
             child: libc::pid_t,
             ppid: libc::pid_t,

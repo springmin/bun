@@ -1,9 +1,11 @@
 #[cfg(any(target_os = "linux", target_os = "android"))]
 use bun_collections::VecExt;
 use bun_jsc::{self as jsc, JSGlobalObject, JSValue, JsResult};
+#[cfg(any(target_os = "linux", target_os = "android"))]
+use bun_sys::FdExt as _;
 #[cfg(windows)]
 use bun_sys::windows::libuv as uv;
-use bun_sys::{self as sys, Fd, FdExt as _};
+use bun_sys::{self as sys, Fd};
 
 // `bun.jsc.WebCore` lives in this crate (not `bun_jsc`); alias so the body can
 // say `webcore::ReadableStream` / `webcore::body::Value`.
@@ -59,10 +61,8 @@ pub(crate) enum Stdio {
     Dup2(Dup2),
     Path(PathLike<'static>),
     Blob(webcore::blob::Any),
-    #[cfg_attr(
-        any(not(any(target_os = "linux", target_os = "android")), target_env = "ohos"),
-        allow(dead_code)
-    )]
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    #[cfg_attr(target_env = "ohos", allow(dead_code))]
     Memfd(Fd),
     Pipe,
     /// Like `Pipe` at indices >= 3, but the parent end of the socketpair is
@@ -119,14 +119,15 @@ impl Stdio {
         }
     }
 
+    #[cfg(any(target_os = "linux", target_os = "android"))]
     pub(crate) fn can_use_memfd(&self) -> bool {
         // OHOS: memfd writes not visible to fstat (see use_memfd).
-        #[cfg(not(all(any(target_os = "linux", target_os = "android"), not(target_env = "ohos"))))]
+        #[cfg(target_env = "ohos")]
         {
             return false;
         }
 
-        #[cfg(all(any(target_os = "linux", target_os = "android"), not(target_env = "ohos")))]
+        #[cfg(not(target_env = "ohos"))]
         match self {
             Self::Blob(blob) => !blob.needs_to_read_file(),
             Self::Memfd(_) => true,
@@ -136,17 +137,18 @@ impl Stdio {
         }
     }
 
+    #[cfg(any(target_os = "linux", target_os = "android"))]
     pub(crate) fn use_memfd(&mut self, index: u32) -> bool {
         // OHOS: memfd writes not visible to fstat after child exits
         // (verified 2026-06-11: dup2(memfd,1/2) → child writes → fstat size=0).
         // Fall through to socketpair on OHOS.
-        #[cfg(not(all(any(target_os = "linux", target_os = "android"), not(target_env = "ohos"))))]
+        #[cfg(target_env = "ohos")]
         {
             let _ = index;
             return false;
         }
 
-        #[cfg(all(any(target_os = "linux", target_os = "android"), not(target_env = "ohos")))]
+        #[cfg(not(target_env = "ohos"))]
         {
             use crate::api::bun_process::spawn_sys;
             if !spawn_sys::can_use_memfd() {
@@ -198,10 +200,6 @@ impl Stdio {
                     }
                 }
             }
-
-            // Note: reshaped for borrowck — `remain` borrows `*self`, so we
-            // must drop it before mutating `self`. Shadowing ends the borrow here.
-            let _ = remain;
 
             // Assigning to `*self` drops the previous variant via `Drop`
             // (and closes a prior `.memfd`).
@@ -303,10 +301,8 @@ impl Stdio {
             Self::SocketFd => buffer(),
             Self::Ipc => ipc(),
             Self::Fd(fd) => SpawnOptionsStdio::Pipe(*fd),
-            #[cfg(not(windows))]
+            #[cfg(any(target_os = "linux", target_os = "android"))]
             Self::Memfd(fd) => SpawnOptionsStdio::Pipe(*fd),
-            #[cfg(windows)]
-            Self::Memfd(_) => panic!("This should never happen"),
             Self::Path(pathlike) => {
                 SpawnOptionsStdio::Path(pathlike.slice().to_vec().into_boxed_slice())
             }
@@ -667,6 +663,7 @@ impl Stdio {
     }
 }
 
+#[cfg(any(target_os = "linux", target_os = "android"))]
 impl Stdio {
     /// Move the memfd out (ownership passes to the caller); `self` becomes `Ignore`.
     pub(crate) fn take_memfd(&mut self) -> Option<Fd> {
@@ -683,6 +680,7 @@ impl Drop for Stdio {
             Self::Blob(blob) => {
                 blob.detach();
             }
+            #[cfg(any(target_os = "linux", target_os = "android"))]
             Self::Memfd(fd) => {
                 fd.close();
             }
