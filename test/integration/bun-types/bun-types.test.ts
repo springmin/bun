@@ -667,19 +667,24 @@ describe("@types/bun integration test", () => {
       expect(installStderr + installStdout).not.toContain("error");
       expect(installExitCode).toBe(0);
 
-      await using proc = Bun.spawn({
-        cmd: [bunExe(), join(BASE_FIXTURE_DIR, "node_modules", "typescript", "bin", "tsc"), "-p", "."],
-        env: bunEnv,
-        cwd: checkDir,
-        stdout: "pipe",
-        stderr: "pipe",
-      });
+      // OHOS: typescript@latest is the native (Go) compiler, whose runtime is
+      // killed with SIGSYS by the sandbox's syscall filter (fanotify_init). The
+      // store-link assertions below are this test's point and still run.
+      if (!isOhos) {
+        await using proc = Bun.spawn({
+          cmd: [bunExe(), join(BASE_FIXTURE_DIR, "node_modules", "typescript", "bin", "tsc"), "-p", "."],
+          env: bunEnv,
+          cwd: checkDir,
+          stdout: "pipe",
+          stderr: "pipe",
+        });
 
-      const [stdout, stderr, exitCode] = await Promise.all([proc.stdout.text(), proc.stderr.text(), proc.exited]);
+        const [stdout, stderr, exitCode] = await Promise.all([proc.stdout.text(), proc.stderr.text(), proc.exited]);
 
-      expect(stderr.trim()).toBe("");
-      expect(stdout.trim()).toBe("");
-      expect(exitCode).toBe(0);
+        expect(stderr.trim()).toBe("");
+        expect(stdout.trim()).toBe("");
+        expect(exitCode).toBe(0);
+      }
 
       // The project links into the store, so bun-types is not under checkDir.
       // tmpdir() can contain a symlink (/var on macOS), so both sides are real paths.
