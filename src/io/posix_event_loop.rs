@@ -324,6 +324,9 @@ impl FilePoll {
         if flags.contains(Flags::Socket) {
             return FileType::Socket;
         }
+        if flags.contains(Flags::Tty) {
+            return FileType::File;
+        }
         if flags.contains(Flags::Nonblocking) {
             return FileType::NonblockingPipe;
         }
@@ -675,7 +678,9 @@ impl FilePoll {
                 // repointed at this poll; MOD is safe when the entry belongs to
                 // this same poll too, and unlike DEL+ADD it cannot drop a live
                 // registration.
-                ctl = unsafe { linux::epoll_ctl(watcher_fd, EPOLL::CTL_MOD, fd.native(), &raw mut event) };
+                ctl = unsafe {
+                    linux::epoll_ctl(watcher_fd, EPOLL::CTL_MOD, fd.native(), &raw mut event)
+                };
             }
             if let Some(errno) = errno_sys(ctl, sys::Tag::epoll_ctl) {
                 self.deactivate(loop_);
@@ -1245,6 +1250,7 @@ pub enum Flags {
     IgnoreUpdates,
 
     Socket,
+    Tty,
 
     /// Opt-in only (set via `FilePollRef::set_flag` before the first
     /// registration; currently only `Bun.Terminal`'s PTY-master reader).
