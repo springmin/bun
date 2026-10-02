@@ -616,7 +616,10 @@ describe.concurrent("bun test --isolate", () => {
       leak: `
         const dial = (options = {}) =>
           new Bun.RedisClient("redis://127.0.0.1:" + port, { autoReconnect: false, ...options });
-        const first = dial();
+        // OHOS: the mock server answers the handshake from this file's parent
+        // process; while the whole file's isolate children run, the default 10s
+        // is not enough and the client closes the connection instead.
+        const first = dial({ connectionTimeout: ${isOhos ? 60_000 : 10_000} });
         first.onclose = () => {
           dial({ connectionTimeout: timeout }).connect().catch(() => {});
         };
@@ -651,10 +654,12 @@ describe.concurrent("bun test --isolate", () => {
         import { test } from "bun:test";
         import fs from "node:fs";
         ${shared}
+        // OHOS: the handshake with the mock server can exceed the default 5s
+        // while the sibling isolate runs load the device.
         test("leak a client that dials again when it is closed", async () => {
           const entered = (handler: string) => fs.appendFileSync(process.env.ENTERED_FILE!, handler + "\\n");
           ${leak}
-        });
+        }, ${isOhos ? 30_000 : 5_000});
       `,
         "b-check.test.ts": `
         import { test, expect } from "bun:test";
