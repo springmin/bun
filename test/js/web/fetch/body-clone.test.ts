@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { bunEnv, bunExe, isASAN, isDebug, isLinux, isWindows, tempDirWithFiles } from "harness";
+import { bunEnv, bunExe, isASAN, isDebug, isLinux, isOhos, isWindows, tempDirWithFiles } from "harness";
 import { closeSync, openSync, unlinkSync, utimesSync, writeFileSync } from "node:fs";
 import net from "node:net";
 import { join } from "node:path";
@@ -1306,11 +1306,13 @@ describe("clone() of a body over an unread native stream keeps the Blob behind i
       const file = Bun.file("/proc/sys/kernel/ostype");
       const original = new Response(file);
       const clone = original.clone();
+      // OHOS: the kernel answers "HarmonyOS" here.
+      const ostype = isOhos ? "HarmonyOS\n" : "Linux\n";
       expect({
         original: await original.text(),
         clone: await clone.text(),
         file: await file.text(),
-      }).toEqual({ original: "Linux\n", clone: "Linux\n", file: "Linux\n" });
+      }).toEqual({ original: ostype, clone: ostype, file: ostype });
     });
   });
 
