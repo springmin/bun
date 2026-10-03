@@ -8,6 +8,7 @@ import {
   bunRun,
   tls as COMMON_CERT_,
   isASAN,
+  isOhos,
   nodeExe,
   rejectUnauthorizedScope,
   tempDir,
@@ -4055,7 +4056,10 @@ describe("new tls.TLSSocket(socket) on the client side", () => {
     });
 
     // Not covered here: setSession() after the handshake started on a tls.connect() socket aborts the process (#41671).
-    it.skipIf(skip)("a session that is set before the handshake starts is resumed", async () => {
+    // OHOS: the device's node does not resume a session passed with a socket
+    // (`tls.connect({ socket, session })` and `new TLSSocket(socket, { session })`
+    // report false); the bun leg above still runs.
+    it.skipIf(skip || (isOhos && _runtime === "node"))("a session that is set before the handshake starts is resumed", async () => {
       expect(await session()).toEqual({
         "tls.connect({ port, session })": true,
         "tls.connect({ socket, session })": true,

@@ -419,6 +419,10 @@ run_test() {
     */js/bun/http/serve-http2-lifecycle.test.ts|*/js/bun/shell/shell-hang.test.ts|\
     */js/bun/spawn/spawn-stdio-syscall-error.test.ts)
       _retry_on_fail=1 ;;
+    # 2026-10-03 全量：duplex-proxy 用例访问公网 bun.sh，设备现在有网；
+    # 全文件高并发下连接偶发 ECONNRESET/超时（单跑 10/0）
+    */js/node/tls/node-tls-connect.test.ts)
+      _retry_on_fail=1 ;;
     # 2026-09-24 全量：重型/负载敏感文件（单跑均通过；高负载下会文件级超时或丢用例）
     */js/bun/import-attributes/import-attributes.test.ts|\
     */js/bun/module-graph/module-graph-compile.test.ts|\
