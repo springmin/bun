@@ -62,21 +62,29 @@ extern "C" int32_t set_process_priority(int32_t pid, int32_t priority)
 #if !OS(WINDOWS)
 extern "C" bool is_executable_file(const char* path)
 {
-#if defined(O_EXEC)
+#if defined(__OHOS__)
+    // OHOS: open(O_EXEC) skips the x-permission-bit check (kernel bug), so use access(X_OK); access passes directories too (x = traversal), so require a regular file first.
+    struct stat st;
+    if (stat(path, &st) != 0)
+        return false;
+    if (!S_ISREG(st.st_mode))
+        return false;
+    return access(path, X_OK) == 0;
+#elif defined(O_EXEC)
     // O_EXEC is macOS specific
     int fd = open(path, O_EXEC | O_CLOEXEC | O_NONBLOCK | O_NOCTTY, 0);
     if (fd < 0)
         return false;
     close(fd);
     return true;
-#endif // defined(O_EXEC)
-
+#else
     struct stat st;
     if (stat(path, &st) != 0)
         return false;
 
     // regular file and user can execute
     return S_ISREG(st.st_mode) && (st.st_mode & S_IXUSR);
+#endif
 }
 #endif
 
