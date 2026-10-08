@@ -122,6 +122,7 @@ const SHIM_C = /* c */ `
 
 static long (*real_syscall)(long, ...);
 static int writer_mods;
+static int writer_arms;
 static int pidfd_adds;
 
 static int is_pidfd(int fd) {
@@ -150,6 +151,13 @@ static int should_fail(long op, int fd, struct epoll_event *event) {
     if (op != EPOLL_CTL_MOD || !(event->events & EPOLLOUT) || ioctl(fd, TIOCGPTN, &pty_number) != 0) return 0;
     const char *skip = getenv("FAIL_EPOLL_CTL_SKIP");
     return writer_mods++ >= (skip ? atoi(skip) : 0);
+  }
+  // OHOS: an initially-empty writer is unregistered at init (Terminal.rs), so
+  // write()'s first re-arm is an ADD and later ones MODs; count both kinds.
+  if (strcmp(mode, "pty-writer-any") == 0) {
+    if ((op != EPOLL_CTL_ADD && op != EPOLL_CTL_MOD) || !(event->events & EPOLLOUT) || ioctl(fd, TIOCGPTN, &pty_number) != 0) return 0;
+    const char *skip = getenv("FAIL_EPOLL_CTL_SKIP");
+    return writer_arms++ >= (skip ? atoi(skip) : 0);
   }
   long failing_op = strcmp(mode, "pty-reader-add") == 0 ? EPOLL_CTL_ADD : EPOLL_CTL_MOD;
   return op == failing_op && (event->events & EPOLLIN) && ioctl(fd, TIOCGPTN, &pty_number) == 0;
@@ -644,7 +652,15 @@ describe.skipIf(!isLinux || !cc)("a Bun.Terminal whose writer fails to re-arm it
     // owed when the second one fails.
     ["a write behind queued bytes", "terminal-write-twice", "1"],
   ])("%s releases the terminal", async (_, kind, skip) => {
-    expect(await runFixture(kind, { FAIL_EPOLL_CTL: "pty-writer-mod", FAIL_EPOLL_CTL_SKIP: skip })).toEqual({
+    expect(
+      await runFixture(kind, {
+        FAIL_EPOLL_CTL: isOHOS ? "pty-writer-any" : "pty-writer-mod",
+        // OHOS: the writer is unregistered after start() (see Terminal.rs), so
+        // write()'s first re-arm is an ADD and the start() registration is
+        // counted before it, hence the skip shifts by one.
+        FAIL_EPOLL_CTL_SKIP: isOHOS ? String(Number(skip) + 1) : skip,
+      }),
+    ).toEqual({
       report: { error: null, write: { closed: true, drains: 0 }, leakedFds: 0, leakedWrappers: 0 },
       stderr: "",
       exitCode: 0,
