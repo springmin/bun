@@ -1,0 +1,72 @@
+diff --git a/Source/WTF/wtf/posix/ThreadingPOSIX.cpp b/Source/WTF/wtf/posix/ThreadingPOSIX.cpp
+index 8146af32e594..160c49867f2c 100644
+--- a/Source/WTF/wtf/posix/ThreadingPOSIX.cpp
++++ b/Source/WTF/wtf/posix/ThreadingPOSIX.cpp
+@@ -121,6 +121,26 @@ public:
+         while (sem_wait(&m_platformSemaphore) == -1 && errno == EINTR) { }
+     }
+ 
++#if defined(__OHOS__)
++    // Bounded wait: returns false on timeout so the suspender can resend the
++    // signal instead of waiting forever for a wake-up that never comes.
++    bool waitFor(double relativeSeconds)
++    {
++        struct timespec deadline;
++        clock_gettime(CLOCK_REALTIME, &deadline);
++        time_t wholeSeconds = static_cast<time_t>(relativeSeconds);
++        deadline.tv_sec += wholeSeconds;
++        deadline.tv_nsec += static_cast<long>((relativeSeconds - wholeSeconds) * 1e9);
++        if (deadline.tv_nsec >= 1000000000L) {
++            deadline.tv_sec += 1;
++            deadline.tv_nsec -= 1000000000L;
++        }
++        int rc;
++        while ((rc = sem_timedwait(&m_platformSemaphore, &deadline)) == -1 && errno == EINTR) { }
++        return rc == 0;
++    }
++#endif
++
+     void post()
+     {
+         sem_post(&m_platformSemaphore);
+@@ -225,6 +245,18 @@ void Thread::signalHandlerSuspendResume(int, siginfo_t*, void* ucontext)
+     // http://pubs.opengroup.org/onlinepubs/9699919799/basedefs/V1_chap04.html#tag_04_11
+     globalSemaphoreForSuspendResume->post();
+ 
++#if defined(__OHOS__)
++    // OHOS (HongMeng kernel): sigsuspend() can fail to return after its wake-up
++    // signal was handled when the process is stopped and continued, leaving
++    // this thread and the suspender stuck for good. sigtimedwait() is woken
++    // reliably; the request flags are the state, so a timeout just re-checks.
++    sigset_t waitSet;
++    sigemptyset(&waitSet);
++    sigaddset(&waitSet, g_wtfConfig.sigThreadSuspendResume);
++    const timespec wakeInterval { 0, 100 * 1000 * 1000 };
++    while (pendingSuspendResumeRequestForCurrentThread() != SuspendResumeRequest::Resume)
++        sigtimedwait(&waitSet, nullptr, &wakeInterval);
++#else
+     // Reaching here, sigThreadSuspendResume is blocked in this handler (this is configured by sigaction's sa_mask).
+     // So before calling sigsuspend, sigThreadSuspendResume to this thread is deferred. This ensures that the handler is not executed recursively.
+     sigset_t blockedSignalSet;
+@@ -234,6 +266,7 @@ void Thread::signalHandlerSuspendResume(int, siginfo_t*, void* ucontext)
+     // sigThreadSuspendResume stays blocked between the check and sigsuspend(), so the request cannot be missed.
+     while (pendingSuspendResumeRequestForCurrentThread() != SuspendResumeRequest::Resume)
+         sigsuspend(&blockedSignalSet);
++#endif
+     clearSuspendResumeRequest();
+ 
+     thread->m_platformRegisters = nullptr;
+@@ -663,7 +696,13 @@ auto Thread::suspend(const ThreadSuspendLocker&) -> std::expected<void, Platform
+                 clearSuspendResumeRequest();
+                 return makeUnexpected(result);
+             }
++#if defined(__OHOS__)
++            // Bounded wait so a lost wake-up leads to a resend instead of an
++            // unbounded wait while holding global locks.
++            globalSemaphoreForSuspendResume->waitFor(0.1);
++#else
+             globalSemaphoreForSuspendResume->wait();
++#endif
+             if (m_platformRegisters)
+                 break;
+             // Because of an alternative signal stack, we failed to suspend this thread.

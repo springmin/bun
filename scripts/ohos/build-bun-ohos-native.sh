@@ -168,6 +168,20 @@ phase_webkit() {
     git checkout "$WEBKIT_COMMIT"
   fi
 
+  # OHOS WTF suspend/resume 加固（sigtimedwait 轮询 + 有界等待），在纯净
+  # checkout 之上应用；守卫式：重复运行/已应用时为 no-op。
+  local wpatch="$REPO_ROOT/patches/webkit/suspend-resume.patch"
+  if [ -f "$wpatch" ]; then
+    cd "$WEBKIT_SRC"
+    if git apply --reverse --check "$wpatch" 2>/dev/null; then
+      ok "WebKit suspend/resume 补丁已应用"
+    else
+      info "应用 WebKit suspend/resume 补丁..."
+      git apply "$wpatch"
+      ok "WebKit suspend/resume 补丁已应用"
+    fi
+  fi
+
   local perl_path
   perl_path=$(command -v perl 2>/dev/null || echo "$HOMEBREW_PREFIX/bin/perl")
   sed -i "s|\"perl\"|\"${perl_path}\"|g" \
