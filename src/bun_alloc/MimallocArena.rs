@@ -549,6 +549,9 @@ unsafe impl Allocator for &MimallocArena {
 // is freed through the other. Copying a reference does not unwind, and moving or dropping one does
 // not touch the heap. `core` has this only for `&A` where `A: Allocator`. `Rc` and `Arc` need it to
 // be `Clone`.
+// The trait is newer than nightly-2026-07-20, which the OHOS build pins; nothing on that
+// toolchain can require it.
+#[cfg(not(target_env = "ohos"))]
 unsafe impl core::alloc::AllocatorClone for &MimallocArena {}
 
 /// Pick `mi_heap_malloc_aligned` only
