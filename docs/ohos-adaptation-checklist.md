@@ -32,6 +32,7 @@
 | `scripts/build/rust.ts` | OHOS target 的 RUSTUP_HOME/CARGO_HOME 持久化 | 上游改 rust 构建时检查 |
 | `scripts/build/rust.ts` / `scripts/build/rust/*.ts`（上游 2026-09-21 重构：每 crate 一条 ninja 边、直接链接 rlibs） | OHOS 适配：① `rust.ts` 的 `CARGO_TARGET_<triple>_LINKER` 指向 `scripts/ohos/sign-linker.sh` 并导出 `OHOS_REAL_CXX`（宿主 build script/proc-macro 链接后签名）② **`bun.ts` 的 `linkImplicitInputs` 写 `exports.list` 的条件必须含 `cfg.ohos`**（否则 ninja 报 `exports.list` missing）③ `flags.ts` 的 OHOS 导出块改用上游的 `--export-dynamic-symbol-list=exports.list` + `--version-script`（上游已删除 `src/symbols.dyn`）④ rlib 模式下 `dead_code`/`unreachable_pub` 变严格：OHOS 门控的未用项要 `pub(crate)`、`#[cfg(not(target_env="ohos"))]` 或 `#[allow(dead_code)]`（`dead-code-escape-limits.json` 含 OHOS 计数） | 上游再改 Rust 构建/链接或 lints 时，按 `test/internal/build-*.test.ts` + 全量回归复验 |
 | WebKit 源获取（gh-proxy 大仓） | depth-1 全量包经 gh-proxy 常 `early EOF`；用 **partial clone**：`git config remote.origin.promisor true && git config remote.origin.partialclonefilter blob:none`，`git fetch --depth 1 --filter=blob:none origin main`，再 `git checkout FETCH_HEAD`（只拉取两版本间增量 blob；2026-09-21 WebKit bump 仅 30 文件差异） | WebKit 升级 fetch 失败时按此流程手动更新源码 |
+| `patches/webkit/suspend-resume.patch` + `phase_webkit()`（`scripts/ohos/build-bun-ohos-native.sh`） | **WTF suspend/resume 加固**（OHOS stop/cont 后 `sigsuspend` 不返回 → JSC 挂起线程死锁）：① `Semaphore::waitFor(double)` 有界等待（`sem_timedwait`）② handler 的 `sigsuspend` 循环在 OHOS 改为 `sigtimedwait`（100ms 周期，条件由上游 `SuspendResumeRequest` 状态驱动）③ `Thread::suspend` 等待改 `waitFor(0.1)`（循环顶部每轮重发）。构建脚本在 checkout 后守卫式 `git apply`（reverse-check 判已应用） | ⚠️ WebKit bump 后确认补丁可在新 commit 上应用（`git apply --check`）；隔离/原子类 + SIGSTOP/CONT 探针复验 |
 | `scripts/build/stream.ts` | OHOS 下构建输出的异步 `WriteStream` 在管道背压时停摆（T50：内核对管道可写事件不投递）：大量输出时静默丢行，重试耗尽后在 `writeAll` 崩溃（WebKit 全量重建时 100% 触发）。修复：`syncWrites`（musl loader 探测）下改为 `writeSync` + EAGAIN 重试（1ms 让出），输出不再丢失；其他平台保持异步 | 上游改 stream.ts 时保留该分支；构建输出量大时复验 |
 | 工具链（brew） | `opt/llvm` 23.1.1（OHOS libc++，ABI `std::__n1`）+ keg-only `opt/lld` 23；`ohos-sdk` 与 llvm 主 formula 冲突已 unlink（`cc/c++` shims 走绝对路径，不受影响）；构建脚本在 `.bin` 补齐 `aarch64-linux-ohos-clang*` 三前缀 | 上游 bump LLVM 必须同步安装对应版本：`tools.ts` 的 `LLVM_VERSION_RANGE` 是硬约束 |
 | `scripts/build/workarounds.ts` | "ohos-node-userinfo-preload" 等 | 上游改 preload 机制时检查 |
@@ -65,7 +66,21 @@
 | `src/spawn_sys/spawn_process.rs` | ① memfd fast-path 三处 `not(target_env="ohos")`（CStr import、'stdio label、use_memfd 块）→ OHOS 回退 socketpair ② **shebang 手动解析**（1004-1090）：OHOS 上 exec 脚本时手动读 shebang 构造 argv（内核 shebang 处理差异） | ⚠️ 上游改 spawn 时检查 memfd 门控 + shebang shim |
 | `src/spawn_sys/lib.rs` | `waiter_thread_flag::SHOULD_USE_WAITER_THREAD` 在 OHOS 默认开启（2026-09-16 移植）：异步子进程退出走 pidfd + 共享 epoll 会丢唤醒——`Bun.serve` 服务 FIFO 响应 + `stop(true)` 之后 `Bun.spawn().exited` 永不 resolve、事件循环忙等、子进程成僵尸；独立 waiter 线程 `poll(eventfd)` 绕开共享循环 | ⚠️ 上游改 waiter 线程/pidfd 路径时检查默认值 |
 | `src/install/PackageManager/PackageManagerLifecycle.rs` | lifecycle PATH 注入：前置 bun_dir + node_dir（`~/.harmonybrew/bin`）+ `NODE=bun`（411-445） | ⚠️ 上游改 PATH 注入时，OHOS 前置必须保留（测试 PATH="" 场景依赖） |
-| `src/io/PipeWriter.rs` | F_SETPIPE_SZ 管道缓冲扩到 1MB（~283，每次写调用，待移到建管道时）；epoll-storm 检测器仅 OHOS 编译（163+） | 上游改 PipeWriter 时检查 |
+| `src/io/PipeWriter.rs` | F_SETPIPE_SZ 管道缓冲扩到 1MB（~283，每次写调用，待移到建管道时）；epoll-storm 检测器仅 OHOS 编译（163+）；`unregister_poll()`（OHOS Terminal 初始空 writer 解注册，防读就绪边沿丢失；首次有数据经 backpressure `register_poll` 重注册） | 上游改 PipeWriter 时检查；terminal 套件复验 |
+| `src/spawn/process.rs`（sync wait 循环 no_orphans 父监视） | 父进程 pidfd（`bun_sys::pidfd_open`）作为第 3 个 pollfd + 无 pidfd 时 100ms 超时轮询 `getppid()`；检测到父死 → `kill_sync_script_tree()` + `Global::exit(129)`。仅当 poll 循环确会运行时清 `PDEATHSIG`（继承 stdio 时保留内核 SIGKILL 兜底） | ⚠️ 上游改该 wait 循环时逐行核验；`BUN_FEATURE_FLAG_NO_ORPHANS=1` 下 kill 父进程应清理子树并以 129 退出 |
+
+### 三-1、OHOS epoll 缺陷恢复链（watchdog / force-drain / Terminal）
+
+另一个已确认的真机内核缺陷（与 T50 不同）：`epoll_ctl` 报成功但内核**静默停止投递**该 fd 的事件（2026-08-20 定位到裸 syscall 级；terminal 的 PTY-master reader 命中，可完全不投递）。2026-10-08 已按上游公式补强为下列恢复链：
+
+| 组件 | 内容 |
+|---|---|
+| `src/io/posix_event_loop.rs` `epoll_rearm_watchdog` | ① `track/untrack`（仅 `Flags::EpollRearmWatch` opt-in 的 fd，当前 = Terminal PTY-master reader）② 后台线程按退避（250ms→1s）发**冗余 `CTL_MOD`** poke ③ **force-drain**：每 100ms tick 把 tracked userdata 交给 loop 线程（`us_wakeup_loop` → uWS post handler → `dispatch_pending`），对每个仍 tracked 的 FilePoll 强制 `update_flags(Readable)`+`on_update`（一次非阻塞读，EAGAIN 即无操作）④ SHUTDOWN/退出握手（`bun_core::add_exit_callback` + `is_exiting`，防退出期跨线程访问已释放 loop）⑤ `CTL_ADD` 遇 `EEXIST` 改发 `CTL_MOD`（关闭 fd 的内核残留项重指向）⑥ 开关：`BUN_DISABLE_EPOLL_REARM_WATCHDOG` |
+| `src/uws_sys/libuwsockets.cpp` + `src/uws_sys/Loop.rs` | `uws_loop_add_post_handler`（C 包装 → `uWS::Loop::addPostHandler`），force-drain 的 loop-thread 派发通道 |
+| `src/runtime/api/bun/Terminal.rs` | reader 启动即带 `EPOLL_REARM_WATCH`；初始空 writer `unregister_poll()`；`flush_kernel_buffered_output()`（close/dispose 前把内核缓冲尾读净，防 `await using` 提前关 fd 丢字节）；`deferred_exit`（同步完成的首读在其一次性通知丢失前暂存、init 末尾回放） |
+| `packages/bun-usockets/src/eventing/epoll_kqueue.c` | mimalloc 空闲交接在 OHOS 下 **1ms 限速**（防每次 park 一次 futex 唤醒+owner 自旋）；`has_epoll_pwait2=0` 既定 |
+
+**merge 检查点**：上游改 `FilePoll::register_with_fd*`/`unregister*`/`update_flags`/`on_update`、uWS Loop 的 post-handler API、Terminal 启动/关闭顺序时，逐项核对上述钩子仍在且签名兼容；terminal 套件 + `spawn-pipe-start-error`（writer 注入已按 §六 适配）+ 空闲 loadavg 复验。
 
 ## 四、syscall 层适配（src/sys/lib.rs + linux_syscall.rs）
 
@@ -93,7 +108,7 @@
 | `src/jsc/bindings/highway_json.cpp` / `src/jsc/bindings/highway_sourcemap.cpp` / `src/jsc/bindings/highway_xml.cpp` | aarch64 SVE 禁用（`HWY_DISABLED_TARGETS`）——scalable SVE 缺符号 | 上游改 highway 时检查 |
 | `src/jsc/bindings/webcore/MessagePort.h` / `src/jsc/bindings/webcore/MessagePort.cpp` | ~~`m_closeEventPending` leak fix~~ 该字段从未被置位（已清理）；保留 `m_closeEventDispatched` 的 pending-activity 逻辑 | 上游改 MessagePort 生命周期时检查 |
 | `src/jsc/bindings/bun-spawn.cpp` | OHOS spawn 平台分支 | 上游改时检查 |
-| `src/jsc/bindings/c-bindings.cpp` | close_range 的 `#if OS(LINUX)||OS(FREEBSD)` 块闭合 | 上游改 close_range 时检查 |
+| `src/jsc/bindings/c-bindings.cpp` | close_range 的 `#if OS(LINUX)||OS(FREEBSD)` 块闭合；**execve/pthread_create 两阶段握手**（`threads_creating`/`execve_want` register-then-verify，防 OHOS 上 clone 与 execve 簿记窗口重叠损坏；含 `#include <sched.h>`）；**`is_executable_file`**：OHOS 的 `O_EXEC` 实为 `O_PATH`（fcntl.h），不检查 x 位 → 改 `access(X_OK)` + `S_ISREG`（否则 which/PATH/install 把不可执行文件当真） | ⚠️ 上游改 close_range / 两个 wrapper / is_executable_file 时逐项核对保留 |
 | `src/jsc/bindings/BunProcess.cpp` / `bun-spawn.cpp` | OHOS 平台分支 | 上游改时检查 |
 | `src/install/PackageManager.rs` | node-gyp 的 CC/CXX 默认值（cc/c++，~1237）；**不再传 `-Wl,--code-sign`**（现有 ld.lld 都不接受；签名由 install/dlopen 时的 `bun_sys::ensure_signed_inplace` 负责） | ⚠️ 上游改 node-gyp 环境时，OHOS 默认编译器必须保留 |
 | `src/install/PackageInstaller.rs` / `src/install/isolated_install.rs` / `src/install/isolated_install/Hardlinker.rs` | OHOS 文件系统/硬链接差异 | 上游改 install 时检查 |
@@ -232,23 +247,23 @@ vite-build（rolldown-vite）与 pnpm（vite5→rollup）走 Linux musl 回退�
 | `getaddrinfo` | 原生 DNS（loopback/ADDRCONFIG 对齐，T49） | T49 相关用例 |
 | `tmpfile` | 启动期 `TMPDIR` 回退（`bin_entry`） | install 用例 |
 | `splice` | 全仓无调用点，不需要 | — |
-| `epoll_ctl`/`epoll_pwait`/`poll`/`ppoll`/`epoll_pipe` | T50 原生 workaround：multi_run drain / `deinit_poll_keep_fd` / `tick_without_idle`、Terminal `EPOLL_REARM_WATCH`、PipeWriter storm 检测 | `multi-run`、terminal 套件 |
+| `epoll_ctl`/`epoll_pwait`/`poll`/`ppoll`/`epoll_pipe` | T50 原生 workaround：multi_run drain / `deinit_poll_keep_fd` / `tick_without_idle`、Terminal `EPOLL_REARM_WATCH` + watchdog **force-drain**（100ms 强制喂读，见 §三-1）+ Terminal 关闭前 flush + 初始空 writer 解注册、PipeWriter storm 检测 | `multi-run`、terminal 套件 |
 | `close` | 仅 shim 内部簿记 | — |
 
 ## 七、merge 上游时的检查清单（按优先级）
 
 ### 🔴 必须人工验证（历史冲突/高风险）
 1. **multi_run.rs** —— 上游每改一次都需重测 `multi-run.test.ts`（120+ 用例）+ 手动 parallel/sequential
-2. **spawn_process.rs memfd 门控** —— 上游若改 memfd 逻辑，OHOS 必须禁用（uses-what-bin-slow SIGABRT 回归）
+2. **spawn_process.rs memfd 门控** —— 上游若改 memfd 逻辑，OHOS 必须禁用（uses-what-bin-slow SIGABRT 回归）；同文件的 sync wait 循环另有 no_orphans pidfd 父监视（见 §三）
 3. **sys/lib.rs lchmod** —— 上游若改 lchmod，OHOS 回退 chmod 必须保留（node-gyp 测试）
 4. **PackageManagerLifecycle.rs PATH 注入** —— OHOS 前置 bun_dir/node_dir 必须保留（lifecycle 测试 PATH="" 场景）
 5. **run_command.rs IS_NODE_ARG** —— `bun node` 支持（as-node 测试 11 个）
-6. **webkit.ts** —— 上游版本号升级需重新构建验证；上游 cmake 改动需检查 OHOS 块
+6. **webkit.ts** —— 上游版本号升级需重新构建验证；上游 cmake 改动需检查 OHOS 块；WebKit 另由 `patches/webkit/suspend-resume.patch` 打 OHOS 挂起/恢复加固（bump 后确认补丁仍能应用，见 §二）
 
 ### 🟡 需检查（OHOS 门控存在但上游少动）
 7. MiniEventLoop.rs `tick_without_idle` pub 可见性
 8. filter_run.rs drain —— 2026-09-17 按 multi_run 补齐 T50 直读（见 §三 filter_run 行）；上游改 drain 逻辑时复测 `--filter/--workspaces`
-9. MessagePort leak fix、highway SVE、V8Array、c-bindings
+9. MessagePort leak fix、highway SVE、V8Array、**c-bindings 两阶段 execve 握手 + `is_executable_file`（见 §五）**
 10. sys/lib.rs fstat/statx/getcwd/link
 11. **工具链（LLVM/Rust nightly）** —— 上游 bump 时：`scripts/build/tools.ts` 的 `LLVM_VERSION_RANGE` 是硬约束（当前 `>=23.1.0 <23.1.99`），需要 brew 提供对应 LLVM（当前 llvm 23.1.1 + keg-only lld 23）；Rust 仍由脚本 `RUST_VER`/`RUST_HOME` 钉在 `nightly-2026-07-20`，与 `rust-toolchain.toml` 的 channel 解耦；`src/collections/*` 的 nightly 兼容层（`core_intrinsics`）保留，不随上游迁移到 `type_info` API；`core::alloc::AllocatorClone`（#44361 使用，core 于 `nightly-2026-09-15` 新增）在钉定 nightly 不存在 → `src/bun_alloc/MimallocArena.rs` 的 impl 以 `#[cfg(not(target_env = "ohos"))]` 门控（`833e8568ab`）——上游再引入同类新 nightly API 时按此模式门控
 
@@ -295,3 +310,5 @@ PATH="" bun install --no-save  # uses-what-bin-slow 场景
 | `aa8307619d..c7b06d94ba`（4 提交，2026-10-04，含 **mimalloc ×2**（`eab09015a585→92ef6587c57b`，v3.5.3 + `Bun.sleepSync` 归还内存 #44560/#44575）、**WebKit bump `1600131e46b5→5718a6ec579b`**（idle JSC 线程与 `Atomics.wait` 归还内存 #44564，WebKit #768 gc-memory-return）、docker 内联签名密钥 #4450x） | `packages/bun-usockets/src/eventing/epoll_kqueue.c`（上游**修改** scavenger 交接块 vs 本地 7 月移除）、`scripts/build/deps/webkit.ts`（版本行）、`src/runtime/api/BunObject.rs`（sleepSync 归还内存 vs 本地 1 行） | ① 冲突 1 处：**完整采用上游的 scavenger 集成**——恢复被改的交接块（`handed_off = will_idle_inside_event_loop && mi_on_thread_idle_start()`）+ 一并恢复流内 `#include <mimalloc.h>` 与轮询后的 `mi_on_thread_idle_end()`（7 月「OHOS 缺 mimalloc 头」的移除已无必要：`libusockets.h` 正常路径已包含 `mimalloc.h`、vendor 提供实现）；该文件现与上游逐字节一致 ② 完整影响评估：10 个仅上游文件逐字节一致、302 个仅本地文件逐字节一致、3 个双方文件全保留（`epoll_kqueue.c` local_adds=0、`webkit.ts` 47+1、`BunObject.rs` 1+6），**0 差异** ③ WebKit 检出切 `5718a6ec579b`（增量 1 提交）④ 编译成功 ⑤ 定向回归：sleepSync 6/0、atomics 30/0、timer-gc-roots 10/0、compile-rss 1/0、net/socket 118/0、isolation 46/0、serve 330/0、multi-run 127/0、as-node 11/0、node-gyp 17/0、spawn 187/0（首次高负载下整文件挂起，重跑 82s 通过——与既往负载型瞬时一致）|
 | `c7b06d94ba..d4928764f2`（1 提交，2026-10-05，fetch：TLS 每连接建立一次而非每请求 #44507） | `test/js/web/fetch/fetch.tls.test.ts`（imports：本地 `isOhos` vs 上游 `nodeExe`）| ① 冲突 1 处：imports 取并集（`isOhos` + `nodeExe`，两者都在用：isOhos 在 1537 行的阈值、nodeExe 在上游新增的 peer fixture 用例）② 完整影响评估：4 个仅上游文件逐字节一致、303 个仅本地文件逐字节一致、1 个双方文件（本地 4 + 上游 69 行）保留，仅 import 并集 1 处有意改写，**0 实质差异** ③ 编译成功 ④ 定向回归：fetch.tls 63/0（含 TLS 每连接新用例）、multi-run 127/0、as-node 11/0、node-gyp 17/0 |
 | `d4928764f2..5749c31290`（9 提交，2026-10-08，含 **`bun check` 内置 TS 类型检查器**（#44361 新 `src/sema` crate + `src/js_parser/sema/*` + CLI `typescript_libs.bin`；#44665/#44685 差异修复）、**WebKit bump `5718a6ec579b→0c06faadf65b`**（fork PR #773，上游 WebKit `dbdca7545d`；`CString→UTF8CString` 迁移）、spawnSync 隔离事件循环 #44581、sql mysql #43323、sql postgres #44235、ByteStream 生产者错误 #38003、React Fast Refresh 签名 #43750） | `src/jsc/bindings/BunProcess.cpp`（上游 UTF8CString vs 本地 OHOS dlopen 签名）、`src/resolver/resolver.rs`（上游 `load_tsconfig` 重构 vs 本地 EACCES/EPERM）、`test/js/bun/spawn/spawn-pipe-start-error.test.ts`（imports） | ① 冲突 4 处：BunProcess 取上游 `legacyCStringPointer()` + 保留 `ohos_ensure_elf_signed`；resolver 取上游结构 + 在 `load_tsconfig` 重放 `is_not_found_like`；测试 imports 取并集 ② 完整影响评估：312 个仅上游文件逐字节一致、277 个仅本地文件逐字节一致、27 个双方文件新增行仅 4 处**有意改写**（0 实质差异）③ WebKit 检出切 `0c06faadf65b` ④ **构建期修复**：`core::alloc::AllocatorClone`（#44361 使用，core 于 `nightly-2026-09-15` 新增）在钉定 `nightly-2026-07-20` 不存在 → `#[cfg(not(target_env = "ohos"))]` 门控（`833e8568ab`）；编译 1409/1409 成功 ⑤ **测试适配**（`2b6540b2b6`）：spawn-pipe-start-error 的 9 个 `FAIL_EPOLL_CTL=pidfd-add` 注入用例在 OHOS（waiter thread 默认开、不注册 pidfd）不可注入、2 个阻塞 300s → 2 块 `skipIf(isOHOS)` + 2 块过滤 pidfd 条目；重跑 15 pass/8 skip/0 fail（12s）⑥ 定向回归：spawn 175/0（首批批次被外部中断，重跑 89s 通过）、spawnSync 16/0、isolated-loop 7/0（首批 6/1 为负载抖动）、webkit-upgrade 9/0、atomics 30/0、timer-gc-roots 10/0、fetch.tls 62/0、net/socket 110/0、serve 328/0、fetch.stream 121/0、body-mixin-errors 23/0、serve-stream-body-error 33/0、sql-mysql 9/0、sql-postgres 2/0、react-spa 8/0、**check entry-points 470/0**、multi-run 127/0、as-node 11/0、node-gyp ✓ |
+
+> **合并教训（2026-10-08，terminal 返回值）**：`Terminal::write` 的返回值映射在早期合并中被回退为 #34289（2026-07-15）之前的"按 arm 返回同步刷出量"；上游语义是**非错误路径返回输入全长**（`StreamingWriter::write` 已缓冲尾部，见该文件内注释）。设备上表现为两个 terminal 用例长期失败（drain 第二写 5005、PTY 满写 13824），且在旧二进制上同值复现，极易被误判为设备噪声。修复：恢复 `_ => Ok(js_number(bytes.len()))`（`d14eb3504a`）。**今后合并 `Terminal.rs` 时逐行核对该 mapping**；terminal 套件失败先对照上游语义而非默认怀疑设备。
