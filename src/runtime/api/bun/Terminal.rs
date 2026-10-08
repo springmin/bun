@@ -485,6 +485,14 @@ impl Terminal {
             }
         }
 
+        // OHOS PTY dup fds can lose the read readiness edge when an
+        // initially-empty writer is also registered for level-triggered
+        // EPOLLOUT. Keep the writer poll object for later backpressure, but do
+        // not watch writable until Terminal.write has data (the next buffered
+        // write re-registers through `register_poll`).
+        #[cfg(target_env = "ohos")]
+        terminal.writer.with_mut(|w| w.unregister_poll());
+
         // Start reader with the read fd. The reader's ref is taken first: when
         // the poll registration fails, POSIX `start()` calls `on_reader_error`,
         // which releases that ref, and still returns Ok.
@@ -1752,6 +1760,8 @@ impl Terminal {
     /// Close the terminal
     #[bun_jsc::host_fn(method)]
     pub(crate) fn close(&self, _g: &JSGlobalObject, _f: &CallFrame) -> JsResult<JSValue> {
+        #[cfg(target_env = "ohos")]
+        self.flush_kernel_buffered_output();
         self.close_internal();
         Ok(JSValue::UNDEFINED)
     }
@@ -1763,6 +1773,11 @@ impl Terminal {
         global_object: &JSGlobalObject,
         _f: &CallFrame,
     ) -> JsResult<JSValue> {
+        // Deliver the kernel-buffered tail before the downgrade below silences
+        // the data callback (FINALIZED gates `on_read_chunk`) and
+        // close_internal closes the master fds.
+        #[cfg(target_env = "ohos")]
+        self.flush_kernel_buffered_output();
         // After dispose the caller must not see further data/exit callbacks.
         // closeInternal on Windows leaves the reader draining off-thread, so
         // suppress callbacks and downgrade the JSRef so the wrapper is
@@ -1774,6 +1789,40 @@ impl Terminal {
             global_object,
             JSValue::UNDEFINED,
         ))
+    }
+
+    /// OHOS: synchronously deliver the PTY master's kernel-buffered output
+    /// before the master fds are torn down. After a master-side write, the
+    /// OHOS kernel can leave the master's readiness flag permanently cleared,
+    /// so epoll never reports the slave→master data again; the epoll-rearm
+    /// watchdog's force-drain recovers this only on a 100ms tick, and `await
+    /// using` dispose closes the master fds as soon as `proc.exited` resolves
+    /// — bytes still in the kernel buffer are dropped with the fd. read(2) is
+    /// the only trusted source of truth: one `read()` runs the regular
+    /// read_loop (each chunk goes through the normal `data` callback path)
+    /// and stops at EAGAIN, since the Terminal reader is a NonblockingPipe and
+    /// skips the readability gate in `read()`.
+    ///
+    /// Must run before `FINALIZED` is set: `on_read_chunk` drops chunks once
+    /// that flag is up, and after `close_internal` the fds are gone.
+    #[cfg(target_env = "ohos")]
+    fn flush_kernel_buffered_output(&self) {
+        let flags = self.flags.get();
+        if flags.contains(Flags::CLOSED)
+            || !flags.contains(Flags::READER_STARTED)
+            || flags.contains(Flags::READER_DONE)
+        {
+            return;
+        }
+        // Both reader callbacks below re-enter user JS and may deref; hold a +1
+        // so `self` stays live for the trailing field accesses. (Same pattern
+        // as `drain_and_close_slave_fd`.)
+        let guard = self.ref_guard();
+        // SAFETY: single JS thread; the reader cell is live for the terminal's
+        // lifetime, and re-entrant user JS (the data callback may call
+        // `terminal.close()`) is handled by `read`'s raw dispatch.
+        unsafe { IOReader::read(self.reader.as_ptr()) };
+        drop(guard);
     }
 
     fn close_internal(&self) {
