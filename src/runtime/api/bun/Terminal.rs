@@ -1563,23 +1563,10 @@ impl Terminal {
         // writer can even exceed `input_len` when prior data drains), so
         // returning them would make callers re-send an already-queued tail.
         match write_result {
-            bun_io::WriteResult::Done(amt) => Ok(JSValue::js_number(
-                i32::try_from(amt).expect("int cast") as f64,
-            )),
-            bun_io::WriteResult::Wrote(amt) => Ok(JSValue::js_number(
-                i32::try_from(amt).expect("int cast") as f64,
-            )),
-            // On Windows the streaming writer buffers and returns .pending=0; the
-            // bytes were accepted, so report bytes.len to match POSIX semantics.
-            bun_io::WriteResult::Pending(amt) => {
-                let n = if cfg!(windows) { bytes.len() } else { amt };
-                Ok(JSValue::js_number(
-                    i32::try_from(n).expect("int cast") as f64
-                ))
-            }
             bun_io::WriteResult::Err(err) => {
                 Err(global_object.throw_value(err.to_js(global_object)))
             }
+            _ => Ok(JSValue::js_number(bytes.len() as f64)),
         }
     }
 
