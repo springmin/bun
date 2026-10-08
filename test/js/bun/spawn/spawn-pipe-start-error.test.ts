@@ -468,7 +468,10 @@ describe.skipIf(!isLinux || !cc)(
 // A child whose exit cannot be registered for was reported as exited with that error while it was still running, and
 // nothing reaped it afterwards. Bun.spawnSync blocked in wait4() instead, where nothing serves the child's stdio and
 // no timeout applies: a child that reads its stdin or fills a pipe never exits. Either way the child is ended now.
-describe.skipIf(!isLinux || !cc)(
+// OHOS: child exits are watched by a waiter thread (SHOULD_USE_WAITER_THREAD is
+// default-on there) and no pidfd is registered with the loop, so this failure
+// cannot be injected and there is no "unwatchable" child.
+describe.skipIf(!isLinux || !cc || isOHOS)(
   "a child whose pidfd fails to register with the event loop is ended and reaped",
   () => {
     test.concurrent.each([
@@ -520,10 +523,14 @@ test.skipIf(!isLinux || !cc)(
 // The shell did not finish a command whose exit came with an error, and left one it gave up on starting to its SIGTERM
 // and unreaped.
 describe.skipIf(!isLinux || !cc)("a shell command is ended, reaped and finished", () => {
-  test.concurrent.each([
-    ["whose pidfd fails to register", "shell-unwatchable", { FAIL_EPOLL_CTL: "pidfd-add", FAIL_EPOLL_CTL_SKIP: "1" }],
-    ["whose stdin writer fails to register", "shell-stdin-buffer-running", { BUN_FEATURE_FLAG_DISABLE_MEMFD: "1" }],
-  ])("%s", async (_, kind, env) => {
+  test.concurrent.each(
+    [
+      ["whose pidfd fails to register", "shell-unwatchable", { FAIL_EPOLL_CTL: "pidfd-add", FAIL_EPOLL_CTL_SKIP: "1" }],
+      ["whose stdin writer fails to register", "shell-stdin-buffer-running", { BUN_FEATURE_FLAG_DISABLE_MEMFD: "1" }],
+      // OHOS: no pidfd is registered for a child (waiter thread), so the
+      // pidfd-add failure cannot be injected there; the writer case still runs.
+    ].filter(([name]) => !(isOHOS && name === "whose pidfd fails to register")),
+  )("%s", async (_, kind, env) => {
     expect(await runFixture(kind, env)).toEqual({
       report: { error: null, sync: { children: 0, next: 0 }, shell: 1, leakedFds: 0, leakedWrappers: 0 },
       stderr: "",
@@ -533,7 +540,8 @@ describe.skipIf(!isLinux || !cc)("a shell command is ended, reaped and finished"
 });
 
 // The same goes for what the CLI runs: it reported the script as failed and exited, and the script ran on.
-describe.skipIf(!isLinux || !cc)("a script whose pidfd fails to register with the event loop is ended", () => {
+// OHOS: the pidfd-add failure cannot be injected there (waiter thread; see above).
+describe.skipIf(!isLinux || !cc || isOHOS)("a script whose pidfd fails to register with the event loop is ended", () => {
   test.concurrent.each(["run --parallel forever", "run --filter=* forever", "install"])("bun %s", async args => {
     using project = tempDir("unwatchable-script", { "watched": "" });
     // By then its parent is somebody else, so it is told by its command line.
@@ -573,10 +581,14 @@ describe.skipIf(!isLinux || !cc)("a script whose pidfd fails to register with th
 // would be waited for until it exits by itself, with the thread blocked or no deadline to end the wait: it is left.
 describe.skipIf(!isLinux || !cc)("a child that has to be ended and cannot be signalled is not waited for", () => {
   const unwatchable = { FAIL_EPOLL_CTL: "pidfd-add", FAIL_EPOLL_CTL_SKIP: "1" };
-  test.concurrent.each([
-    ["Bun.spawnSync of a child whose pidfd fails to register", "sync-unwatchable-timeout", unwatchable, 0],
-    ["Bun.spawnSync whose stdin writer fails to register", "sync-stdin-buffer", {}, "next\n"],
-  ])("%s", async (_, kind, env, next) => {
+  test.concurrent.each(
+    [
+      ["Bun.spawnSync of a child whose pidfd fails to register", "sync-unwatchable-timeout", unwatchable, 0],
+      ["Bun.spawnSync whose stdin writer fails to register", "sync-stdin-buffer", {}, "next\n"],
+      // OHOS: the pidfd failure cannot be injected (waiter thread); the writer
+      // case still runs.
+    ].filter(([name]) => !(isOHOS && name === "Bun.spawnSync of a child whose pidfd fails to register")),
+  )("%s", async (_, kind, env, next) => {
     expect(await runFixture(kind, { ...env, FAIL_SIGKILL: "1", BUN_FEATURE_FLAG_DISABLE_MEMFD: "1" })).toEqual({
       report: {
         error: { code: "ENOSPC", message: "ENOSPC: no space left on device, epoll_ctl" },
