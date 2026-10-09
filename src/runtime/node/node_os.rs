@@ -722,6 +722,13 @@ mod _impl {
             let _ = using_heap;
 
             if ret != 0 {
+                // OHOS has no passwd entry for app uids; HOME was already
+                // checked above, so return the static app-sandbox home
+                // instead of throwing (android-branch convention).
+                #[cfg(target_env = "ohos")]
+                if ret == bun_sys::E::ENOENT as c_int {
+                    return Ok(BunString::static_("/data/storage/el2/base"));
+                }
                 return Err(global.throw_value(
                     bun_sys::Error::from_code(
                         // `ret` is a libc errno; a code outside the table is `EUNKNOWN`.
@@ -739,8 +746,15 @@ mod _impl {
                 {
                     return Ok(BunString::static_("/data/local/tmp"));
                 }
+                // OHOS: no passwd entry for app uids either; HOME was checked
+                // above, so return the static app-sandbox home instead of
+                // throwing (same default as ohos_node_userinfo.rs).
+                #[cfg(target_env = "ohos")]
+                {
+                    return Ok(BunString::static_("/data/storage/el2/base"));
+                }
                 // in uv__getpwuid_r, null result throws UV_ENOENT.
-                #[cfg(not(target_os = "android"))]
+                #[cfg(not(any(target_os = "android", target_env = "ohos")))]
                 return Err(global.throw_value(
                     bun_sys::Error::from_code(bun_sys::E::ENOENT, bun_sys::Tag::uv_os_homedir)
                         .to_js(global),
