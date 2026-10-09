@@ -133,6 +133,7 @@
 |---|---|---|
 | `test/cli/run/garbage-env.test.ts` | `isOhos`（BUN_OHOS / musl loader 探测）下 binary-sign-tool 签名 | 上游改该测试时检查 |
 | `test/js/bun/spawn/spawn-ohos-node-userinfo.test.ts` | OHOS 专属测试 | 保留 |
+| `test/js/bun/spawn/spawn-pipe-start-error.test.ts` | OHOS：`FAIL_EPOLL_CTL=pidfd-add` 注入不可用（waiter thread 默认开、无 pidfd 注册）→ 相关 describe/test 过滤或 `skipIf(isOHOS)`；writer 注入改 `pty-writer-any`（初始空 writer 解注册，首写为 ADD，skip 位移 +1）；`afterAll` 按 fixture 的 cwd（本文件唯一临时目录）清扫超时残留——测试超时后 `await using` 不展开，挂死的 fixture 会一直存活 | 上游改该文件时保留 OHOS 分支与清扫逻辑 |
 
 ### 六-0、平台依赖测试的 OHOS 处理（2026-09-19，@ohos-ports 优先）
 
