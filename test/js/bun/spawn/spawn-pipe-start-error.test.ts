@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { bunEnv, bunExe, isDebug, isLinux, isOHOS, isWindows, tempDir } from "harness";
-import { readdirSync, readFileSync } from "node:fs";
+import { readdirSync, readFileSync, readlinkSync } from "node:fs";
 import { join } from "node:path";
 
 // On Windows, when the initial uv_read_start on a subprocess stdout/stderr
@@ -369,6 +369,21 @@ beforeAll(async () => {
 });
 
 afterAll(() => {
+  if (dir) {
+    // A fixture that hangs keeps running after bun test reports its timeout:
+    // the test promise never settles, so `await using` never unwinds and
+    // nothing kills the child (the failure these tests hunt — a writer stuck
+    // behind a failed re-arm — leaves the loop idling, so it never exits by
+    // itself). Each fixture's cwd is this file's temp dir; kill whatever is
+    // still rooted there, however the test ended.
+    const root = String(dir);
+    for (const pid of readdirSync("/proc")) {
+      if (!/^\d+$/.test(pid)) continue;
+      try {
+        if (readlinkSync(`/proc/${pid}/cwd`) === root) process.kill(Number(pid), "SIGKILL");
+      } catch {}
+    }
+  }
   dir?.[Symbol.dispose]();
 });
 
