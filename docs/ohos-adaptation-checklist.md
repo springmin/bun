@@ -51,6 +51,7 @@
 | `scripts/build/source.ts` | 依赖编译的 PIC 策略：OHOS 与 Android 一样必须 `-fPIC`（上游 #42556 把 `-fno-pic -fno-pie` 默认推广到所有 unix；OHOS 上非 PIC 依赖会让链接器发 R_AARCH64_COPY，OHOS musl 不填充这些 libc 数据 → 启动即 abort） | ⚠️ 上游改 PIC 策略/新增依赖时检查 |
 | `rust-toolchain.toml` | nightly-2026-07-20（OHOS Tier3 需 build-std） | ⚠️ 上游 bump 时需确认 OHOS 可用 |
 | `.rust-nightly-version` | nightly-2026-07-20 | 同上 |
+| `src/sys/Cargo.toml` + `src/ohos_sign/Cargo.toml` | **workspace lints 显式 opt-in**：上游 workspace-lints 测试（#44361 新增，逐 crate 检查 `[lints]` + `workspace = true`）要求每个 member 都有；`src/sys` 在多次 merge（a8e463c80d、9f272525c2）中被丢过 → 2026-10-09 补回；`src/ohos_sign`（fork 专属）补加。注意 `unreachable_pub=deny`：私有模块内不得用裸 `pub`（已改 `pub(crate)`；`#[no_mangle] extern "C"` 同理，符号不受影响） | ⚠️ **每次 merge 后跑 `test/internal/source-lints/workspace-lints.test.ts`**；新增 fork crate 必须带 `[lints]` |
 
 ## 三、spawn 管道机制（T50 内核 bug 适配）——⚠️ 最高风险区
 
@@ -62,7 +63,7 @@
 | `src/io/pipes.rs` | `PollOrFd::deinit_poll_keep_fd()`（pub，仅 OHOS multi_run 用） | 上游改 PollOrFd 时检查该方法保留 |
 | `src/event_loop/MiniEventLoop.rs` | `tick_without_idle` 改 `pub`（OHOS multi_run 跨 crate 调用） | ⚠️ 上游是 `pub(crate)`——上游改回 pub(crate) 会破坏 OHOS 编译 |
 | `src/runtime/cli/filter_run.rs` | ① `--workspaces/--filter` 的 pipe_setup（SOCKET|NONBLOCKING flags）② **OHOS T50 排空（2026-09-17 按 multi_run 补齐）**：启动后 `deinit_poll_keep_fd`（反注册 poll，tick 直读是唯一 reader）、主循环 `tick_without_idle` + `drain_ohos_pipes`/`drain_one` 原始 fd 直读到 EAGAIN（EOF 做 `remaining_fds` 记账 + `maybe_finish`）、退出路径先排空 fd 再 force-end | 上游改 filter_run 的 drain/event-loop 时检查；`test/cli/run/filter-workspace.test.ts` 必须保持全通过（LLVM23 构建中曾因旧「跳过」实现丢输出 23 失败） |
-| `src/runtime/api/bun/spawn/stdio.rs` | `can_use_memfd`/`use_memfd` OHOS 返回 false（memfd 写入对 fstat 不可见 + 子进程崩溃） | ⚠️ 上游若改 memfd 逻辑，OHOS 必须保持禁用 |
+| `src/runtime/api/bun/spawn/stdio.rs` | memfd 在 OHOS 一律不用（写入对 fstat 不可见 + 子进程崩溃）：**运行时双重闸门**——`Stdio::can_use_memfd()` 与 `bun_sys::can_use_memfd()` 均在 OHOS 提前返回 false；**不再用编译期 `#[cfg(not(ohos))]` 包裹 `use_memfd` 体**（会让 `Stdio::Memfd`/`byte_slice`/`Capture.buf` 在 OHOS 成 dead_code，触发上游 dead-code-escapes lint），变体保持编译、仅运行时不可达 | ⚠️ 上游移除 OHOS 早退（#44086 类清理）会真实启用 memfd → 保留双闸门；合并时勿加回编译期包裹 |
 | `src/sys/lib.rs` `can_use_memfd` | OHOS 全局禁用 memfd（`excluded even though memfd_create works`） | 同上，sys 层统一门控 |
 | `src/spawn_sys/spawn_process.rs` | ① memfd fast-path 三处 `not(target_env="ohos")`（CStr import、'stdio label、use_memfd 块）→ OHOS 回退 socketpair ② **shebang 手动解析**（1004-1090）：OHOS 上 exec 脚本时手动读 shebang 构造 argv（内核 shebang 处理差异） | ⚠️ 上游改 spawn 时检查 memfd 门控 + shebang shim |
 | `src/spawn_sys/lib.rs` | `waiter_thread_flag::SHOULD_USE_WAITER_THREAD` 在 OHOS 默认开启（2026-09-16 移植）：异步子进程退出走 pidfd + 共享 epoll 会丢唤醒——`Bun.serve` 服务 FIFO 响应 + `stop(true)` 之后 `Bun.spawn().exited` 永不 resolve、事件循环忙等、子进程成僵尸；独立 waiter 线程 `poll(eventfd)` 绕开共享循环 | ⚠️ 上游改 waiter 线程/pidfd 路径时检查默认值 |
@@ -134,6 +135,8 @@
 | `test/cli/run/garbage-env.test.ts` | `isOhos`（BUN_OHOS / musl loader 探测）下 binary-sign-tool 签名 | 上游改该测试时检查 |
 | `test/js/bun/spawn/spawn-ohos-node-userinfo.test.ts` | OHOS 专属测试 | 保留 |
 | `test/js/bun/spawn/spawn-pipe-start-error.test.ts` | OHOS：`FAIL_EPOLL_CTL=pidfd-add` 注入不可用（waiter thread 默认开、无 pidfd 注册）→ 相关 describe/test 过滤或 `skipIf(isOHOS)`；writer 注入改 `pty-writer-any`（初始空 writer 解注册，首写为 ADD，skip 位移 +1）；`afterAll` 按 fixture 的 cwd（本文件唯一临时目录）清扫超时残留——测试超时后 `await using` 不展开，挂死的 fixture 会一直存活 | 上游改该文件时保留 OHOS 分支与清扫逻辑 |
+| `test/js/node/process/process-stdio.test.ts` + `fd-nonblock-fixture.js` | OHOS：Bun 创建的 stdio 是 socketpair，且该内核**读取 socket fd 的 fdinfo 返回 ENOENT**（条目存在、read 失败）→ fixture 在 fdinfo 读取失败时回退 `fcntl(F_GETFL)`（bun:ffi dlopen；linux/android 用 `libc.so`，darwin/freebsd 各自 SONAME） | 上游改该 fixture 时保留回退 |
+| `test/internal/source-lints/{dead-code-escapes,workspace-lints,no-std-stdio}.test.ts` | #44361 新增的上游 source lint（2026-10-09 首次全量运行）：fork 侧完成适配——零 `allow(dead_code)` 逃逸（真 cfg）、两个 crate 补 `[lints]`、`no-std-stdio` 按“独立程序”排除 `src/ohos_sign/src/bin/` | 上游改这些 lint 时保留 `src/ohos_sign/src/bin/` 排除；fork 新增源文件注意别用被禁的 std stdio API |
 
 ### 六-0、平台依赖测试的 OHOS 处理（2026-09-19，@ohos-ports 优先）
 
@@ -198,7 +201,7 @@
 | `test/js/bun/shell/leak.test.ts` | `fd leak`/`mem leak` 的 100s 用例预算在 OHOS 负载下不足（多例 100.0s 超时）→ OHOS 提到 300s | 上游改预算时保留 |
 | `scripts/build/config.ts`（构建适配） | 上游 #44091 新增「clang 与 rustc 的 LLVM 主版本必须一致」硬校验；OHOS 端钉死的 rustc 为 **LLVM 22.1.8**、OHOS SDK clang 为 **23.1.1**，且本环境无法更换 nightly → 在 OHOS 上豁免该检查（链接只读取 rustc 的**较旧** bitcode，新 lld 可读；且 OHOS 构建传 `--lto=off`） | 上游改该检查或 rust nightly 可升级时复评 |
 | `test/internal/build-rust-toolchain-probe.test.ts` | 上游把探针 fixture 的 LLVM 版本改为 23.1.1 并要求 clang/rustc 一致；OHOS 端保留 `echo`（设备 `/bin/sh` 无 `printf` 内建）+ 取上游的 23.1.1 | 上游改 fixture 时保留 |
-| `src/runtime/api/bun/spawn/stdio.rs` / `src/sys/lib.rs` | 上游 #44086「真实 #[cfg] 取代存根」重构：memfd 相关函数改为**函数级** `#[cfg(any(linux, android))]`（无存根）；OHOS 端采用其 cfg + 保留「OHOS 一律不可用 memfd」的提前返回（`Memfd` 变体加 `allow(dead_code)`） | 上游再改这些 cfg 时保留 OHOS 早退 |
+| `src/runtime/api/bun/spawn/stdio.rs` / `src/sys/lib.rs` | 上游 #44086「真实 #[cfg] 取代存根」重构：memfd 相关函数改为**函数级** `#[cfg(any(linux, android))]`（无存根）；OHOS 端采用其 cfg + 保留「OHOS 一律不可用 memfd」的提前返回 | 上游再改这些 cfg 时保留 OHOS 早退；2026-10-09 起不再对 `Memfd` 变体加 `allow(dead_code)`（见 §三 stdio.rs 行） |
 | `src/spawn/process.rs` | 上游移除 Windows 存根（真实 cfg）；OHOS 端的 `prewarm()` 调用在 `#[cfg(target_env = "ohos")]` 块内 → 接受上游的删除 | 同上 |
 | `test/internal/source-lints/dead-code-escape-limits.json` | 上游删除该 lint 与其清单（测试改为自算）→ 接受删除，不再维护 OHOS 版清单 | 上游恢复该 lint 时复评 |
 | runner 看门狗（2026-09-26 追加） | module-graph 家族（`module-graph`/`-io`/`-compile`/`-workers`）WT 600→**900s**（单跑 2-3 分钟，全量高负载下多次超时）；重试名单再补 `module-graph-io`、`026039` | 同上 |
