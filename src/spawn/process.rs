@@ -1806,11 +1806,9 @@ mod spawn_process_body {
     /// RAII fd owner — closes the wrapped [`Fd`] on drop iff it is valid.
     /// Used by `sync::spawn_posix` (no-orphans kqueue, ppid pidfd).
     #[cfg(any(target_os = "linux", target_os = "android", target_os = "macos"))]
-    #[cfg_attr(target_env = "ohos", allow(dead_code))]
     struct AutoCloseFd(Fd);
 
     #[cfg(any(target_os = "linux", target_os = "android", target_os = "macos"))]
-    #[cfg_attr(target_env = "ohos", allow(dead_code))]
     impl AutoCloseFd {
         #[inline]
         const fn new(fd: Fd) -> Self {
@@ -3008,11 +3006,12 @@ mod spawn_process_body {
             safe fn tcsetpgrp(fd: c_int, pgrp: libc::pid_t) -> c_int;
             safe fn getpgrp() -> libc::pid_t;
             #[cfg(any(target_os = "linux", target_os = "android", target_os = "macos"))]
-            #[cfg_attr(target_env = "ohos", allow(dead_code))]
             safe fn getppid() -> libc::pid_t;
             safe fn isatty(fd: c_int) -> c_int;
-            #[cfg(any(target_os = "linux", target_os = "android", target_os = "macos"))]
-            #[cfg_attr(target_env = "ohos", allow(dead_code))]
+            #[cfg(all(
+                any(target_os = "linux", target_os = "android", target_os = "macos"),
+                not(target_env = "ohos")
+            ))]
             safe fn raise(sig: c_int) -> c_int;
             safe fn kill(pid: libc::pid_t, sig: c_int) -> c_int;
             /// No args; returns -1/errno on failure. macOS-only caller below.
@@ -3022,8 +3021,10 @@ mod spawn_process_body {
 
         #[cfg(unix)]
         impl JobControl {
-            #[cfg(any(target_os = "linux", target_os = "android", target_os = "macos"))]
-            #[cfg_attr(target_env = "ohos", allow(dead_code))]
+            #[cfg(all(
+                any(target_os = "linux", target_os = "android", target_os = "macos"),
+                not(target_env = "ohos")
+            ))]
             fn is_active(&self) -> bool {
                 self.prev > 0
             }

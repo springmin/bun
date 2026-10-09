@@ -311,8 +311,8 @@ pub(crate) struct ReadFile {
 }
 
 /// States for `ReadFile::read_loop_state`: `on_ready` fires on every readability event and used to unconditionally schedule racing `do_read_loop` workers that `recv()`ed the same fd concurrently (truncated stdin via OHOS socketpair stdio), so exactly one worker owns the loop; a wakeup landing mid-run flips it to `RUNNING_PENDING` and the owner re-schedules instead of dropping it.
-// `dead_code`: the Windows build routes through `ReadFileUV` and never references these.
-#[allow(dead_code)]
+// The Windows build routes through `ReadFileUV` and never references these.
+#[cfg(not(windows))]
 mod read_loop_state {
     /// No worker is running or queued to run `do_read_loop`.
     pub(super) const IDLE: u8 = 0;

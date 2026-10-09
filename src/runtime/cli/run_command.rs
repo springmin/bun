@@ -1897,8 +1897,7 @@ impl RunCommand {
     //
     // Canonical definition lives in `bun_install::RunCommand` (lower tier so
     // the package manager can use it without depending on `bun_runtime`).
-    #[cfg(not(windows))]
-    #[allow(dead_code)] // OHOS uses the runtime bun_node_dir_bytes() instead.
+    #[cfg(all(not(windows), not(target_env = "ohos")))]
     pub(crate) const BUN_NODE_DIR: &'static str = bun_install::RunCommand::BUN_NODE_DIR;
 
     /// Returns the path to the

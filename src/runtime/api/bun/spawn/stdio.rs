@@ -39,7 +39,6 @@ pub(crate) struct Capture {
     // The shell keeps the buffer alive for the lifetime
     // of the spawned process; this struct never frees it.
     #[cfg(any(target_os = "linux", target_os = "android"))]
-    #[cfg_attr(target_env = "ohos", allow(dead_code))]
     pub(crate) buf: *mut Vec<u8>,
 }
 
@@ -62,7 +61,6 @@ pub(crate) enum Stdio {
     Path(PathLike<'static>),
     Blob(webcore::blob::Any),
     #[cfg(any(target_os = "linux", target_os = "android"))]
-    #[cfg_attr(target_env = "ohos", allow(dead_code))]
     Memfd(Fd),
     Pipe,
     /// Like `Pipe` at indices >= 3, but the parent end of the socketpair is
@@ -107,7 +105,6 @@ impl ToSpawnOptsError {
 
 impl Stdio {
     #[cfg(any(target_os = "linux", target_os = "android"))]
-    #[cfg_attr(target_env = "ohos", allow(dead_code))]
     pub(crate) fn byte_slice(&self) -> &[u8] {
         match self {
             // SAFETY: `buf` is a live backref owned by the caller (shell); the
@@ -141,14 +138,9 @@ impl Stdio {
     pub(crate) fn use_memfd(&mut self, index: u32) -> bool {
         // OHOS: memfd writes not visible to fstat after child exits
         // (verified 2026-06-11: dup2(memfd,1/2) → child writes → fstat size=0).
-        // Fall through to socketpair on OHOS.
-        #[cfg(target_env = "ohos")]
-        {
-            let _ = index;
-            return false;
-        }
-
-        #[cfg(not(target_env = "ohos"))]
+        // Falls through to socketpair there via the can_use_memfd() check
+        // below; the body stays compiled on OHOS so `Stdio::Memfd` and
+        // `byte_slice` stay reachable.
         {
             use crate::api::bun_process::spawn_sys;
             if !spawn_sys::can_use_memfd() {
