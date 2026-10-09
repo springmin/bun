@@ -114,7 +114,7 @@ impl Ctx {
     }
 }
 
-pub fn hash(data: &[u8]) -> [u8; 32] {
+pub(crate) fn hash(data: &[u8]) -> [u8; 32] {
     let mut ctx = Ctx::new();
     ctx.update(data);
     ctx.finalize()

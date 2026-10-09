@@ -14,7 +14,7 @@ const H: usize = 32;
 /// intermediate hashes (levels from just above leaves up to, but not including,
 /// the root).  These are packed sequentially: each level is a contiguous block
 /// of 32-byte hashes, and levels are written top-down (root-1 first).
-pub fn root_hash_and_tree(data: &[u8], cs_off: u64, cs_len: u64) -> ([u8; H], Vec<u8>) {
+pub(crate) fn root_hash_and_tree(data: &[u8], cs_off: u64, cs_len: u64) -> ([u8; H], Vec<u8>) {
     if data.is_empty() {
         let zeros = [0u8; PAGE];
         return (sha256::hash(&zeros), Vec::new());
@@ -93,6 +93,6 @@ pub fn root_hash_and_tree(data: &[u8], cs_off: u64, cs_len: u64) -> ([u8; H], Ve
 }
 
 /// Compute only the fs-verity merkle tree root hash (backward compat).
-pub fn root_hash(data: &[u8], cs_off: u64, cs_len: u64) -> [u8; H] {
+pub(crate) fn root_hash(data: &[u8], cs_off: u64, cs_len: u64) -> [u8; H] {
     root_hash_and_tree(data, cs_off, cs_len).0
 }

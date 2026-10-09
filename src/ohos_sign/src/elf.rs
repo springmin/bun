@@ -124,7 +124,7 @@ fn find_section_by_name<'a>(
     None
 }
 
-pub fn has_codesign_section(elf: &[u8]) -> bool {
+pub(crate) fn has_codesign_section(elf: &[u8]) -> bool {
     let Ok((e_shoff, e_shnum, e_shstrndx, e_shentsize)) = parse_header(elf) else {
         return false;
     };
@@ -141,7 +141,7 @@ pub fn has_codesign_section(elf: &[u8]) -> bool {
 
 /// Return `(file offset, size)` of the `.codesign` section when it is present
 /// and in bounds; used to validate an existing self-signature.
-pub fn codesign_section_range(elf: &[u8]) -> Option<(usize, usize)> {
+pub(crate) fn codesign_section_range(elf: &[u8]) -> Option<(usize, usize)> {
     let (e_shoff, e_shnum, e_shstrndx, e_shentsize) = parse_header(elf).ok()?;
     let cs_entry = find_section_by_name(
         elf,
@@ -161,7 +161,7 @@ pub fn codesign_section_range(elf: &[u8]) -> Option<(usize, usize)> {
 
 /// Strip .codesign section. Returns true if a section was removed.
 /// Rebuilds the ELF in-place by rewriting shstrtab and SHT without the removed entry.
-pub fn strip(elf: &mut Vec<u8>) -> Result<bool, SignError> {
+pub(crate) fn strip(elf: &mut Vec<u8>) -> Result<bool, SignError> {
     let (e_shoff, e_shnum, e_shstrndx, e_shentsize) = parse_header(elf)?;
     let e_shentsize = e_shentsize as usize;
     let Some(cs_entry_off) = find_section_by_name(
@@ -344,7 +344,7 @@ fn inject_codesign_section(elf: &[u8]) -> Result<(Vec<u8>, u64), SignError> {
 }
 
 /// Sign an ELF. If `force` is true, strip any existing .codesign first.
-pub fn sign(elf: &[u8], force: bool) -> Result<Vec<u8>, SignError> {
+pub(crate) fn sign(elf: &[u8], force: bool) -> Result<Vec<u8>, SignError> {
     if !is_elf64(elf) {
         return Err(SignError::NotElf64);
     }

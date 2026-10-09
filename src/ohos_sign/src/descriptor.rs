@@ -1,11 +1,11 @@
-pub const SIZE: usize = 256;
-pub const FLAG_SELF_SIGN: u32 = 0x10;
-pub const ELF_SIGN_INFO_TYPE: u32 = 1;
+pub(crate) const SIZE: usize = 256;
+pub(crate) const FLAG_SELF_SIGN: u32 = 0x10;
+pub(crate) const ELF_SIGN_INFO_TYPE: u32 = 1;
 
 /// Build the 256-byte fs-verity descriptor.
 /// When computing the digest, pass `sign_size = 0`.
 /// When writing to disk, pass `sign_size = 32`.
-pub fn build(sign_size: u32, file_size: u64, root_hash: &[u8; 32]) -> [u8; SIZE] {
+pub(crate) fn build(sign_size: u32, file_size: u64, root_hash: &[u8; 32]) -> [u8; SIZE] {
     let mut out = [0u8; SIZE];
     out[0] = 1;   // version
     out[1] = 1;   // hashAlgorithm = SHA-256

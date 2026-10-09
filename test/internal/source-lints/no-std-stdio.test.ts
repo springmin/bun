@@ -26,7 +26,11 @@ test("Rust sources linked into Bun do not use the streams of the standard librar
   ]);
   // Programs of their own.
   const isLinked = (file: string) =>
-    !file.endsWith("/build.rs") && !file.includes("/benches/") && !file.startsWith("src/sema/standalone/");
+    !file.endsWith("/build.rs") &&
+    !file.includes("/benches/") &&
+    !file.startsWith("src/sema/standalone/") &&
+    // The OHOS signing helper is a build/install-time tool, not linked into Bun.
+    !file.startsWith("src/ohos_sign/src/bin/");
 
   const found = new Map<string, number>();
   let scanned = 0;

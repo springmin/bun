@@ -195,7 +195,7 @@ fn write_temp_then_rename(tmp: &Path, dest: &Path, data: &[u8]) -> Maybe<()> {
 /// is (or became) signed; false if not an ELF or signing failed.
 /// Called from BunProcess.cpp before `dlopen()`.
 #[unsafe(no_mangle)]
-pub extern "C" fn ohos_ensure_elf_signed(path: *const core::ffi::c_char) -> bool {
+pub(crate) extern "C" fn ohos_ensure_elf_signed(path: *const core::ffi::c_char) -> bool {
     if path.is_null() {
         return false;
     }
