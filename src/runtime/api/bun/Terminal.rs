@@ -595,11 +595,6 @@ impl Terminal {
         // synchronously; that path is one-shot, so without this replay the
         // user's `exit` callback would never fire at all.
         if let Some(code) = terminal.deferred_exit.take() {
-            #[cfg(debug_assertions)]
-            eprintln!(
-                "T@{:x} init: replaying deferred exit_code={}",
-                parent_ptr as usize, code
-            );
             terminal.this_value.with_mut(|v| v.downgrade());
             terminal.call_exit_callback(code, None);
         }
@@ -1956,12 +1951,6 @@ impl Terminal {
                 // so nothing will ever retry. Stash it; `init_terminal`
                 // replays it once the callbacks are registered.
                 self.deferred_exit.set(Some(exit_code));
-                #[cfg(debug_assertions)]
-                eprintln!(
-                    "T@{:x}   -> DEFERRED exit_code={} (wrapper not ready yet)",
-                    std::ptr::from_ref(self) as usize,
-                    exit_code,
-                );
             } else {
                 self.call_exit_callback(exit_code, None);
             }
