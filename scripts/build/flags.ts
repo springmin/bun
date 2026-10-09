@@ -615,6 +615,20 @@ export const globalFlags: Flag[] = [
     when: c => c.unix && c.ci,
     desc: "Remap source paths in debug info (reproducible builds)",
   },
+
+  // ─── OHOS (shared with deps) ───
+  {
+    flag: "-fno-emulated-tls",
+    when: c => c.ohos,
+    // clang's default for this target is emulated TLS (-femulated-tls), so
+    // every `__thread`/`thread_local` (mimalloc's per-thread heap pointer
+    // included) goes through a software lookup instead of a hardware TLS
+    // access. OHOS's musl supports native TLS; the default looks inherited
+    // from Android's historical NDK clang config. Must live in globalFlags
+    // (not bunOnlyFlags): the affected code is in deps' own DirectBuilds
+    // (e.g. mimalloc), which only inherit globalFlags.
+    desc: "OHOS: force native TLS — this target's emulated-tls default isn't a real platform limitation",
+  },
 ];
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1566,6 +1580,15 @@ export const linkerFlags: Flag[] = [
     ],
     when: c => c.ohos,
     desc: "OHOS linker tuning: 8MB stack (debug compression skipped — host LLVM lacks zlib)",
+  },
+  {
+    // lld's aarch64-linux-ohos default gives RW/TLS a 64KiB p_align but
+    // leaves R/R-E at 4KiB, so a strict-p_align loader sees the segments
+    // overlap by a few KiB (bun's own standalone module-graph
+    // append/relocate logic checks p_align).
+    flag: ["-Wl,-z,common-page-size=0x10000", "-Wl,-z,max-page-size=0x10000"],
+    when: c => c.ohos,
+    desc: "OHOS: uniform 64 KiB segment alignment — mixed 4K/64K PT_LOAD align overlaps under strict p_align",
   },
   {
     // Matches the linux/freebsd release links; the pre-merge release linked
