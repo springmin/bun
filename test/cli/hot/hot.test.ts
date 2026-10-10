@@ -21,7 +21,7 @@ const sourcemapReloads = isOHOS ? 20 : 50;
  * was encountered, potentially losing data and causing test hangs.
  */
 async function driveErrorReloadCycle(
-  runner: ReturnType<typeof spawn>,
+  runner: Bun.Subprocess<"ignore", "ignore", "pipe">,
   opts: {
     targetCount: number;
     onReload: (counter: number) => void;

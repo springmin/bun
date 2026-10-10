@@ -13,6 +13,7 @@ import {
 } from "node:fs";
 import { basename, delimiter, dirname, isAbsolute, join } from "node:path";
 import { zstdDecompressSync } from "node:zlib";
+import { modulesInRings } from "./differential";
 
 // The directory of the `lib.*.d.ts` files of the `typescript7` package, which has them in a package for the platform.
 const typescript7 = (() => {
@@ -632,43 +633,124 @@ describe.concurrent("bun check", () => {
     `);
   });
 
-  test("modules that enter the same cycles produce the same output on any number of threads", async () => {
-    // Whichever file is checked first enters each cycle: the variances of type parameters, recursive aliases, and
-    // functions and constants without annotations, each through a ring of modules.
-    const n = isDebug || isASAN ? 24 : 60;
-    const files: Record<string, string> = {};
-    for (let i = 0; i < n; i++) {
-      const [a, b, d] = [(i + 1) % n, (i + 7) % n, (i * 3 + 2) % n];
-      files[`m${i}.ts`] = [
-        ...[...new Set([a, b, d])]
-          .filter(j => j !== i)
-          .map(j => `import { f${j}, g${j}, C${j}, v${j}, type T${j}, type R${j} } from "./m${j}";`),
-        `export interface T${i}<A> { a: A; next: T${a}<A[]> | null; take(x: T${b}<A>): void; give(): T${d}<A> }`,
-        `export type R${i}<X, N extends unknown[] = []> = N["length"] extends 6 ? X : R${a}<{ m${i}: X }, [...N, 1]>;`,
-        `export function f${i}(x: number) { return x > 0 ? { k: "m${i}" as const, inner: f${a}(x - 1) } : null; }`,
-        `export function g${i}(x: number) { return ${i === 0 ? "x" : `{ k: ${i}, inner: g${Math.floor(i / 2)}(x) }`}; }`,
-        `export class C${i}<A> { constructor(public v: A) {} map<B>(h: (a: A) => B): C${b}<B> { return new C${b}(h(this.v)); } }`,
-        `export const v${i} = new C${a}(${i}).map(x => [x, v${d}] as const);`,
-        // `never` puts the types in the messages.
-        `const r${i}: never = f${d}(1);`,
-        `const s${i}: never = g${b}(1);`,
-        `const t${i}: T${a}<string> = null! as T${a}<unknown>;`,
-        `const u${i}: T${b}<unknown> = null! as T${b}<string>;`,
-        `const w${i}: never = null! as R${d}<${i}>;`,
-        `const y${i}: never = v${b};`,
-        `r${i}; s${i}; t${i}; u${i}; w${i}; y${i};\n`,
-      ].join("\n");
-    }
-    using dir = project(files);
-    const [one, ...others] = await Promise.all(
-      [1, 2, 3, 8, 16].map(threads => check(dir, ["--threads", String(threads)])),
+  describe("a file that is too long for control flow analysis takes no error from another file", () => {
+    const long = (end: string) => "const data = [];\n" + repeat("data[0] = 0;\n", 3000) + end;
+    const right = `type S = { k: "a" } | { k: "b" };\ndeclare function assertNever(x: never): never;\nexport function f(s: S) {\n  switch (s.k) {\n    case "a":\n      return 1;\n    case "b":\n      return 2;\n    default:\n      return assertNever(s);\n  }\n}\n`;
+    const wrong = `declare let s: string;\nexport const a: number = s;\nexport function f(x: string): number {\n  return x;\n}\nexport const b = s.nope;\n`;
+    const errors = [
+      "wrong.ts(2,14): error TS2322: Type 'string' is not assignable to type 'number'.",
+      "wrong.ts(4,3): error TS2322: Type 'string' is not assignable to type 'number'.",
+      "wrong.ts(6,20): error TS2339: Property 'nope' does not exist on type 'string'.",
+    ];
+    test.each([
+      ["it is checked", "a-generated.ts", {}, [], long("export default data;\n"), wrong, errors],
+      // 2563 is not among the errors of a JavaScript file that is not checked.
+      [
+        "it is JavaScript that is not checked, as with the tsconfig.json of bun init",
+        "a-generated.js",
+        { allowJs: true },
+        ["--checkJs"],
+        long("export default data;\n"),
+        wrong,
+        errors,
+      ],
+      [
+        "it reads a variable of the other file behind its limit",
+        "a-generated.ts",
+        {},
+        [],
+        long("data[0] = b;\n"),
+        `declare let s: string;\nconst b = s.nope;\nconst c: number = s;\n`,
+        [
+          "wrong.ts(2,13): error TS2339: Property 'nope' does not exist on type 'string'.",
+          "wrong.ts(3,7): error TS2322: Type 'string' is not assignable to type 'number'.",
+        ],
+      ],
+    ] as const)("%s", async (_, generated, options, shows, text, other, expected) => {
+      using dir = project({
+        [generated]: text,
+        "wrong.ts": other,
+        "right.ts": right,
+        "tsconfig.json": JSON.stringify({
+          compilerOptions: { ...JSON.parse(tsconfig).compilerOptions, ...options },
+          files: [generated, "right.ts", "wrong.ts"],
+        }),
+      });
+      const [control, ...runs] = await Promise.all([
+        check(dir, [...shows]),
+        ...[1, 2, 8].map(threads => check(dir, ["--threads", String(threads)])),
+      ]);
+      // In a debug build the stack can run out before the 2,000 levels of TS2563.
+      if (!isDebug && !isASAN) expect(control.stdout).toContain(`${generated}(1,1): error TS2563:`);
+      for (const { stdout, exitCode } of runs) {
+        const others = stdout.split("\n").filter(line => !line.startsWith("a-generated."));
+        expect(others.join("\n")).toBe(expected.join("\n"));
+        expect(exitCode).toBe(1);
+      }
+    });
+
+    test("nor does another file that is too long switch it on again", async () => {
+      using dir = project({
+        "a-generated.ts":
+          `import { last } from "./c-generated";\n` +
+          long(
+            `data[0] = last;\nexport const f = (p: string | number) => {\n  const n: number = p;\n  return [n, data];\n};\n`,
+          ),
+        "c-generated.ts": "const rows = [];\n" + repeat("rows[0] = 0;\n", 3000) + "export const last = rows;\n",
+        "wrong.ts": wrong,
+      });
+      const tooLong = (file: string) =>
+        `${file}(1,1): error TS2563: The containing function or module body is too large for control flow analysis.`;
+      for (const { stdout, exitCode } of await Promise.all(
+        [1, 2, 8].map(threads => check(dir, ["--threads", String(threads)])),
+      )) {
+        // In a debug build the stack can run out before the 2,000 levels of TS2563.
+        if (isDebug || isASAN) {
+          expect(stdout.split("\n").filter(line => line.startsWith("wrong.ts"))).toEqual(errors);
+        } else {
+          expect(stdout).toBe([tooLong("a-generated.ts"), tooLong("c-generated.ts"), ...errors].join("\n"));
+        }
+        expect(exitCode).toBe(1);
+      }
+    });
+  });
+
+  // The time was cubic and worse: 16 s for 1,000 lines in a release build, where it now takes 0.2 s.
+  test("an array without a type that is filled line by line", async () => {
+    const n = isDebug || isASAN ? 200 : 1000;
+    const lines = (line: (i: number) => string, count = n) => Array.from({ length: count }, (_, i) => line(i)).join("");
+    const end = "export const probe: never = rows;\n";
+    using dir = project({
+      "assigned.ts": "const rows = [];\n" + lines(i => `rows[${i}] = { id: ${i} };\n`) + end,
+      "pushed.ts": "const rows = [];\n" + lines(i => `rows.push({ id: ${i} });\n`) + end,
+      // Half as many: each line has three flow nodes, and 2,000 levels are the limit of TS2563.
+      "pushed-if.ts":
+        "declare const c: boolean;\nconst rows = [];\n" + lines(i => `if (c) rows.push({ id: ${i} });\n`, n / 2) + end,
+    });
+    const { stdout, exitCode } = await check(dir);
+    expect(stdout).toBe(
+      [
+        `assigned.ts(${n + 2},14): error TS2322: Type '{ id: number; }[]' is not assignable to type 'never'.`,
+        `pushed-if.ts(${n / 2 + 3},14): error TS2322: Type '{ id: number; }[]' is not assignable to type 'never'.`,
+        `pushed.ts(${n + 2},14): error TS2322: Type '{ id: number; }[]' is not assignable to type 'never'.`,
+      ].join("\n"),
     );
-    expect(one.stdout.split("\n").length).toBeGreaterThan(n * 6);
+    expect(exitCode).toBe(1);
+  });
+
+  // One thread checks the files in program order, like `tsc --singleThreaded`: see differential.test.ts.
+  test("modules that enter the same cycles produce the same output on any number of threads above one", async () => {
+    const n = isDebug || isASAN ? 24 : 60;
+    using dir = project(modulesInRings(n));
+    const [two, ...others] = await Promise.all(
+      [2, 3, 8, 16].map(threads => check(dir, ["--threads", String(threads)])),
+    );
+    expect(two.stdout.split("\n").length).toBeGreaterThan(n * 6);
     for (const { stdout, exitCode } of others) {
-      expect(stdout).toBe(one.stdout);
+      expect(stdout).toBe(two.stdout);
       expect(exitCode).toBe(1);
     }
-    expect(one.exitCode).toBe(1);
+    expect(two.exitCode).toBe(1);
   });
 
   test("prints related information under an error", async () => {
@@ -1543,6 +1625,53 @@ c/index.ts(2,14): error TS2322: Type 'number' is not assignable to type 'string'
       for (const threads of ["1", "8"]) {
         const { stdout } = await check(dir, ["--threads", threads]);
         expect(stdout).toBe(expected);
+      }
+    });
+
+    // The projects of one check share what they read. `tsc -b` shares it by path alone, so there `late` and `later`
+    // get the old file too, although it has written the new one by then, and the next `tsc -b` finds the new one in all.
+    test("an old declaration file on the disk is what a project before the one that emits it sees, and no other", async () => {
+      const compilerOptions = { ...options, outDir: "dist", rootDir: "src" };
+      const config = (references: { path: string }[]) =>
+        JSON.stringify({ compilerOptions, files: ["src/index.ts"], references });
+      const names = (path: string) =>
+        `import * as lib from "${path}";\nexport const names: never = null! as keyof typeof lib;\nexport const keys: never = null! as keyof lib.Shape;\n`;
+      using dir = project({
+        "tsconfig.json": JSON.stringify({
+          files: [],
+          references: [{ path: "./early" }, { path: "./lib" }, { path: "./late" }, { path: "./later" }],
+        }),
+        "lib/tsconfig.json": config([]),
+        "lib/src/index.ts": `export const fresh = "fresh" as const;\nexport interface Shape { fresh: 1 }\n`,
+        "lib/dist/index.d.ts": `export declare const stale: "stale";\nexport interface Shape { stale: 1 }\n`,
+        "early/tsconfig.json": config([]),
+        "early/src/index.ts": names("../../lib/dist/index"),
+        "late/tsconfig.json": config([{ path: "../lib" }]),
+        "late/src/index.ts": names("../../lib/src/index"),
+        "later/tsconfig.json": config([]),
+        "later/src/index.ts": names("../../lib/dist/index"),
+      });
+      const expected = `early/src/index.ts(2,14): error TS2322: Type '"stale"' is not assignable to type 'never'.
+early/src/index.ts(3,14): error TS2322: Type '"stale"' is not assignable to type 'never'.
+late/src/index.ts(2,14): error TS2322: Type '"fresh"' is not assignable to type 'never'.
+late/src/index.ts(3,14): error TS2322: Type '"fresh"' is not assignable to type 'never'.
+later/src/index.ts(2,14): error TS2322: Type '"fresh"' is not assignable to type 'never'.
+later/src/index.ts(3,14): error TS2322: Type '"fresh"' is not assignable to type 'never'.`;
+      for (const threads of ["1", "8"]) {
+        const { stdout, exitCode } = await check(dir, ["--threads", threads]);
+        expect({ stdout, exitCode }).toEqual({ stdout: expected, exitCode: 1 });
+      }
+      // Each directory is a build of its own. What `lib` emits for `late` is not on the disk, where `later` looks.
+      const separately = `late/src/index.ts(2,14): error TS2322: Type '"fresh"' is not assignable to type 'never'.
+late/src/index.ts(3,14): error TS2322: Type '"fresh"' is not assignable to type 'never'.
+later/src/index.ts(2,14): error TS2322: Type '"stale"' is not assignable to type 'never'.
+later/src/index.ts(3,14): error TS2322: Type '"stale"' is not assignable to type 'never'.`;
+      for (const directories of [
+        ["late", "later"],
+        ["later", "late"],
+      ]) {
+        const { stdout, exitCode } = await check(dir, directories);
+        expect({ stdout, exitCode }).toEqual({ stdout: separately, exitCode: 1 });
       }
     });
 
@@ -2782,16 +2911,23 @@ export const wrong: number = { ...tool, kind: 1 };
     });
 
     test("a type that is nested too deeply to be printed whole loses no error", async () => {
-      // The frames of a build that is not optimised are larger: at 1,000 levels the check itself runs out of stack there.
-      const depth = isDebug || isASAN ? 100 : 1000;
+      // An optimised build prints about 700 levels, and the check itself runs out of stack at about 3,000. The frames of
+      // another build are larger, by how much depends on the system: there the type may be printed whole.
+      const isOptimised = !isDebug && !isASAN;
+      const depth = isOptimised ? 1500 : 100;
       using dir = project({
         "a.ts": `declare const x: ${repeat("{ a: ", depth)}1${repeat(" }", depth)};
 export const wrong: number = x;
 `,
       });
       const { stdout, stderr, exitCode } = await check(dir, ["--noErrorTruncation"]);
-      expect(stdout).toStartWith("a.ts(2,14): error TS2322: Type '{ a: { a: { a: { a: { a: { a: ");
-      expect(stdout).toEndWith(" }; }; }' is not assignable to type 'number'.");
+      const levels = stdout.split("{ a: ").length - 1;
+      expect(levels).toBeGreaterThanOrEqual(50);
+      if (isOptimised) expect(levels).toBeLessThan(depth);
+      const innermost = levels < depth ? "any" : "1";
+      expect(stdout).toBe(
+        `a.ts(2,14): error TS2322: Type '${repeat("{ a: ", levels)}${innermost}${repeat("; }", levels)}' is not assignable to type 'number'.`,
+      );
       expect(stderr.split("\n")[0]).toBe("Found 1 error in 1 file, checked 1 file [time]");
       expect(exitCode).toBe(1);
     });
@@ -2817,6 +2953,183 @@ const wrong: number = "";
       `);
       expect(stderr.split("\n")[0]).toBe(
         "error: ran out of stack in a.ts. This is a bug in Bun: errors in this file may be missing.",
+      );
+      expect(exitCode).toBe(1);
+    });
+
+    // The parser reads a run of `!` in a loop, so nothing bounds its length.
+    test.each([
+      [
+        "an initializer",
+        (run: string) => `export const z: number = x${run};`,
+        "a.ts(5,14): error TS2322: Type '{ a: number; }' is not assignable to type 'number'.",
+      ],
+      [
+        "an argument",
+        (run: string) => `take(x${run});`,
+        "a.ts(5,6): error TS2345: Argument of type '{ a: number; }' is not assignable to parameter of type 'number'.",
+      ],
+      [
+        "before a property access",
+        (run: string) => `take(x${run}.b);`,
+        "a.ts(5,60008): error TS2339: Property 'b' does not exist on type '{ a: number; }'.",
+      ],
+      [
+        "in an optional chain",
+        (run: string) => `take(x?.a${run}.b);`,
+        "a.ts(5,60011): error TS2339: Property 'b' does not exist on type 'number'.",
+      ],
+      [
+        "an assignment target",
+        (run: string) => `y${run} = "";`,
+        "a.ts(5,1): error TS2322: Type 'string' is not assignable to type 'number'.",
+      ],
+      [
+        "an operand of ++",
+        (run: string) => `x${run}++;`,
+        "a.ts(5,1): error TS2588: Cannot assign to 'x' because it is a constant.",
+      ],
+      [
+        "a condition over an optional chain",
+        (run: string) => `if (f()?.a${run}.b) take(1);`,
+        "a.ts(5,60012): error TS2339: Property 'b' does not exist on type 'number'.",
+      ],
+      [
+        "an object literal with a contextual type",
+        (run: string) => `export const o: { a: 1 } = ({ a: 2 })${run};`,
+        "a.ts(5,14): error TS2322: Type '{ a: 2; }' is not assignable to type '{ a: 1; }'.\n  Types of property 'a' are incompatible.\n    Type '2' is not assignable to type '1'.",
+      ],
+      [
+        "an arrow function with a contextual type",
+        (run: string) => `export const g: (n: number) => void = ((n) => n.b)${run};`,
+        "a.ts(5,49): error TS2339: Property 'b' does not exist on type 'number'.",
+      ],
+      [
+        "an array literal with a contextual type",
+        (run: string) => `export const l: 1[] = [2]${run};`,
+        "a.ts(5,14): error TS2322: Type '2[]' is not assignable to type '1[]'.\n  Type '2' is not assignable to type '1'.",
+      ],
+    ])("60,000 non-null assertions in a row, %s", async (_where, statement, expected) => {
+      using dir = project({
+        "a.ts": `declare const x: { a: number } | undefined;
+declare let y: number | undefined;
+declare function f(): typeof x;
+declare function take(n: number): void;
+${statement(repeat("!", 60_000))}
+`,
+      });
+      const { stdout, exitCode } = await check(dir);
+      expect(stdout).toBe(expected);
+      expect(exitCode).toBe(1);
+    });
+
+    // `T[][][]` is read in a loop as well. Its type is as deep as it looks, so what a build says about the
+    // type depends on the size of its stack frames. The errors after it do not.
+    test.each([
+      [
+        "the type of a class property",
+        "a.ts",
+        (run: string) => `export class C {\n  p: number${run} = 1;\n}`,
+        `a.ts(6,32): error TS2339: Property 'nope' does not exist on type '""'.`,
+      ],
+      [
+        "a JSDoc @typedef",
+        "a.js",
+        (run: string) => `/** @typedef {number${run}} T */\n/** @type {T} */\nexport let t = 1;`,
+        `a.js(5,14): error TS2322: Type 'string' is not assignable to type 'number'.
+a.js(6,32): error TS2339: Property 'nope' does not exist on type 'number'.`,
+      ],
+      [
+        "a JSDoc @param with properties",
+        "a.js",
+        (run: string) => `/**\n * @param {Object${run}} a\n * @param {number} a.b\n */\nexport function f(a) {}`,
+        `a.js(7,14): error TS2322: Type 'string' is not assignable to type 'number'.
+a.js(8,32): error TS2339: Property 'nope' does not exist on type 'number'.`,
+      ],
+    ])("200,000 array types in a row, %s", async (_where, name, declaration, errorsAfterIt) => {
+      using dir = project({
+        [name]: `${declaration(repeat("[]", 200_000))}
+/** @type {number} */
+export const wrong = "";
+export const alsoWrong = wrong.nope;
+`,
+      });
+      const { stdout, exitCode } = await check(dir, ["--allowJs", "--checkJs"]);
+      expect(stdout.slice(-errorsAfterIt.length)).toBe(errorsAfterIt);
+      expect(exitCode).toBe(1);
+    });
+
+    // The literal has its members when the properties that assignments declare are added, and above eight properties
+    // a name is looked up in an index.
+    test.each([
+      ["allowJs alone", [], "", 0],
+      [
+        "checkJs",
+        ["--checkJs"],
+        `a.js(5,5): error TS7053: Element implicitly has an 'any' type because expression of type 'any' can't be used to index type '{ a(): void; b(): void; c(): void; d(): void; e(): void; f(): void; g(): void; h(): void; i(): void; }'.
+a.js(5,10): error TS2304: Cannot find name 'k'.`,
+        1,
+      ],
+    ])(
+      "an object literal of nine methods in JavaScript, one of which assigns to this[k], %s",
+      async (_, flags, expected, code) => {
+        using dir = project({
+          "a.js": `const o = {
+  a() {}, b() {}, c() {}, d() {},
+  e() {}, f() {}, g() {},
+  h() {
+    this[k] = 1;
+  },
+  i() {},
+};
+`,
+        });
+        const { stdout, exitCode } = await check(dir, ["--allowJs", ...flags]);
+        expect(stdout).toBe(expected);
+        expect(exitCode).toBe(code);
+      },
+    );
+
+    // The way Kobalte types a component that renders as any element. Where `Elements[keyof Elements]` is a
+    // parameter its members meet in one intersection. Whether that is `never` is decided name by name, and
+    // comparing every pair of members for every name took minutes here.
+    test("a polymorphic component over 2,000 element types", async () => {
+      const kinds = ["string", "number", "boolean | undefined", "(event: { target: T }) => void", "T | undefined"];
+      const lines = (count: number, line: (i: number) => string) => Array.from({ length: count }, (_, i) => line(i));
+      const source = [
+        "interface Attributes<T> {",
+        ...lines(100, i => `  p${i}?: ${kinds[i % kinds.length]};`),
+        "}",
+        ...lines(2_000, i => `interface E${i} { kind: "e${i}" }`),
+        "interface Elements {",
+        ...lines(2_000, i => `  e${i}: Attributes<E${i}>;`),
+        "}",
+        `type Component<P> = (props: P) => unknown;
+type ValidComponent = keyof Elements | Component<any> | (string & {});
+type ComponentProps<T extends ValidComponent> = T extends Component<infer P>
+  ? P
+  : T extends keyof Elements
+    ? Elements[T]
+    : Record<string, unknown>;
+type OverrideProps<T, P> = Omit<T, keyof P> & P;
+type ElementOf<T> = T extends keyof Elements ? Elements[T] : any;
+interface PolymorphicAttributes<T extends ValidComponent> { as?: T | keyof Elements }
+type PolymorphicProps<T extends ValidComponent, Props extends {} = {}> = OverrideProps<
+  ComponentProps<T>,
+  Props & PolymorphicAttributes<T>
+>;
+interface TriggerOptions { p1?: string; onOpen?: () => void }
+interface TriggerCommonProps<T = unknown> { ref: T | ((el: T) => void); p3: (event: { target: T }) => void }
+type TriggerProps<T extends ValidComponent | unknown = unknown> = TriggerOptions &
+  Partial<TriggerCommonProps<ElementOf<T>>>;
+declare function Trigger<T extends ValidComponent = "e0">(props: PolymorphicProps<T, TriggerProps<T>>): unknown;
+export const First = <T extends ValidComponent = "e1">(props: PolymorphicProps<T, TriggerProps<T>>) => Trigger(props);
+export const wrong: number = "";`,
+      ].join("\n");
+      using dir = project({ "a.ts": source });
+      const { stdout, exitCode } = await check(dir);
+      expect(stdout).toBe(
+        `a.ts(${source.split("\n").length},14): error TS2322: Type 'string' is not assignable to type 'number'.`,
       );
       expect(exitCode).toBe(1);
     });

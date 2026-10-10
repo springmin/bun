@@ -1992,6 +1992,7 @@ impl<'p, 's> Checker<'p, 's> {
                 flags: PropFlags::empty(),
                 source: PropSource::Type(ty),
                 mapper: MapperId::IDENTITY,
+                name_type: TypeId::UNRESOLVED,
             };
             let wrapper = self.synth(Shape {
                 props: vec_from_iter_in([default], self.arena),
@@ -2824,6 +2825,7 @@ impl<'p, 's> Checker<'p, 's> {
                     _,
                     _,
                     is_js_literal,
+                    in_const_context,
                     ObjectLiteralCheck::ForParent,
                     object_flags,
                     is_fresh,
@@ -2868,6 +2870,7 @@ impl<'p, 's> Checker<'p, 's> {
                 file,
                 literal,
                 is_js_literal,
+                in_const_context,
                 created_by,
                 object_flags,
                 is_fresh,
@@ -3050,8 +3053,14 @@ impl<'p, 's> Checker<'p, 's> {
 
     /// `checkObjectLiteral` creates a new type for the symbol of the literal every time. `kept`,
     /// whose members are those of the first check, represents it if the members are the same.
-    fn recheck_object_literal(&mut self, file: FileId, e: ExprId, kept: TypeId) -> TypeId {
-        let shape = self.build_object_literal_shape(file, e, false);
+    fn recheck_object_literal(
+        &mut self,
+        file: FileId,
+        e: ExprId,
+        in_const_context: bool,
+        kept: TypeId,
+    ) -> TypeId {
+        let shape = self.build_object_literal_shape(file, e, in_const_context, false);
         let is_empty_resolved_type = shape.props.is_empty() && shape.index.is_empty();
         if is_empty_resolved_type
             || self.inference_contexts.is_empty()
@@ -3068,8 +3077,14 @@ impl<'p, 's> Checker<'p, 's> {
     /// (`getTypeAtFlowLoopLabel`) or `anySignature`: the properties have the types just computed.
     /// The members of `kept` are resolved when they are read, from the complete type of the loop or
     /// the resolved signature.
-    fn object_literal_in_flow_loop(&mut self, file: FileId, e: ExprId, kept: TypeId) -> TypeId {
-        let shape = self.build_object_literal_shape(file, e, true);
+    fn object_literal_in_flow_loop(
+        &mut self,
+        file: FileId,
+        e: ExprId,
+        in_const_context: bool,
+        kept: TypeId,
+    ) -> TypeId {
+        let shape = self.build_object_literal_shape(file, e, in_const_context, true);
         if shape.props.is_empty() && shape.index.is_empty() {
             return kept;
         }
@@ -3573,9 +3588,13 @@ impl<'p, 's> Checker<'p, 's> {
                 let spread = self.type_of_expr(file, prop.value);
                 let spread = self.reduced(spread);
                 // 2698 and `spread = c.errorType`. `check_spread` reports it, but not for a target
-                // that is destructured: the walk does not check that one as an expression.
+                // that is destructured: the walk does not check that one as an expression. Nor
+                // where only `CheckModeInferential` gives the reference such a type:
+                // `getNarrowableTypeForReference` substitutes no constraints then.
                 if !self.is_valid_spread_type(spread) {
-                    if self.is_definite_assignment_target(file, e)
+                    if self.check_mode().contains(CheckMode::INFERENTIAL) {
+                        self.report_spread_in_inference(file, e, p);
+                    } else if self.is_definite_assignment_target(file, e)
                         && self.is_target_of_assignment_in_progress(file, e)
                     {
                         self.error(file, p, 2698, &[]);
@@ -3610,6 +3629,7 @@ impl<'p, 's> Checker<'p, 's> {
                 flags: flags | written,
                 source,
                 mapper: literal_mapper,
+                name_type: TypeId::UNRESOLVED,
             });
         }
         self.check_spread_overrides(file, props);
@@ -3658,15 +3678,23 @@ impl<'p, 's> Checker<'p, 's> {
         let scope = self.enclosing_scope_of_expr(file, e);
         let mapper = self.identity_mapper_with_adopted(file, scope);
         let is_js_literal = self.is_js_literal(file, e);
-        let created_by = ObjectLiteralCheck::ForParent;
+        let in_const_context = self.is_const_context(file, e);
         let kept = self.intern(TypeData::Anon {
-            origin: Origin::ObjectLiteral(file, e, is_js_literal, created_by, object_flags, true),
+            origin: Origin::ObjectLiteral(
+                file,
+                e,
+                is_js_literal,
+                in_const_context,
+                ObjectLiteralCheck::ForParent,
+                object_flags,
+                true,
+            ),
             mapper,
         });
         if self.is_rechecking() {
-            self.recheck_object_literal(file, e, kept)
+            self.recheck_object_literal(file, e, in_const_context, kept)
         } else if is_written {
-            self.object_literal_in_flow_loop(file, e, kept)
+            self.object_literal_in_flow_loop(file, e, in_const_context, kept)
         } else {
             // `getObjectLiteralIndexInfo` requests the types of the members, accessors too, while
             // the literal is checked. The members of `kept` are resolved when they are read.
@@ -3804,7 +3832,7 @@ impl<'p, 's> Checker<'p, 's> {
         }
         let is_inferential = check_mode.contains(CheckMode::INFERENTIAL);
         let is_context_sensitive = self.is_context_sensitive(file, e);
-        let mut assigned = None;
+        let mut assigned: AssignedSignature = (None, false);
         if let Some(contextual) = contextual_signature {
             let level = self.get_inference_context(file, e);
             if is_context_sensitive {
@@ -3822,7 +3850,10 @@ impl<'p, 's> Checker<'p, 's> {
                         )
                     })
                 });
-                assigned = Some(instantiated.unwrap_or(contextual));
+                assigned = (
+                    Some(instantiated.unwrap_or(contextual)),
+                    instantiated.is_some(),
+                );
             } else if is_inferential
                 && f.type_params.is_empty()
                 // `len(node.Parameters())` counts a declared `this` parameter.
@@ -3954,7 +3985,11 @@ impl<'p, 's> Checker<'p, 's> {
     }
 
     /// The entry of `context_checked_under` for `func`.
-    fn context_checked_under_taint(&mut self, file: FileId, func: FnId) -> Option<Option<SigId>> {
+    fn context_checked_under_taint(
+        &mut self,
+        file: FileId,
+        func: FnId,
+    ) -> Option<AssignedSignature> {
         if self.context_checked_under.is_empty() {
             return None;
         }
@@ -3983,6 +4018,27 @@ impl<'p, 's> Checker<'p, 's> {
     /// `NodeCheckFlagsContextChecked`, with the signature passed to
     /// `assignContextualParameterTypes`.
     pub(super) fn context_checked(&mut self, file: FileId, func: FnId) -> Option<Option<SigId>> {
+        self.assigned_signature(file, func).map(|it| it.0)
+    }
+
+    /// The function whose type parameters `sig` has, if they are those of a contextual signature
+    /// that `instantiateSignature(contextualSignature, inferenceContext.mapper)` cloned for it: no
+    /// other signature has that list (`core.Same`). A clone is identified by its declaration and
+    /// the mapper here, so the list equals that of the parameter type instantiated likewise.
+    pub(super) fn function_with_type_parameters_cloned_for_it(
+        &mut self,
+        sig: SigId,
+    ) -> Option<(FileId, FnId)> {
+        let declared = self.declared_sig(sig);
+        let (file, func, _) = self.sig_decl(declared)?;
+        if !self.hir(file)[func].type_params.is_empty() {
+            return None;
+        }
+        self.takes_context(file, func)?;
+        (self.assigned_signature(file, func)?.1).then_some((file, func))
+    }
+
+    fn assigned_signature(&mut self, file: FileId, func: FnId) -> Option<AssignedSignature> {
         match self
             .context_checking
             .iter()
@@ -4488,6 +4544,17 @@ impl<'p, 's> Checker<'p, 's> {
 
     /// The start of `checkObjectLiteral`, for the literal `e`.
     fn object_literal_context(&mut self, file: FileId, e: ExprId) -> ObjectLiteralContext {
+        let in_const_context = self.is_const_context(file, e);
+        self.object_literal_context_in(file, e, in_const_context)
+    }
+
+    /// `object_literal_context`, given `isConstContext(e)`.
+    fn object_literal_context_in(
+        &mut self,
+        file: FileId,
+        e: ExprId,
+        in_const_context: bool,
+    ) -> ObjectLiteralContext {
         let in_destructuring_pattern = self.is_assignment_target(file, e);
         let implied = if self.pattern_that_may_expect(file, e).is_some() {
             self.apparent_type_of_contextual_type(file, e, ContextFlags::empty())
@@ -4498,7 +4565,7 @@ impl<'p, 's> Checker<'p, 's> {
         ObjectLiteralContext {
             in_destructuring_pattern,
             implied,
-            in_const_context: self.is_const_context(file, e),
+            in_const_context,
         }
     }
 
@@ -4684,18 +4751,19 @@ impl<'p, 's> Checker<'p, 's> {
         infos
     }
 
-    /// `is_written`: see `source_of_literal_member_in`.
+    /// `in_const_context`: see `Origin::ObjectLiteral`. `is_written`: see `source_of_literal_member_in`.
     pub(super) fn build_object_literal_shape(
         &mut self,
         file: FileId,
         e: ExprId,
+        in_const_context: bool,
         is_written: bool,
     ) -> Shape<'s> {
         let hir = self.hir(file);
         let ExprKind::Object(props) = hir[e].kind else {
             return Shape::new_in(self.arena);
         };
-        let context = self.object_literal_context(file, e);
+        let context = self.object_literal_context_in(file, e, in_const_context);
         let mut shape = Shape::new_in(self.arena);
         shape.props.reserve_exact(props.len());
         // The names of `shape.props`, of a literal with many members.
@@ -4730,6 +4798,7 @@ impl<'p, 's> Checker<'p, 's> {
                 flags: flags | written,
                 source,
                 mapper: MapperId::IDENTITY,
+                name_type: TypeId::UNRESOLVED,
             });
         }
         // FOR SPEED: in any other literal every member is the first declaration of its symbol. The binder adds a declaration to the

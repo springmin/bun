@@ -51,7 +51,7 @@ async function probeClientSocket(startRequest: (url: string) => Promise<{ drain:
     },
   });
 
-  const port = server.port;
+  const port = server.port!;
   const { drain } = await startRequest(`http://127.0.0.1:${port}/`);
 
   // Parse /proc/self/net/tcp: find ESTABLISHED (state 01) socket with

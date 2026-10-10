@@ -117,6 +117,23 @@ pub trait Host: Sync {
     /// The local scripts of the HTML file at `page`, which Bun serves or bundles with it. A file
     /// that imports the page refers to them.
     fn scripts_of_page(&self, page: &[u8]) -> Vec<Vec<u8>>;
+    /// Several programs are about to be loaded: from here on there is a `shared_file` for a
+    /// declaration file. `variants`: a bit for each `variant_of_files` that more than one of them
+    /// has. What no other program can use is not kept: nothing is once `programs` more
+    /// `stay_loaded`.
+    fn share_declaration_files(&self, variants: u32, programs: usize);
+    /// The program that was `loaded` is checked as it is. One that lacks what another has yet to
+    /// emit is loaded again.
+    fn stays_loaded(&self);
+    /// Where the first program that loads the file at `path` leaves it for the others. `variant`:
+    /// `variant_of_files`, and a bit for whether the file keeps its text. `None`: each program
+    /// loads its own, also where it is given another `text` than the first.
+    fn shared_file(
+        &self,
+        path: &[u8],
+        text: &[u8],
+        variant: u8,
+    ) -> Option<std::sync::Arc<std::sync::OnceLock<crate::portable::SharedFile>>>;
     /// The lists of the result are in `arena`, which belongs to the calling thread.
     fn parse<'s>(
         &self,
@@ -347,14 +364,20 @@ impl ScriptKind {
 
     /// `GetScriptKindFromFileName`
     pub fn from_file_name(path: &[u8]) -> Option<ScriptKind> {
-        let dot = strings::last_index_of_char(path, b'.')?;
-        Some(match &path[dot..].to_ascii_lowercase()[..] {
-            b".js" | b".cjs" | b".mjs" => ScriptKind::Js,
-            b".jsx" => ScriptKind::Jsx,
-            b".ts" | b".cts" | b".mts" => ScriptKind::Ts,
-            b".tsx" => ScriptKind::Tsx,
-            _ => return None,
-        })
+        const KINDS: [(&[u8], ScriptKind); 8] = [
+            (b".js", ScriptKind::Js),
+            (b".cjs", ScriptKind::Js),
+            (b".mjs", ScriptKind::Js),
+            (b".jsx", ScriptKind::Jsx),
+            (b".ts", ScriptKind::Ts),
+            (b".cts", ScriptKind::Ts),
+            (b".mts", ScriptKind::Ts),
+            (b".tsx", ScriptKind::Tsx),
+        ];
+        let extension = &path[strings::last_index_of_char(path, b'.')?..];
+        let mut kinds = KINDS.iter();
+        let found = kinds.find(|(name, _)| extension.eq_ignore_ascii_case(name))?;
+        Some(found.1)
     }
 
     /// Whether a file called `path` is another language than its name says. JavaScript can have
@@ -368,10 +391,10 @@ impl ScriptKind {
 
 /// Whether `GetScriptKindFromFileName` is `ScriptKindTSX` or `ScriptKindJSX`.
 pub fn is_jsx_file_name(path: &[u8]) -> bool {
-    strings::last_index_of_char(path, b'.').is_some_and(|dot| {
-        let extension = &path[dot..];
-        extension.eq_ignore_ascii_case(b".tsx") || extension.eq_ignore_ascii_case(b".jsx")
-    })
+    matches!(
+        ScriptKind::from_file_name(path),
+        Some(ScriptKind::Tsx | ScriptKind::Jsx)
+    )
 }
 
 /// The LANGUAGE of a file: `is_javascript`, unless the host knows better than the name. What goes

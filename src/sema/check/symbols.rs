@@ -784,6 +784,7 @@ impl<'p, 's> Checker<'p, 's> {
                 flags: PropFlags::empty(),
                 source: PropSource::Symbol(self.files().sym(sym.file, property)),
                 mapper: MapperId::IDENTITY,
+                name_type: TypeId::UNRESOLVED,
             };
             return self.synth(Shape {
                 props: vec_from_iter_in([prop], self.arena),
@@ -2169,6 +2170,7 @@ impl<'p, 's> Checker<'p, 's> {
             flags: PropFlags::OPTIONAL | (prop.flags & PropFlags::READONLY),
             source: Self::copy_of(missing, &[prop], true, self.arena),
             mapper: MapperId::IDENTITY,
+            name_type: self.name_type_of_copy(TypeId::UNRESOLVED, prop),
         };
         self.undefined_properties
             .insert(prop.name, result.clone_in(self.arena));
@@ -2218,13 +2220,22 @@ impl<'p, 's> Checker<'p, 's> {
             let widened = match self.data(ty) {
                 TypeData::Anon {
                     origin:
-                        Origin::ObjectLiteral(file, e, is_js_literal, created_by, object_flags, _),
+                        Origin::ObjectLiteral(
+                            file,
+                            e,
+                            is_js_literal,
+                            in_const_context,
+                            created_by,
+                            object_flags,
+                            _,
+                        ),
                     mapper,
                 } => self.intern(TypeData::Anon {
                     origin: Origin::WidenedLiteral(
                         *file,
                         *e,
                         *is_js_literal,
+                        *in_const_context,
                         *created_by,
                         object_flags.contains(ObjectFlags::NON_INFERRABLE_TYPE),
                     ),
@@ -2323,6 +2334,7 @@ impl<'p, 's> Checker<'p, 's> {
             flags: prop.flags,
             source: Self::copy_of(widened, &[prop], true, self.arena),
             mapper: MapperId::IDENTITY,
+            name_type: self.name_type_of_copy(TypeId::UNRESOLVED, prop),
         }
     }
 
@@ -2503,17 +2515,36 @@ impl<'p, 's> Checker<'p, 's> {
             return None;
         }
         let first = self.stack.iter().rposition(|&q| q == query)?;
-        let pushed_at = self.flow_loop_pushed_since(first)?;
-        let resolution_start = std::mem::replace(&mut self.resolution_start, self.stack.len());
-        let entered = self.enter(query);
-        self.resolution_start = resolution_start;
-        if !entered {
+        // The resolutions of the binding element that asks for the pattern have not called
+        // `checkExpressionCached`, and what they find is stored.
+        let resolutions = self.resolutions_below(self.stack.len());
+        self.quick_initializers.push(resolutions);
+        let entered = (self.flow_loop_pushed_since(first))
+            .map(|_| self.enter_again_in_flow_loop(query).flatten());
+        if let Some(Some(pushed_at)) = entered {
+            self.taint_from(pushed_at);
+        }
+        self.quick_initializers.pop();
+        if entered?.is_none() {
             return Some(TypeId::UNRESOLVED);
         }
-        self.taint_from(pushed_at);
         let ty = self.type_of_pat_uncached(file, pat);
         let _ = self.leave(query);
         Some(ty)
+    }
+
+    /// `enter`, for a query that has no re-entrancy guard in tsgo. A visit that is in progress is
+    /// hidden from it if a back edge of a loop has led here again: then the result has the depth
+    /// of `stack` when that loop was pushed. `None`: not entered.
+    fn enter_again_in_flow_loop(&mut self, query: Query) -> Option<Option<usize>> {
+        let first = self.stack.iter().rposition(|&q| q == query);
+        let Some(pushed_at) = first.and_then(|first| self.flow_loop_pushed_since(first)) else {
+            return self.enter(query).then_some(None);
+        };
+        let resolution_start = std::mem::replace(&mut self.resolution_start, self.stack.len());
+        let entered = self.enter(query);
+        self.resolution_start = resolution_start;
+        entered.then_some(Some(pushed_at))
     }
 
     /// Diagnostics reported inside a cycle are dropped with the results that depend on it, and
@@ -2555,15 +2586,27 @@ impl<'p, 's> Checker<'p, 's> {
                 self.hir(file)[e].kind,
                 ExprKind::Call(_) | ExprKind::New(_) | ExprKind::Await(_)
             )
-            && {
+            && let Some(loop_pushed_at) = {
                 self.instantiation_count = 0;
-                self.enter(Query::Expr(file, e))
+                // The resolutions of the declaration itself are right below the frame of `e`. They
+                // hide no loop from here on, so neither from the question whether one has led
+                // here again.
+                let resolutions = self.resolutions_below(self.stack.len());
+                self.quick_initializers.push(resolutions);
+                let entered = self.enter_again_in_flow_loop(Query::Expr(file, e));
+                if entered.is_none() {
+                    self.quick_initializers.pop();
+                }
+                entered
             }
         {
-            // The resolutions of the declaration itself are right below the frame of `e`.
-            let resolutions = self.resolutions_below(self.stack.len() - 1);
-            self.quick_initializers.push(resolutions);
-            self.frames[resolutions.1].is_quick_type = true;
+            let at = self.stack.len() - 1;
+            self.frames[at].is_quick_type = true;
+            // The loop type is incomplete: nothing else computed since the loop was pushed is
+            // cached.
+            if let Some(pushed_at) = loop_pushed_at {
+                self.taint_from(pushed_at);
+            }
             let quick = self.quick_type_of_expr(file, e);
             self.quick_initializers.pop();
             let _ = self.leave(Query::Expr(file, e));
@@ -3606,6 +3649,12 @@ impl<'p, 's> Checker<'p, 's> {
         if self.is_resolving_return_type(sig) {
             return self.any_for_return_type_in_resolution();
         }
+        self.return_type_not_in_resolution(sig)
+    }
+
+    /// `getReturnTypeOfSignature(sig)`, for a caller that has asked `isResolvingReturnTypeOfSignature(sig)` first: a path
+    /// that leads here a second time ends here.
+    pub(super) fn return_type_not_in_resolution(&mut self, sig: SigId) -> TypeId {
         self.non_circular_returns.push(self.stack.len());
         let ty = self.sig_return(sig);
         self.non_circular_returns.pop();
@@ -3874,6 +3923,7 @@ impl<'p, 's> Checker<'p, 's> {
                         flags: PropFlags::OPTIONAL,
                         source: PropSource::Type(ty),
                         mapper: MapperId::IDENTITY,
+                        name_type: TypeId::UNRESOLVED,
                     });
                 }
                 for info in &members.shape().index {
@@ -4076,7 +4126,7 @@ impl<'p, 's> Checker<'p, 's> {
     /// its result, and the check of a function or a class is deferred.
     fn has_reference_without_flow_type(&mut self, file: FileId, node: Node) -> bool {
         // A walk nests at most once per flow node.
-        if self.flow_analysis_disabled
+        if self.flow_analysis_disabled.contains(&file)
             || self.bound(file).flow_places <= super::flow::MAX_FLOW_DEPTH
         {
             return false;

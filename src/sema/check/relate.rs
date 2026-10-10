@@ -3104,6 +3104,7 @@ impl<'p, 's> Checker<'p, 's> {
     /// `hasCommonProperties`
     pub(super) fn has_common_properties(&mut self, source: TypeId, target: TypeId) -> bool {
         let apparent = self.reduced_apparent_type_as_object(source);
+        let apparent = self.object_with_properties_of(apparent);
         let Some(sm) = self.members(apparent) else {
             return false;
         };
@@ -4336,6 +4337,7 @@ impl<'p, 's> Checker<'p, 's> {
         members.retain(|member| !self.is_error_type(*member) && !member.is_never());
         if members.len() < 2 {
             let apparent = members.first().copied().unwrap_or(source);
+            let apparent = self.object_with_properties_of(apparent);
             // `getPropertyOfType` finds nothing in a type that is not an object type: `any`, which
             // `T & U` resolves to where `U` extends `any`.
             let properties = match self.members(apparent) {
@@ -6859,7 +6861,11 @@ impl<'p, 's> Checker<'p, 's> {
             (target != as_passed.1).then_some(Some(as_passed.1)),
         );
         let source_type_params = self.sig_type_params(source);
-        if !source_type_params.is_empty() && source_type_params != self.sig_type_params(target) {
+        if !source_type_params.is_empty()
+            && (source_type_params != self.sig_type_params(target)
+                || self.function_with_type_parameters_cloned_for_it(source)
+                    != self.function_with_type_parameters_cloned_for_it(target))
+        {
             let canonical = self.canonical_sig(target);
             if canonical != target {
                 signature_targets.1 = Some(Some(target));

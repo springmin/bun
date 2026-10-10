@@ -297,6 +297,17 @@ pub struct Lazy<'s> {
     pub(crate) keyword_identifiers: OnceLock<ArenaBox<'s, [Node]>>,
 }
 
+impl<'s> Lazy<'s> {
+    pub(crate) fn new(session: &'s Session) -> Lazy<'s> {
+        Lazy {
+            session,
+            parents: OnceLock::new(),
+            ambient_or_type_places: OnceLock::new(),
+            keyword_identifiers: OnceLock::new(),
+        }
+    }
+}
+
 /// Copies `list` to a block of exactly its size in `arena`, and empties it. It retains its capacity.
 pub(crate) fn copy_to_arena<'s, T: Copy>(list: &mut Vec<T>, arena: &'s Arena) -> ArenaVec<'s, T> {
     let mut exact = ArenaVec::new_in(arena);
@@ -1846,6 +1857,11 @@ pub struct FileIn<S: Storage> {
     /// `ParenthesizedExpression`: the inner expression, the start and the end of the parentheses.
     /// Ordered by expression, and for nested parentheses around one expression innermost first.
     pub parens: S::List<(ExprId, u32, u32)>,
+    /// `x!!!` is one `NonNull`, which ends at the last `!`. The parser reads a run of `!` in a loop,
+    /// so nothing bounds its length, and `x!!` has the type of `x!`. These are the other
+    /// `NonNullExpression`s of the run: the `NonNull`, and where each ends. Ordered by expression, the
+    /// innermost first.
+    pub non_null_ends: S::Few<(ExprId, u32)>,
     /// `JsxExpression`: the inner expression, the start and the end of the braces. Ordered by
     /// expression.
     pub jsx_expressions: S::List<(ExprId, u32, u32)>,
@@ -2333,6 +2349,7 @@ impl FileBuilder {
             specifier_expressions: few_to_arena(self.specifier_expressions, arena),
             exports_from_expressions: few_to_arena(self.exports_from_expressions, arena),
             parens: copy_to_arena(&mut self.parens, arena),
+            non_null_ends: few_to_arena(self.non_null_ends, arena),
             jsx_expressions: copy_to_arena(&mut self.jsx_expressions, arena),
             jsx_pragmas: self.jsx_pragmas,
             jsdoc_comments: few_to_arena(self.jsdoc_comments, arena),
@@ -2379,12 +2396,7 @@ impl FileBuilder {
             bases: self.bases,
             fn_nodes: copy_to_arena(&mut self.fn_nodes, arena),
             class_nodes: copy_to_arena(&mut self.class_nodes, arena),
-            lazy: Lazy {
-                session,
-                parents: OnceLock::new(),
-                ambient_or_type_places: OnceLock::new(),
-                keyword_identifiers: OnceLock::new(),
-            },
+            lazy: Lazy::new(session),
             keyword_identifier_positions: few_to_arena(self.keyword_identifier_positions, arena),
         };
         let mut emptied = FileBuilder::default();
@@ -2418,6 +2430,13 @@ pub fn is_parenthesized(hir: &File, e: ExprId) -> bool {
 #[inline]
 pub fn open_parenthesis(hir: &File, e: ExprId) -> Option<u32> {
     parentheses_around(hir, e).last().map(|p| p.1)
+}
+
+/// `File::non_null_ends` of `e`.
+pub fn non_null_ends_in<S: Storage>(hir: &FileIn<S>, e: ExprId) -> &[(ExprId, u32)] {
+    let first = hir.non_null_ends.partition_point(|it| it.0.0 < e.0);
+    let count = hir.non_null_ends[first..].partition_point(|it| it.0 == e);
+    &hir.non_null_ends[first..first + count]
 }
 
 /// The parentheses around `e`, the innermost first.

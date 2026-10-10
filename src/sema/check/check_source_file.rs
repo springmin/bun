@@ -199,9 +199,6 @@ impl<'s> Checker<'_, 's> {
         self.check_deferred_nodes(file);
         self.check_merged_symbols(file);
         self.check_exprs_visited_by_queries(file);
-        if hir.kind != FileKind::Declaration {
-            self.check_unused_renamed_binding_elements(file);
-        }
         self.note_assignments_marked_by_check(file);
         self.reported_unreachable_nodes.clear();
     }
@@ -447,9 +444,10 @@ impl<'s> Checker<'_, 's> {
 
     /// `checkBlock` of an `IsFunctionOrModuleBlock`
     fn check_function_or_module_block(&mut self, file: FileId, statements: IdList<StmtId>) {
-        let save_flow_analysis_disabled = self.flow_analysis_disabled;
+        let save_flow_analysis_disabled = self.flow_analysis_disabled.len();
         self.check_source_elements(file, statements);
-        self.flow_analysis_disabled = save_flow_analysis_disabled;
+        self.flow_analysis_disabled
+            .truncate(save_flow_analysis_disabled);
     }
 
     /// `checkSourceElement(node.Body())`, `checkExpressionCached(node.Body())`
@@ -888,48 +886,6 @@ impl<'s> Checker<'_, 's> {
                 PatParent::Prop(_, p) if self.is_renamed_binding_element(file, p) => true,
                 declaration => declaration.initializer(hir).is_some(),
             }
-    }
-
-    /// `checkUnusedRenamedBindingElements`: 2842
-    fn check_unused_renamed_binding_elements(&mut self, file: FileId) {
-        let (hir, bound) = (self.hir(file), self.bound(file));
-        for p in std::mem::take(&mut self.renamed_binding_elements_in_types) {
-            let symbol = bound.pat_symbol[hir[p].value.idx()];
-            // `WalkUpBindingElementsAndPatterns`
-            let PatParent::Param(param) = root_declaration(bound, hir[p].value) else {
-                continue;
-            };
-            if symbol.is_none() {
-                continue;
-            }
-            // `referenceKinds`: `Resolve` notes the reference, so only an identifier that is
-            // checked is one.
-            if (bound.expr_symbol.iter().enumerate()).any(|(i, &resolved)| {
-                resolved == symbol
-                    && !bound.is_unchecked(i)
-                    && !self.is_never_checked(hir.exprs[i].pos)
-            }) {
-                continue;
-            }
-            let start = hir[hir[p].value].pos;
-            let (node, name) = match hir[hir[p].value].kind {
-                PatKind::Ident(name) if name != known::empty => (
-                    self.place_of_token(file, start),
-                    self.declaration_name_at(file, start),
-                ),
-                _ => ((file, start, start), b"(Missing)".to_vec()),
-            };
-            let property = self.declaration_name_at(file, hir[p].key_pos);
-            let related = hir[param].ty.is_none().then(|| {
-                let end = self.end_of_param(file, param);
-                self.new_diagnostic((file, end, end), 2843, &[Arg::Bytes(&property)])
-            });
-            let args = [Arg::Bytes(&name), Arg::Bytes(&property)];
-            let diagnostic = self.error_at(node, 2842, &args);
-            if let Some(related) = related {
-                diagnostic.add_related_info(related);
-            }
-        }
     }
 
     /// `checkVariableDeclarationList`, `checkVariableDeclaration`. `parent`: `node.Parent.Kind`.
@@ -2087,7 +2043,7 @@ impl<'s> Checker<'_, 's> {
         if self.bound(file).flow_places > super::flow::MAX_FLOW_DEPTH
             && (self.p.flows_too_deep.get(&self.task, &(file, e))).is_some()
         {
-            self.flow_analysis_disabled = true;
+            self.disable_flow_analysis(file);
         }
     }
 
@@ -2193,15 +2149,16 @@ impl<'s> Checker<'_, 's> {
 /// resolve, so that `getTypeOfSymbol` of the property that `node` annotates cannot close a cycle.
 /// `checkTypeOperator`, `checkConditionalType`, `checkArrayType` and `checkJSDocType` visit the
 /// children and do not ask for the type of `node`.
-fn is_resolved_by_check_source_element(hir: &File, node: TypeNodeId) -> bool {
+fn is_resolved_by_check_source_element(hir: &File, mut node: TypeNodeId) -> bool {
+    // The parser builds `T[][][]..` in a loop, so nothing bounds its depth.
+    while node.is_some()
+        && let TypeNodeKind::Array(of) | TypeNodeKind::Readonly(of) = hir[node].kind
+    {
+        node = of;
+    }
     node.is_some()
-        && match hir[node].kind {
-            TypeNodeKind::Keyof(_) | TypeNodeKind::Cond { .. } | TypeNodeKind::JSDoc { .. } => {
-                false
-            }
-            TypeNodeKind::Array(of) | TypeNodeKind::Readonly(of) => {
-                is_resolved_by_check_source_element(hir, of)
-            }
-            _ => true,
-        }
+        && !matches!(
+            hir[node].kind,
+            TypeNodeKind::Keyof(_) | TypeNodeKind::Cond { .. } | TypeNodeKind::JSDoc { .. }
+        )
 }

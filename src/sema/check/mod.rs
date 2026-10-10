@@ -152,7 +152,7 @@ macro_rules! buffered_fields {
             resolved_type_arguments instantiations key_properties composed outer_type_params declared_type_params
             identity_mappers identity_mappers_with_adopted base_types context_checked relations variances
             awaited_types mapped_prop_types reverse_mapped_cache optional_properties intersected_props
-            union_properties union_objects keys_of_properties never_intersections mapped_targets inferred_constraints constraints plain_global_refs
+            union_properties union_objects intersection_objects keys_of_properties never_intersections mapped_targets inferred_constraints constraints plain_global_refs
             equivalent_base_types type_param_constraints enum_values type_param_defaults
             circular_type_param_defaults conditionals
             mapped_param_constraints
@@ -176,6 +176,10 @@ macro_rules! file_local_fields {
     };
 }
 pub(crate) use file_local_fields;
+
+/// The signature passed to `assignContextualParameterTypes`, if it was called, and whether
+/// `instantiateSignature` created it for the call.
+pub(crate) type AssignedSignature = (Option<SigId>, bool);
 
 pub struct Program<'s> {
     /// The arenas that the program and everything computed from it are in.
@@ -323,7 +327,7 @@ pub struct Program<'s> {
     call_diagnostics: ByNodeIndirect<(FileId, ExprId), Vec<Reported>, Buffered, &'s Session>,
     /// `NodeCheckFlagsContextChecked`, with the signature passed to
     /// `assignContextualParameterTypes`. `None`: it was not called.
-    context_checked: ByNode<(FileId, FnId), Option<SigId>, Buffered, &'s Session>,
+    context_checked: ByNode<(FileId, FnId), AssignedSignature, Buffered, &'s Session>,
     /// `contextFreeTypes` for a function.
     context_free_types: ByNode<(FileId, FnId), TypeId, Buffered, &'s Session>,
     /// The diagnostics `resolveCall` reported for a call the first time it was resolved again while
@@ -348,6 +352,7 @@ pub struct Program<'s> {
     union_properties: ByKey<(TypeId, Atom), Option<TypeId>, Buffered, &'s Session>,
     /// `UnionOrIntersectionType.resolvedProperties` of a union: `union_as_object`.
     union_objects: ById<TypeId, TypeId, Buffered, &'s Session>,
+    intersection_objects: ById<TypeId, TypeId, Buffered, &'s Session>,
     /// `get_literal_type_from_properties` without index flags. Instantiations under several
     /// mappers arrive at one object type.
     keys_of_properties: ById<TypeId, TypeId, Buffered, &'s Session>,
@@ -526,6 +531,7 @@ impl<'s> Program<'s> {
             never_intersections: ById::new_in(session),
             mapped_targets: ById::new_in(session),
             union_objects: ById::new_in(session),
+            intersection_objects: ById::new_in(session),
             keys_of_properties: ById::new_in(session),
             inferred_constraints: ById::new_in(session),
             constraints: ById::new_in(session),
@@ -675,6 +681,7 @@ impl<'s> Program<'s> {
             instantiation_depth: 0,
             outermost_comparison: None,
             instantiation_count: 0,
+            instantiations_computed: 0,
             recent_instantiations: Default::default(),
             recent_composed: Default::default(),
             unresolved_members: Vec::new(),
@@ -759,7 +766,7 @@ impl<'s> Program<'s> {
             has_compared_without_total_order: std::cell::Cell::new(false),
             symbol_ids: None,
             parsed_again_for_await: None,
-            flow_analysis_disabled: false,
+            flow_analysis_disabled: Vec::new(),
             inline_level: 0,
             walk_declared: TypeId::NEVER,
             constants_in_evaluation: Vec::new(),
@@ -1263,6 +1270,8 @@ pub struct Checker<'p, 's> {
     outermost_comparison: Option<Option<(FileId, u32, u32)>>,
     /// `instantiationCount`: the instantiations computed since the last statement, type node or expression check began.
     instantiation_count: u32,
+    /// How many instantiations no cache had.
+    instantiations_computed: u64,
     /// The entries most recently read from or written to `Program::instantiations`.
     recent_instantiations: instantiate::Recent,
     /// The entries most recently read from or written to `Program::composed`.
@@ -1450,9 +1459,13 @@ pub struct Checker<'p, 's> {
     /// `reparseTopLevelAwait`: the statements of that file that end up in an await context. Sorted.
     /// Computed on first use.
     parsed_again_for_await: Option<Vec<StmtId>>,
-    /// `flowAnalysisDisabled`. Only `checkBlock` restores it, so after a reference outside any
-    /// function or module block it stays set for the files that this checker checks afterwards.
-    flow_analysis_disabled: bool,
+    /// `flowAnalysisDisabled`: the files in which it holds, in the order in which it was set. More
+    /// than one where a query from a file that is too long gets to another one that is. Only
+    /// `checkBlock` restores it, so after a reference outside any function or module block it stays
+    /// set for the rest of the file. In tsgo it holds for every reference, also for one in another
+    /// file that a query gets to in the meantime, whose `errorType` then stays in what the query
+    /// stores.
+    flow_analysis_disabled: Vec<FileId>,
     /// Nesting depth of the `const ok = test` conditions being inlined.
     inline_level: u32,
     /// The declared type of the reference that the flow walk in progress narrows.
@@ -1596,14 +1609,14 @@ pub struct Checker<'p, 's> {
     /// The functions whose first check is in progress, see `context_checked`. They are published to
     /// `Program::context_checked`, for every thread, only once the results of the first check are:
     /// a thread that found one without the other would continue without a first check of its own.
-    context_checking: Vec<((FileId, crate::hir::FnId), Option<SigId>)>,
+    context_checking: Vec<((FileId, crate::hir::FnId), AssignedSignature)>,
     /// The functions whose entry in `Program::context_checked` this checker wrote or tried to write. See `is_context_checked`.
     context_checked_here: crate::util::FxHashSet<(FileId, crate::hir::FnId)>,
     /// The functions whose first check is not published because a frame in progress is tainted,
     /// with the index and the serial of the lowest such frame. tsgo sets
     /// `NodeCheckFlagsContextChecked` and assigns the parameter types whatever is in progress. So
     /// until that frame is left the function is checked, with that signature.
-    context_checked_under: Vec<(usize, u64, (FileId, crate::hir::FnId), Option<SigId>)>,
+    context_checked_under: Vec<(usize, u64, (FileId, crate::hir::FnId), AssignedSignature)>,
     /// `links.resolvedType` of an initializer that `checkExpressionCached` is checking, as a nested
     /// `checkExpressionCached` of it has assigned it: the index and the serial of the frame of the
     /// outermost visit, and the type. See `check_declaration_initializer`.
@@ -2127,6 +2140,12 @@ impl<'p, 's> Checker<'p, 's> {
         {
             return false;
         }
+        // `resolveIntersectionTypeMembers` has none either, and calls `setStructuredTypeMembers` at its end.
+        if matches!(q, Query::Shape(ty) if matches!(self.data(ty), TypeData::Intersection(_)))
+            && self.ends_at_reduction_in_progress(i)
+        {
+            return false;
+        }
         self.last_enter = EnterOutcome::Refused;
         // Everything in progress between there and here is computed without the result, so it is
         // provisional.
@@ -2203,7 +2222,7 @@ impl<'p, 's> Checker<'p, 's> {
     }
 
     /// Whether the first resolution on the path from `stack[i]` is a return type that
-    /// `getNonCircularReturnTypeOfSignature` has requested.
+    /// `getNonCircularReturnTypeOfSignature` or `getContextualReturnType` has requested.
     fn ends_at_non_circular_return(&self, i: usize) -> bool {
         !self.non_circular_returns.is_empty()
             && (self.stack[i..].iter().position(|&q| self.is_resolution(q))).is_some_and(|above| {
@@ -2756,7 +2775,11 @@ impl<'p, 's> Checker<'p, 's> {
             self.note_limit();
             return self.mark_tainted_from(0);
         };
-        self.add_diagnostic_of(None, Reported::bare(at, code));
+        // Past the limit of 5,000,000 every further instantiation of the statement reports the same.
+        // `sort_and_deduplicate_diagnostics` leaves one: millions are not kept until then.
+        if !self.is_last_diagnostic_of_task(at, code) {
+            self.add_diagnostic_of(None, Reported::bare(at, code));
+        }
         // A query that began under an instantiation had less depth left than the same query has
         // from depth 0, where a finite type does not reach the limit. tsgo stores its result
         // regardless, and which types that breaks depends on the order in which it checks files.
@@ -3268,16 +3291,15 @@ impl<'p, 's> Checker<'p, 's> {
         self.note_taint_event(depth);
         // `getTypeOfVariableOrParameterOrProperty` stores what `getQuickTypeOfExpression` returns,
         // which checks the callee with the loops visible, and the type of a `...rest`.
-        let quick = &self.quick_initializers;
-        for (i, frame) in self.frames[depth..].iter_mut().enumerate() {
-            if quick
-                .iter()
-                .any(|&(from, to)| (from..to).contains(&(depth + i)))
-            {
+        // Not the type of a pattern around a binding element, which nothing stores: it is computed
+        // again for the next element.
+        for at in depth..self.frames.len() {
+            let is_quick = |&(from, to): &(usize, usize)| (from..to).contains(&at);
+            if self.quick_initializers.iter().any(is_quick) && self.is_resolution(self.stack[at]) {
                 continue;
             }
-            frame.tainted = true;
-            frame.incomplete_flow = true;
+            self.frames[at].tainted = true;
+            self.frames[at].incomplete_flow = true;
         }
         self.taints += 1;
         self.note_cycle();
@@ -3858,7 +3880,14 @@ impl<'p, 's> Checker<'p, 's> {
         })
     }
 
-    pub fn synth(&self, shape: Shape<'s>) -> TypeId {
+    pub fn synth(&self, mut shape: Shape<'s>) -> TypeId {
+        // A symbol that is given its type has no mapper (`createSymbolWithType`, `getSpreadSymbol`). What the
+        // property it is made from had would make the shape look generic for good.
+        for prop in &mut shape.props {
+            if let PropSource::Type(_) | PropSource::Copy(..) = prop.source {
+                prop.mapper = MapperId::IDENTITY;
+            }
+        }
         self.intern(TypeData::Synth(self.boxed(shape)))
     }
 

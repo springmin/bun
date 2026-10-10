@@ -116,7 +116,7 @@ test("spawn AbortSignal args validation", async () => {
       stdout: "inherit",
       stderr: "inherit",
       stdin: "inherit",
-      signal: 123,
+      signal: 123 as any,
     }),
   ).toThrow();
 });
