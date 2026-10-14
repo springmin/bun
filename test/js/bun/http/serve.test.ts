@@ -1449,7 +1449,7 @@ describe("parallel", () => {
         },
       },
       async server => {
-        for (let i = 0; i < count; ) {
+        for (let i = 0; i < count;) {
           let responses = await Promise.all([
             fetch(server.url.origin),
             fetch(server.url.origin),
@@ -1475,7 +1475,7 @@ describe("parallel", () => {
         },
       },
       async server => {
-        for (let i = 0; i < count; ) {
+        for (let i = 0; i < count;) {
           let responses = await Promise.all([
             fetch(server.url.origin),
             fetch(server.url.origin),
@@ -5031,7 +5031,7 @@ it("serves a TLS connection whose handshake completes after a graceful stop()", 
     raw.on("close", () => wire.push(null));
     const c = (client = nodeTls.connect({ socket: wire, rejectUnauthorized: false }));
     c.on("error", () => {});
-    for (const t = Date.now(); held.length === 0 && Date.now() - t < 10_000; ) await Bun.sleep(5);
+    for (const t = Date.now(); held.length === 0 && Date.now() - t < 10_000;) await Bun.sleep(5);
     expect(held.length).toBeGreaterThan(0);
 
     const stopped = server.stop();
