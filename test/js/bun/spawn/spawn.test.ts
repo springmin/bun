@@ -12,6 +12,7 @@ import {
   isLinux,
   isOhos,
   isPosix,
+  isRoot,
   isWindows,
   shellExe,
   tempDir,
@@ -1862,8 +1863,6 @@ describe("option combinations", () => {
 });
 
 describe("uid/gid", () => {
-  const isRoot = process.getuid?.() === 0;
-
   it.if(isPosix && isRoot)("applies uid and gid to the child", async () => {
     await using proc = spawn({ cmd: ["id", "-u"], uid: 65534, gid: 65534, stdout: "pipe" });
     const [stdout, exitCode] = await Promise.all([proc.stdout.text(), proc.exited]);

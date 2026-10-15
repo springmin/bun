@@ -18,7 +18,7 @@ const NODE_HEADERS_VERSION = "26.3.0";
 // (the /usr/lib paths do not exist there). Resolve via PATH on OHOS so the
 // direct-compile and node-gyp paths both get a real compiler.
 const linuxClang = !isMusl
-  ? "/usr/lib/llvm-23/bin/clang"
+  ? "/opt/llvm/bin/clang"
   : (which("clang") ?? "/usr/lib/llvm23/bin/clang");
 
 interface GypTarget {

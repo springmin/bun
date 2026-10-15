@@ -13,6 +13,7 @@ import {
   isOHOS,
   isOhos,
   isPosix,
+  isRoot,
   isWindows,
   rss,
   runWithErrorPromise,
@@ -65,7 +66,6 @@ afterAll(async () => {
 });
 
 const BUN = bunExe();
-const isRoot = process.getuid?.() === 0;
 
 describe("bunshell", () => {
   describe("exit codes", async () => {

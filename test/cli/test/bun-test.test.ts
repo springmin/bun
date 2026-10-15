@@ -1391,8 +1391,7 @@ describe("bun test", () => {
       stderr
         .replace(/bun-test-(.*)\.test\.ts/, "bun-test-*.test.ts")
         .trim()
-        // OHOS: a slow run reports the total as [N.NNs], not [Nms].
-        .replace(/\[[\d.]+(?:ms|s)\]/, "[xx ms]"),
+        .replace(/\[[\d.]+m?s\]/, "[xx ms]"),
     ).toMatchInlineSnapshot(`
       "bun-test-*.test.ts:
 
@@ -1513,8 +1512,7 @@ describe("bun test", () => {
     expect(
       stderr
         .replace(/bun-test-(.*)\.test\.ts/, "bun-test-*.test.ts")
-        // OHOS: a slow run reports the total as [N.NNs], not [Nms].
-        .replace(/ \[[\d.]+(?:ms|s)\]/g, "") // Remove all timings
+        .replace(/ \[[\d.]+m?s\]/g, "") // Remove all timings
         .replace(/Ran \d+ tests across \d+ files?\.\s*$/, "Ran 2 tests across 1 file.") // Normalize test counts
         .trim(),
     ).toMatchInlineSnapshot(`
