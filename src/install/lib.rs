@@ -413,18 +413,7 @@ impl RunCommand {
         };
         static DIR: std::sync::OnceLock<bun_core::ZBox> = std::sync::OnceLock::new();
         DIR.get_or_init(|| {
-            // OHOS: `/tmp` is read-only, so the shim dir is placed under
-            // `$TMPDIR` (the app cache) like the rest of the runtime's temp files.
-            let tmp: &str = if cfg!(target_env = "ohos") {
-                bun_core::env_var::TMPDIR::get()
-                    .and_then(|t| core::str::from_utf8(t).ok())
-                    .filter(|t| !t.is_empty())
-                    .unwrap_or(TMP)
-            } else {
-                TMP
-            };
-            let tmp = tmp.trim_end_matches('/');
-            bun_core::ZBox::from_bytes(format!("{tmp}/bun-node-{}{SUFFIX}", bun_sys::c::getuid()))
+            bun_core::ZBox::from_bytes(format!("{TMP}/bun-node-{}{SUFFIX}", bun_sys::c::getuid()))
         })
     }
 

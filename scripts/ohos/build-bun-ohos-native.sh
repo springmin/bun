@@ -85,7 +85,7 @@ RUST_READY="$RUST_HOME/BREW_SIGNED_OK"
 # 公开实体, 该前缀只会来自内联 ABI 命名空间, 不会误伤正常符号。
 KNOWN_STALE_ABI_MARKERS="_ZNSt3__h"
 
-export TMPDIR=/data/storage/el2/base/tmp
+export TMPDIR="${TMPDIR:-/tmp}"
 export SSL_CERT_FILE="$HOMEBREW_PREFIX/etc/ca-certificates/cert.pem"
 export CURL_CA_BUNDLE="$SSL_CERT_FILE"
 

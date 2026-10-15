@@ -469,13 +469,6 @@ describe("spawn()", () => {
       expect(await getChildEnv({})).toMatchObject({});
       expect(await getChildEnv(undefined)).not.toStrictEqual({});
       expect(await getChildEnv(null)).not.toStrictEqual({});
-    } else if (Bun.env.BUN_OHOS === "1") {
-      // OHOS: Bun injects TMPDIR into the child env (the runtime depends on
-      // it for tmp files), so strict equality cannot hold.
-      expect(await getChildEnv({ TEST: "test" })).toMatchObject({ TEST: "test" });
-      expect(await getChildEnv({})).toMatchObject({});
-      expect(await getChildEnv(undefined)).toMatchObject(process.env);
-      expect(await getChildEnv(null)).toMatchObject(process.env);
     } else {
       expect(await getChildEnv({ TEST: "test" })).toStrictEqual({ TEST: "test" });
       expect(await getChildEnv({})).toStrictEqual({});

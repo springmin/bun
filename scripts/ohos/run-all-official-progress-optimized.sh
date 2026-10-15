@@ -21,10 +21,6 @@ TMOUT=${TMOUT:-300}
 TMOUT_BUNDLER=${TMOUT_BUNDLER:-1200}
 BUN_TIMEOUT=${BUN_TIMEOUT:-600000}
 
-# OHOS: /tmp is read-only; postinstall scripts (node-gyp etc.) need a writable tmp.
-# Default to the app's private tmp dir, respecting explicit TMPDIR override.
-export TMPDIR="${TMPDIR:-/data/storage/el2/base/tmp}"
-
 # The OHOS SDK's lld links against the SDK's bundled libxml2, but its
 # $ORIGIN/../lib RUNPATH is not honored in this environment: every run-time
 # native compile (FFI, shim, seccomp, addon tests) failed with

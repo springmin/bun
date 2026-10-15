@@ -68,19 +68,6 @@ function pathWithout(name: string, PATH: string | undefined): string {
     .join(delimiter);
 }
 
-beforeAll(async () => {
-  // Clean stale bunx cache dirs from previous runs once up front instead of before every test.
-  // OHOS has no readable /tmp; the caches live under the OS temp dir there.
-  const tmp = isWindows || isOHOS ? tmpdir() : "/tmp";
-  const waiting: Promise<void>[] = [];
-  readdirSync(tmp).forEach(file => {
-    if (file.startsWith("bunx-") || file.startsWith("bun-x.test")) {
-      waiting.push(rm(join(tmp, file), { recursive: true, force: true }));
-    }
-  });
-  await Promise.all(waiting);
-});
-
 // Cases that need bunx to install something get a per-test in-process registry
 // serving throwaway packages: what they assert is bunx's own behavior (name ->
 // bin resolution, the bunx cache, argument passthrough), and installing real
