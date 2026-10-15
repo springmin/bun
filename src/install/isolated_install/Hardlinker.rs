@@ -275,8 +275,6 @@ impl Hardlinker {
                                     break 'body Err(link_err);
                                 }
                             }
-                            }
-                            sys::linkat(dir, name, Fd::cwd(), self.dest.slice_z())
                         }
                         _ => Ok(()),
                     }

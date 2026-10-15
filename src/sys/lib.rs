@@ -3144,7 +3144,7 @@ mod posix_impl {
         }
     }
     /// musl's fallback: `O_PATH` + `chmod("/proc/self/fd/N")`; symlinks get EOPNOTSUPP like libc.
-    #[cfg(any(target_os = "linux", target_os = "android"))]
+    #[cfg(all(any(target_os = "linux", target_os = "android"), not(target_env = "ohos")))]
     fn lchmod_no_fchmodat2(path: &ZStr, mode: Mode) -> Maybe<()> {
         let retag = |mut err: Error| {
             err.syscall = Tag::lchmod;

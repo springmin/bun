@@ -90,6 +90,7 @@ pub(crate) fn openat(dir: Fd, path: &ZStr, flags: i32, mode: Mode) -> Result<Fd,
 }
 
 /// Android's seccomp answers `openat2`/`fchmodat2` with SIGSYS; Termux runs the linux build.
+#[cfg(not(target_env = "ohos"))]
 pub(crate) fn is_android_kernel() -> bool {
     static CACHED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *CACHED.get_or_init(|| {

@@ -1393,9 +1393,6 @@ pub mod package_manifest {
                     #[cfg(not(target_env = "ohos"))]
                     return Err(link_err.into());
                 }
-                }
-                // Keep the entry present throughout: rename over it below instead of unlinking it.
-                bun_sys::linkat_tmpfile(file.handle, tmpdir, tmp_path)?;
             }
 
             #[cfg(not(windows))]

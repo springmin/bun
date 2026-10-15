@@ -408,14 +408,13 @@ impl PackageManager {
                 if let Some(node_dir) = node_dir_bytes.as_deref() {
                     ohos_path.append(node_dir)?;
                 }
-                ohos_path.append(&current_path)?;
+                ohos_path.append(current_path.as_slice())?;
                 path = ohos_path;
             }
         }
         #[cfg(target_env = "ohos")]
         if let Ok(bun_exe) = bun_core::self_exe_path() {
             let _ = script_env.put(b"NODE", bun_exe.as_bytes());
-        }
         }
         script_env.put(b"PATH", path.slice())?;
 
