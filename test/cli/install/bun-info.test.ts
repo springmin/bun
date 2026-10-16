@@ -328,8 +328,8 @@ describe.concurrent("bun info", () => {
       expect(code).toBe(1);
       // bun renders registry 404s as "<code>: <url>" plus a message
       // (e.g. "'nonexistent-package-12345' does not exist in this
-      // registry") — not the raw "Not Found" text.
-      expect(error).toContain("404:");
+      // registry"); the local server's reason phrase may sit between.
+      expect(error).toMatch(/404(:| Not Found:)/);
       expect(output).toBe("");
     });
 
@@ -373,7 +373,7 @@ describe.concurrent("bun info", () => {
       const { output, error, code } = await runCommand([bunExe(), "pm", "view", "@"], testDir, false);
 
       expect(code).toBe(1);
-      expect(error).toContain("405:");
+      expect(error).toMatch(/405(:| Method Not Allowed:)/);
       expect(output).toBe("");
     });
 

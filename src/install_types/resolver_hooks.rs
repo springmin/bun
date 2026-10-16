@@ -884,7 +884,10 @@ impl Libc {
     /// The musl build is a separate binary, so the build target is the host libc.
     #[cfg(all(target_os = "linux", target_env = "musl"))]
     pub const CURRENT: Self = Self(Self::MUSL);
-    #[cfg(all(target_os = "linux", not(target_env = "musl")))]
+    /// OHOS's libc is musl-derived, and its build is a separate binary too.
+    #[cfg(all(target_os = "linux", target_env = "ohos"))]
+    pub const CURRENT: Self = Self(Self::MUSL);
+    #[cfg(all(target_os = "linux", not(target_env = "musl"), not(target_env = "ohos")))]
     pub const CURRENT: Self = Self(Self::GLIBC);
     #[cfg(not(target_os = "linux"))]
     pub const CURRENT: Self = Self::ALL;
