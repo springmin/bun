@@ -64,5 +64,7 @@ test("the Node-API tests build against the headers of the Node.js the CI images 
   const harness = readFileSync(join(root, "test/napi/node-napi-tests/harness.ts"), "utf8");
   expect(harness).toContain(`const NODE_HEADERS_VERSION = "${pins.nodejs.version}";`);
   const major = pins.llvm.version.split(".")[0];
-  expect(harness).toContain(`? "${locations.llvm}/bin/clang" : "/usr/lib/llvm${major}/bin/clang";`);
+  expect(harness).toContain(`? "${locations.llvm}/bin/clang"`);
+  // OHOS resolves the musl fallback through PATH: the /usr/lib paths do not exist there.
+  expect(harness).toContain(`(which("clang") ?? "/usr/lib/llvm${major}/bin/clang");`);
 });

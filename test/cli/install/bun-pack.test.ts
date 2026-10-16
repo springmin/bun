@@ -8,6 +8,7 @@ import {
   bunEnv,
   bunExe,
   isLinux,
+  isOhos,
   isRoot,
   isWindows,
   MAX_PATH_BYTES,
@@ -1053,6 +1054,9 @@ describe.skipIf(isWindows)("a failed pack leaves no tarball behind", () => {
     { args: ["--destination=out"], tarball: join("out", "pack-failed-1.0.0.tgz") },
     { args: ["--filename=custom.tgz"], tarball: "custom.tgz" },
   ])("when the tarball cannot be written (args: $args)", async ({ args, tarball }) => {
+    // OHOS: `ulimit -f` in the shell does not reach the kernel, so the write
+    // never fails with EFBIG.
+    if (isOhos) return;
     await using dir = tempDir("pack-failed", {
       "package.json": packageJson,
       "index.js": "module.exports = 1;",
@@ -1089,6 +1093,8 @@ describe.skipIf(isWindows)("a failed pack leaves no tarball behind", () => {
   // Only the regular file pack itself created (or truncated) is removed; a destination that is
   // something else, like a symlink, is not pack's to delete.
   test.concurrent("does not delete a --filename that is a symlink", async () => {
+    // OHOS: `ulimit -f` never fires (see above).
+    if (isOhos) return;
     await using dir = tempDir("pack-failed-symlink", {
       "package.json": packageJson,
       "index.js": "module.exports = 1;",
@@ -2662,7 +2668,8 @@ describe.concurrent("bundledDependencies", () => {
   });
 
   // The lookup keeps every directory it found open. Before, the ones past the limit were left out: `Bundled deps: 190`, exit 0.
-  test.skipIf(isWindows)("running out of file descriptors is an error", async () => {
+  // OHOS: `ulimit -n` in the shell does not reach the kernel either.
+  test.skipIf(isWindows || isOhos)("running out of file descriptors is an error", async () => {
     const names = Array.from({ length: 299 }, (_, i) => `d${i}`);
     using dir = tempDir("pack-bundled-dep-emfile", {
       "package.json": JSON.stringify({

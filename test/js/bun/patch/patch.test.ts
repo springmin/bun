@@ -2,7 +2,7 @@ import { $ } from "bun";
 import { patchInternals } from "bun:internal-for-testing";
 import { describe, expect, test } from "bun:test";
 import fs from "fs/promises";
-import { tempDirWithFiles as __tempDirWithFiles, bunEnv, bunExe, tempDir } from "harness";
+import { tempDirWithFiles as __tempDirWithFiles, bunEnv, bunExe, isOhos, tempDir } from "harness";
 import { join as __join } from "node:path";
 const { parse, apply, makeDiff } = patchInternals;
 
@@ -1043,7 +1043,9 @@ describe("apply", () => {
 
     // `link.txt` and an outside path name the same inode, so truncating or writing through
     // the name inside the patch dir changes the outside file. NTFS hard links need no privilege.
-    describe("hard links", () => {
+    // OHOS: link(2) does not produce a hard link there (the sandbox denies it),
+    // so the fixture the refusal checks are built on cannot exist.
+    describe.skipIf(isOhos)("hard links", () => {
       test.each([
         ["file patch of a hard-linked file", edit("link.txt")],
         ["file creation over a hard-linked file", creation("link.txt")],

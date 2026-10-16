@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { bunEnv, bunExe, isASAN, isDebug, isWindows, tempDir } from "harness";
+import { bunEnv, bunExe, isASAN, isDebug, isOhos, isWindows, tempDir } from "harness";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { longLimit, spawn } from "../children";
@@ -16,7 +16,9 @@ function nativeTypeScript() {
     // There is none for this system.
   }
 }
-export const tsc = nativeTypeScript();
+// TypeScript 7 is a native binary; the OHOS sandbox answers one of its
+// startup syscalls with SIGSYS, so the oracle cannot run there.
+export const tsc = isOhos ? undefined : nativeTypeScript();
 
 export const env = {
   ...bunEnv,

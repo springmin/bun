@@ -8,6 +8,7 @@ import {
   isLinux,
   isMacOS,
   isMusl,
+  isOhos,
   isWindows,
   normalizeBunSnapshot,
   tempDir,
@@ -410,7 +411,8 @@ describe.concurrent("bun fmt", () => {
     }
     const read = (dir: string, name: string) => readFileSync(join(dir, name), "utf8");
 
-    test("is still the file that its other names stand for", async () => {
+    // OHOS: link(2) does not produce a hard link there (the sandbox denies it).
+    test.skipIf(isOhos)("is still the file that its other names stand for", async () => {
       using dir = tempDir("bun-format", { "a.js": ugly });
       linkSync(join(String(dir), "a.js"), join(String(dir), "other-name.txt"));
       const { exitCode } = await write(String(dir), ["a.js"]);
@@ -1985,7 +1987,8 @@ describe.concurrent("bun fmt", () => {
 
   describe("a language that only a plugin of Prettier reads", () => {
     // A run starts a VM, and the search for leaks at its end takes seconds with the threads of one.
-    const timeout = isDebug || isASAN ? 120_000 : 5_000;
+    // OHOS starts that VM slowly, so these paths need longer than a release build's 5 s.
+    const timeout = isDebug || isASAN ? 120_000 : isOhos ? 60_000 : 5_000;
     // Stand-ins. This Prettier takes blanks away, and writes down what it is called with.
     const packages = {
       "node_modules/prettier/package.json": '{ "name": "prettier", "version": "3.0.0", "main": "index.cjs" }',

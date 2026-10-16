@@ -44,7 +44,8 @@ describe("bun", () => {
 
 // A working directory can be PATH_MAX - 1 bytes long. A file in it whose own path no longer fits a path buffer
 // is treated as one that cannot be read.
-describe.concurrent.skipIf(!isLinux)("a working directory close to PATH_MAX", () => {
+// OHOS: the same PATH_MAX edge as bad-workspace — getcwd fails first.
+describe.concurrent.skipIf(!isLinux || isOhos)("a working directory close to PATH_MAX", () => {
   const PATH_MAX = 4096;
   const packageJson = JSON.stringify({ name: "deep", scripts: { hi: "echo hi" } });
 

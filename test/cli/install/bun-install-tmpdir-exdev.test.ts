@@ -5,7 +5,7 @@
 // behind. Forcing EXDEV needs a writable mount on a different device from
 // the harness temp dir (/dev/shm on Linux).
 import { expect, test } from "bun:test";
-import { bunEnv, bunExe, isPosix, tempDir } from "harness";
+import { bunEnv, bunExe, isOhos, isPosix, tempDir } from "harness";
 import { accessSync, constants, existsSync, mkdtempSync, readdirSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -25,7 +25,9 @@ function findCrossDeviceDir(): string | undefined {
 
 const crossDeviceDir = findCrossDeviceDir();
 
-test.skipIf(!crossDeviceDir)(
+// OHOS: the only cross-device candidate is /tmp, whose hmfs mount denies the
+// rename the probe relies on.
+test.skipIf(!crossDeviceDir || isOhos)(
   "leaves nothing in $TMPDIR when it is on a different filesystem than the cache",
   async () => {
     using dir = tempDir("install-tmpdir-exdev", {

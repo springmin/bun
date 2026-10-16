@@ -2,7 +2,7 @@ import { spawn, spawnSync } from "bun";
 import { install_test_helpers } from "bun:internal-for-testing";
 import { beforeEach, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "fs";
-import { bunEnv, bunExe, isLinux, isRoot, isWindows, tempDir, tmpdirSync } from "harness";
+import { bunEnv, bunExe, isLinux, isOhos, isRoot, isWindows, tempDir, tmpdirSync } from "harness";
 import { dirname, join } from "path";
 
 let cwd: string;
@@ -710,7 +710,8 @@ describe.concurrent.skipIf(isWindows)("package.json in a sticky, shared director
 
 // A working directory can be PATH_MAX - 1 bytes long, and `<cwd>/package.json` is 13 bytes longer.
 // On Windows the path buffer is longer than any path the OS accepts.
-describe.concurrent.skipIf(isWindows)("working directory close to PATH_MAX", () => {
+// OHOS: a path at that edge makes getcwd fail before the length this builds on.
+describe.concurrent.skipIf(isWindows || isOhos)("working directory close to PATH_MAX", () => {
   /** A project in a directory whose absolute path is exactly `cwdBytes` bytes long. */
   function deepProject(cwdBytes: number) {
     const dir = tempDir("root-discovery-deep-cwd", {

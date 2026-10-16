@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { bunEnv, bunExe, isLinux, isMacOS, isWindows, tempDir } from "harness";
+import { bunEnv, bunExe, isLinux, isMacOS, isOhos, isWindows, tempDir } from "harness";
 import { randomBytes } from "node:crypto";
 import { existsSync, lstatSync, readdirSync, readFileSync, readlinkSync, rmSync, statSync } from "node:fs";
 import { join } from "path";
@@ -1936,7 +1936,9 @@ describe("Bun.Archive", () => {
     // A sparse map can put a chunk where the file system cannot seek: ext4
     // stops at 16 TiB. The child runs with a file size limit, so a build that
     // writes zeros up to the offset stops at the limit and not at a full disk.
-    test.skipIf(isWindows)("extract() writes nothing to reach an offset the file system cannot seek to", async () => {
+    // OHOS: `ulimit -f` in the shell does not reach the kernel, so the file
+    // size limit this test builds on never fires.
+    test.skipIf(isWindows || isOhos)("extract() writes nothing to reach an offset the file system cannot seek to", async () => {
       const offset = 17 * 2 ** 40;
       using dir = tempDir("sparse-far-offset", {
         "far.tar": Buffer.concat([
@@ -1975,7 +1977,7 @@ describe("Bun.Archive", () => {
   // a file. The write loop then went on with `write()` at the start of the
   // file: the file was cut, its first bytes were those of the refused block,
   // and extract() resolved.
-  test.skipIf(isWindows)("extract() rejects when the file system refuses a write in the middle of a file", async () => {
+  test.skipIf(isWindows || isOhos)("extract() rejects when the file system refuses a write in the middle of a file", async () => {
     // 6,000,000 bytes where no file can grow past 4 MiB. Gzip, so that the
     // member arrives in many blocks: the first ones fit.
     const data = randomBytes(6_000_000);
