@@ -533,6 +533,39 @@ pub(crate) fn is_linked_folder(src: &Dir, dest: &Dir) -> bool {
     dest_stat.st_dev == src_stat.st_dev
         && dest_stat.st_ino != src_stat.st_ino
         && is_hardlinked_copy(src, dest)
+        // A hard link shows the source's `package.json`, so a copy must too. Two folders
+        // can share every size and time (fixtures do), and only the bytes tell them apart.
+        && package_json_matches(src, dest)
+}
+
+/// Whether both directories have the same `package.json` (or neither can be read).
+fn package_json_matches(src: &Dir, dest: &Dir) -> bool {
+    fn read(dir: &Dir) -> Option<Vec<u8>> {
+        let name = bun_core::zstr!("package.json");
+        let fd = sys::openat(dir.fd(), name, sys::O::RDONLY | sys::O::CLOEXEC, 0).ok()?;
+        let file = sys::File::from_fd(fd);
+        let stat = sys::fstat(file.handle()).ok()?;
+        let len = usize::try_from(stat.st_size).ok()?;
+        if len > 1 << 20 {
+            // Larger than any manifest: the other checks stand.
+            return None;
+        }
+        let mut buf = vec![0u8; len];
+        let mut off = 0usize;
+        while off < len {
+            match sys::pread(file.handle(), &mut buf[off..], off as i64) {
+                Ok(0) => break,
+                Ok(n) => off += n,
+                Err(_) => return None,
+            }
+        }
+        buf.truncate(off);
+        Some(buf)
+    }
+    match (read(src), read(dest)) {
+        (Some(a), Some(b)) => a == b,
+        _ => true,
+    }
 }
 
 // macOS clonefileat(2) — routed through the safe `sys::clonefileat` wrapper
