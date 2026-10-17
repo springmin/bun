@@ -334,7 +334,7 @@ PATH="" bun install --no-save  # uses-what-bin-slow 场景
 | # | 修复 | 文件 | 说明 |
 |---|------|------|------|
 | 1 | libc 家族 | `src/install_types/resolver_hooks.rs` | `Libc::CURRENT` 增加 `target_env="ohos"` → MUSL 分支。原落 GLIBC：OHOS 的可选依赖被按 glibc 误过滤（`bun-install-cpu-os`、`bun-pm-licenses`） |
-| 2 | 文件夹依赖「未变化」检测 | `src/install/PackageInstall.rs` | `is_hardlinked_copy` 在 OHOS 改按 **size+mtime** 比较（原判断依赖副本与源的 inode 集合；沙箱拒绝 `link(2)`，副本不可能共享 inode → 每次 install 重装） |
+| 2 | 文件夹依赖「未变化」检测 | `src/install/PackageInstall.rs` | `is_hardlinked_copy` 在 OHOS 改按 **size+mtime** 比较（原判断依赖副本与源的 inode 集合；沙箱拒绝 `link(2)`，副本不可能共享 inode → 每次 install 重装）；另在 `is_linked_folder` 增加 **`package.json` 内容比较**（夹具的两个文件夹可能 size/mtime 完全相同，只有字节能区分；Linux 硬链接语义下恒等，无副作用） |
 | 3 | **linkat 复制回退保留 mtime** | `src/sys/lib.rs`（`linkat_copy_fallback`） | **根因入口**：`sys::linkat` 的 OHOS 回退（EPERM/EACCES→复制）才是 folder 依赖的实际复制路径；未保留 mtime 使第 2 条比较永远不匹配。复制后 `futimens` 写回源时间 |
 | 4 | 其它复制路径保留 mtime | `src/install/lib.rs`（`copy_file_fallback`）、`src/install/isolated_install/FileCopier.rs`、`src/install/PackageInstall.rs`（`install_with_copyfile`） | 同上（EXDEV/克隆回退等路径）；顺序均为「复制后 futimens」 |
 | 5 | 生命周期脚本 `node` 解析 | `src/install/PackageManager/PackageManagerLifecycle.rs` | OHOS PATH 组装中 harmonybrew 目录由最前移到**末尾**：bun 的 `node` shim 优先（脚本里 `node`=bun），空 PATH 仍能找到 node |
@@ -350,7 +350,7 @@ PATH="" bun install --no-save  # uses-what-bin-slow 场景
 | 超时（类型感知/插件路径在设备上更慢） | `format`（5s→60s）、`lint`/`config-files`/`js-parsers`/`js-plugins`（10/30s→120s） | 120s |
 | 设备全局工具遮蔽夹具 | `bun-install-lifecycle-scripts` | `setupTest` 净化 PATH（移除含 `node-gyp` 的目录）；`uname` 断言改为真实输出（OHOS 系统名 `HarmonyOS`，而 `os.type()` 为 `Linux`） |
 | 注册表错误渲染 | `bun-info` | 接受 reason phrase（`404 Not Found:`） |
-| 内核 TCP/TLS 语义（新旧二进制均复现，非本轮回归） | `socket`（`SHUT_RD` 后不 RST）、 `renegotiation`（第 3 次重协商期间写入的响应未被交付：TLS 层把第 4 次被拒报告为握手失败，fetch 抛 EPROTO；`FetchTasklet.rs` 的映射） | 门控 + 归因注释 |
+| 内核 TCP/TLS 语义（新旧二进制均复现，非本轮回归） | `socket`（`SHUT_RD` 后不 RST；另：merge 4 sockets 写路径 #45278 的 3 个“stalled TLS socket”用例在 OHOS 上永不返回 → 门控，属真实移植缺口）、 `renegotiation`（第 3 次重协商期间写入的响应未被交付：TLS 层把第 4 次被拒报告为握手失败，fetch 抛 EPROTO；`FetchTasklet.rs` 的映射） | 门控 + 归因注释 |
 | source-lint 与 harness 一致 | `ci-image-pins` | 期望串更新（`which("clang")`） |
 
 ### 10.3 runner 级净化
