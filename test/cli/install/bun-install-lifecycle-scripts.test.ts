@@ -27,7 +27,7 @@ import {
   readdirSorted,
   runBunInstall,
 } from "harness";
-import { constants as osConstants, type as osType, tmpdir } from "os";
+import { constants as osConstants, tmpdir } from "os";
 import { join, sep } from "path";
 import { TestRegistry } from "registry";
 
@@ -1816,13 +1816,16 @@ describe("the trusted set", () => {
       "payload/run.sh": "#!/bin/sh\necho planted\n",
     });
     const built = (ctx: TestCtx) => textOf(ctx.packageDir, "node_modules", "native", "built.txt");
+    // The script runs the system `uname`: the expected value is what it prints, which on
+    // OHOS is "HarmonyOS" (the platform map's `os.type()` says "Linux").
+    const realUname = new TextDecoder().decode(Bun.spawnSync({ cmd: ["uname"], env: baseEnv }).stdout);
 
     test.each(["preinstall", "postinstall"] as const)("bun install, %s", async script => {
       using ctx = await project("hoisted", files(script, true));
       const { err, exitCode } = await bun(ctx, ["install"]);
       expect(err).not.toContain("error:");
       expect(await exists(join(ctx.packageDir, "node_modules", ".bin", "uname"))).toBeTrue();
-      expect(await built(ctx)).toBe(`${osType()}\n`);
+      expect(await built(ctx)).toBe(realUname);
       expect(exitCode).toBe(0);
     });
 
@@ -1834,7 +1837,7 @@ describe("the trusted set", () => {
       await rm(join(ctx.packageDir, "node_modules", "native"), { recursive: true, force: true });
       const { err, exitCode } = await bun(ctx, ["run", "setup"]);
       expect(err).not.toContain("error:");
-      expect(await built(ctx)).toBe(`${osType()}\n`);
+      expect(await built(ctx)).toBe(realUname);
       expect(exitCode).toBe(0);
     });
 
@@ -1843,7 +1846,7 @@ describe("the trusted set", () => {
       expect((await bun(ctx, ["install"])).out).toContain("Blocked 1 postinstall");
       const { err, exitCode } = await bun(ctx, ["pm", "trust", "native"]);
       expect(err).not.toContain("error:");
-      expect(await built(ctx)).toBe(`${osType()}\n`);
+      expect(await built(ctx)).toBe(realUname);
       expect(exitCode).toBe(0);
     });
 
