@@ -764,8 +764,9 @@ it("fetch does not report a certificate error when the client refuses a renegoti
 it.concurrent.each(["direct", "through a CONNECT proxy"])(
   "fetch (%s) gets the response that arrives in the same read as a refused renegotiation",
   async route => {
-    // OHOS: the handshake against the relay fails with EPROTO before the response
-    // (HongMeng kernel; reproduces on the pre-merge binary too).
+    // OHOS: a response written during the third renegotiation is not delivered when
+    // the fourth is refused: the TLS layer reports a handshake failure and the fetch
+    // surfaces EPROTO. The same happens on the pre-merge binary.
     if (isOhos) return;
     using proxy = route === "direct" ? undefined : await startRecordingProxy();
     await using proc = Bun.spawn({

@@ -350,7 +350,7 @@ PATH="" bun install --no-save  # uses-what-bin-slow 场景
 | 超时（类型感知/插件路径在设备上更慢） | `format`（5s→60s）、`lint`/`config-files`/`js-parsers`/`js-plugins`（10/30s→120s） | 120s |
 | 设备全局工具遮蔽夹具 | `bun-install-lifecycle-scripts` | `setupTest` 净化 PATH（移除含 `node-gyp` 的目录）；`uname` 断言改为真实输出（OHOS 系统名 `HarmonyOS`，而 `os.type()` 为 `Linux`） |
 | 注册表错误渲染 | `bun-info` | 接受 reason phrase（`404 Not Found:`） |
-| 内核 TCP/TLS 语义（新旧二进制均复现，非本轮回归） | `socket`（`SHUT_RD` 后不 RST）、`renegotiation`（relay 握手 EPROTO） | 门控 + 归因注释 |
+| 内核 TCP/TLS 语义（新旧二进制均复现，非本轮回归） | `socket`（`SHUT_RD` 后不 RST）、 `renegotiation`（第 3 次重协商期间写入的响应未被交付：TLS 层把第 4 次被拒报告为握手失败，fetch 抛 EPROTO；`FetchTasklet.rs` 的映射） | 门控 + 归因注释 |
 | source-lint 与 harness 一致 | `ci-image-pins` | 期望串更新（`which("clang")`） |
 
 ### 10.3 runner 级净化
