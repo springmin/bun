@@ -71,8 +71,8 @@ extern "C" bool is_executable_file(const char* path)
     if (!S_ISREG(st.st_mode))
         return false;
     return access(path, X_OK) == 0;
-#elif defined(O_EXEC)
-    // O_EXEC is macOS specific
+#elif defined(O_EXEC) && !OS(LINUX)
+    // musl defines O_EXEC as O_PATH, which opens any file.
     int fd = open(path, O_EXEC | O_CLOEXEC | O_NONBLOCK | O_NOCTTY, 0);
     if (fd < 0)
         return false;
