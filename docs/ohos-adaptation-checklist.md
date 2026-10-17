@@ -361,4 +361,6 @@ PATH="" bun install --no-save  # uses-what-bin-slow 场景
 
 37 项全部处理：**35 个持久失败 → 单文件复验全绿**；2 个负载型（`bun-doctor`、`node-dns`）单跑通过。覆盖：lint 536/0、config-files 1081/0、js-parsers 24/0、js-plugins 135/0、lifecycle 354/0、backends、dt-unknown-readdir、symlink-path-traversal、isolated-install、bun-remove、bun-install、bun-install-registry、cpu-os 43/0、pm-licenses 82/0、bun-info 66/0、link-path 49/0、yarn-berry 104/0、bun-patch 134/0、socket（10 skip/0 fail）、renegotiation 58/0、format、bun-pack、archive、bun-write、streaming-extract、tmpdir-exdev、bad-workspace、run_command、ci-image-pins、js/bun/patch。
 
+**最终全量回归（2026-10-17 20:30，`1.4.4-canary.1+fc0b5573a`）**：2,310 文件 / **2,294 通过** / 16 失败 / **97,378 用例通过** / 60 用例失败 / 4 超时 / 2h21m。16 个失败全部为 **PARALLEL=4 下 lint/format/check 重文件饱和**（单文件 5-27 分钟，4 worker 时耗时膨胀 5-8 倍），**逐个单跑均 0 fail**：check 631/0、entry-points 472/0、parallel 45/0、format 1052/0、glob 45/0、svelte 233/0、doctor 26/0、bunfig 402/0、js-plugins 135/0、robustness 123/0、rule-throws 51/0、lint 536/0、config-files 1081/0、socket 173/19skip/0、ls 32/0、create-jsx 23/0。与 10-16 对比：文件通过 +21、用例通过 +946、用例失败 −115、超时 −3。**建议**：未来全量对 lint/format/check 加串行锁（flock）或 PARALLEL=2。
+
 **经验**：`sys::linkat` 的 OHOS 复制回退是 folder 依赖行为的**统一入口**——以后任何「文件身份/时间」语义问题先查 `src/sys/lib.rs` 的 syscall 包装层，而不是安装器的各个复制器。
