@@ -1543,7 +1543,9 @@ it("TLS mid-read boundary dispatch: writing to another TLS socket from data() do
 // write() reports how many bytes it took, and the caller may send anything next: the peer must get
 // exactly the reported bytes, then the next write. While one TLS socket holds the unsent rest of a
 // batch, the other TLS sockets of the loop send record by record, which is the path under test.
-describe("TLS write() that ends short while another TLS socket is stalled", () => {
+// OHOS: a stalled TLS socket keeps the other sockets' writes from reaching their peers,
+// so every test here waits for ever. The merge-4 write path (#45278) does not work here.
+describe.skipIf(isOhos)("TLS write() that ends short while another TLS socket is stalled", () => {
   const STEP = 1024 * 1024;
   const FIRST = 0x61;
   const OTHER = 0x62;
@@ -1659,9 +1661,6 @@ describe("TLS write() that ends short while another TLS socket is stalled", () =
     ["other data arrives byte for byte (accepted socket, TLS 1.2)", 256 * 1024, { accepted: true, maxVersion: 0x0303 }],
     ["less than one TLS record is sent", 100, {}],
   ])("a later write of %s", async (_, length, options) => {
-    // OHOS: a stalled TLS socket keeps the other sockets' writes from reaching their
-    // peers, so this never resolves. The merge-4 write path (#45278) does not work here.
-    if (isOhos) return;
     const { reported, received } = await shortWriteThen({ bytes: Buffer.alloc(length, OTHER) }, options);
     expect(received).toEqual({ length: reported + length, otherStartsAt: reported, firstEndsAt: reported - 1 });
   });
