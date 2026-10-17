@@ -368,6 +368,13 @@ _ohos_watchdog_for() {
       WT=900
       BT="--expose-internals --smol --timeout 600000"
       ;;
+    # ── lint/format：类型感知用例在设备上 35-120s/例，单文件 5-15 分钟；并行 4
+    # worker 下超过默认 300s 看门狗（2026-10-17 全量：config-files 623s、
+    # bunfig 749s 被误杀）──
+    */cli/lint/*.test.ts|*/cli/format/format.test.ts)
+      WT=$((TMOUT * 6))       # 1800s
+      BT="--expose-internals --smol --timeout ${BUN_TIMEOUT}"
+      ;;
     # ── 默认 ──
     *)
       WT=${TMOUT}
