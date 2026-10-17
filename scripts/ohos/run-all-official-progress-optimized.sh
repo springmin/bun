@@ -371,7 +371,7 @@ _ohos_watchdog_for() {
     # ── lint/format：类型感知用例在设备上 35-120s/例，单文件 5-15 分钟；并行 4
     # worker 下超过默认 300s 看门狗（2026-10-17 全量：config-files 623s、
     # bunfig 749s 被误杀）──
-    */cli/lint/*.test.ts|*/cli/format/format.test.ts)
+    */cli/lint/*.test.ts|*/cli/format/*.test.ts|*/cli/check/*.test.ts|*/cli/test/parallel.test.ts)
       WT=$((TMOUT * 6))       # 1800s
       BT="--expose-internals --smol --timeout ${BUN_TIMEOUT}"
       ;;
@@ -469,6 +469,13 @@ run_test() {
   case "$f" in
     *socket.io/*|*grpc-js/*|*jsonwebtoken/*|*pg-gateway/*|*resvg/*|*@napi-rs/*|*@fastify/*|*@electric-sql/*)
       _serial=1 ;;
+    # 2026-10-17 全量：类型感知 lint/format/check 在设备上单文件 5-27 分钟；4 worker
+    # 并行时互相饱和（单文件耗时膨胀 5-8 倍 → 看门狗误杀/用例超时）。独占运行：
+    # 其他 worker 暂停分派，文件按单跑速度完成（check 213s / format 342s /
+    # config-files 315s / lint 186s）。
+    */cli/lint/*.test.ts|*/cli/format/*.test.ts|*/cli/check/*.test.ts|*/cli/test/parallel.test.ts)
+      _serial=1
+      _exclusive=1 ;;
     # Load-sensitive under the full run's 5-way parallelism (each passes solo,
     # but the 2026-09-18/19 runs failed some): static source scans, FD-baseline
     # sampling, timing-injected syscall faults, pty behaviour, S3 mock timings,
