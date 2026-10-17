@@ -11,7 +11,7 @@ import {
   rmSync,
   symlinkSync,
 } from "fs";
-import { bunEnv, bunExe, DirectoryTree, isWindows, normalizeBunSnapshot, readdirSorted, tempDir } from "harness";
+import { bunEnv, bunExe, DirectoryTree, isOhos, isWindows, normalizeBunSnapshot, readdirSorted, tempDir } from "harness";
 import { isAbsolute, join, sep } from "path";
 import { TestRegistry } from "registry";
 import { wyhash11 } from "./wyhash11.js";
@@ -1110,6 +1110,9 @@ describe.concurrent("a step that fails leaves node_modules as it was", () => {
   ] as const)(
     "bun patch when the copy from the cache fails (%s linker, globalStore = %p)",
     async (linker, globalStore) => {
+      // OHOS: `ulimit -f` in the shell does not reach the kernel, so the copy
+      // never fails with EFBIG.
+      if (isOhos) return;
       const tarball = await packTarball({
         "package.json": JSON.stringify({
           name: "pkg-to-patch",

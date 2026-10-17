@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { bunEnv, bunExe, isASAN, isDebug, normalizeBunSnapshot, tempDir } from "harness";
+import { bunEnv, bunExe, isASAN, isDebug, isOhos, normalizeBunSnapshot, tempDir } from "harness";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { endChildren, spawn } from "../children";
@@ -59,7 +59,7 @@ function summary(json: string) {
 }
 
 // Each thread that needs JavaScript starts a VM, which takes seconds in a debug build.
-const timeout = isDebug || isASAN ? 120_000 : 10_000;
+const timeout = isDebug || isASAN || isOhos ? 120_000 : 10_000;
 
 // Takes the blocks between ``` out of a file, and puts what is reported about them where they are.
 const fenced = (supportsAutofix: boolean) => `

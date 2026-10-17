@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { bunEnv, bunExe, isASAN, isDebug, isLinux, normalizeBunSnapshot, tempDir } from "harness";
+import { bunEnv, bunExe, isASAN, isDebug, isLinux, isOhos, normalizeBunSnapshot, tempDir } from "harness";
 import { readFileSync } from "node:fs";
 import { availableParallelism } from "node:os";
 import { join } from "node:path";
@@ -60,7 +60,7 @@ const oxlintrc = (config: object) =>
   JSON.stringify({ categories: { correctness: "off" }, ignorePatterns: ["plugin.mjs"], ...config });
 
 // Each thread that lints a file starts a VM, which takes seconds in a debug build.
-const timeout = isDebug || isASAN ? 120_000 : 10_000;
+const timeout = isDebug || isASAN || isOhos ? 120_000 : 10_000;
 
 // As under ESLint 10.12.0.
 test.concurrent(

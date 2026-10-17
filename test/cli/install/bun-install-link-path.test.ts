@@ -509,12 +509,15 @@ describe.each(["hoisted", "isolated"])("link:<path> (%s)", linker => {
     });
     const root = String(dir);
     const cli = join(root, "project", "vendor", "dep", "cli.js");
-    chmodSync(cli, 0o755);
+    // A bin's target is left at `0o777 & !umask` (see `mode_for_bin_target` in bin.rs):
+    // with the device's `002` umask, setting `0o755` would be changed, not left alone.
+    const binMode = 0o777 & ~process.umask();
+    chmodSync(cli, binMode);
 
     const { err, exitCode } = await bun(root, ["install"]);
     expect(err).not.toContain("error:");
     expect(realpathSync(join(root, "project", "node_modules", ".bin", "dep-bin"))).toBe(realpathSync(cli));
-    expect(statSync(cli).mode & 0o777).toBe(0o755);
+    expect(statSync(cli).mode & 0o777).toBe(binMode);
     expect(exitCode).toBe(0);
   });
 });

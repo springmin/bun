@@ -27,6 +27,7 @@ import {
   githubTarball,
   isLinux,
   isWindows,
+  isOhos,
   pack,
   readdirSorted,
   runBunInstall,
@@ -3361,7 +3362,8 @@ describe.concurrent("existing node_modules, missing node_modules/.bun", () => {
       return false;
     }
   });
-  test.skipIf(!otherDevice).concurrent("what cannot be moved aside is deleted", async () => {
+  // OHOS: the only cross-device candidate is /dev/shm, which the sandbox refuses at mkdtemp.
+  test.skipIf(!otherDevice || isOhos).concurrent("what cannot be moved aside is deleted", async () => {
     const { packageDir } = await registry.createTestDir({
       bunfigOpts: { linker: "hoisted" },
       files: memberWithNestedCopy,
@@ -4828,7 +4830,10 @@ describe.each(["isolated", "hoisted"] as const)("failed script of an optional de
 
   // With SIGCHLD ignored, Linux reaps the script itself and bun cannot wait for it. Bun then
   // treats a script that exited 0 as failed, through a second exit path.
-  test.concurrent.skipIf(!isLinux)("workspace: the folder stays when bun cannot wait for the script", async () => {
+  // With SIGCHLD ignored, Linux reaps the script itself and bun cannot wait for it. Bun then
+  // treats a script that exited 0 as failed, through a second exit path.
+  // OHOS: scripts run through the waiter thread, so a script bun cannot wait for cannot be made.
+  test.concurrent.skipIf(!isLinux || isOhos)("workspace: the folder stays when bun cannot wait for the script", async () => {
     const { packageDir } = await registry.createTestDir({ bunfigOpts: { linker }, files: workspaceFiles() });
     const verb = linker === "hoisted" ? "deleting" : "skipping";
 
@@ -5352,7 +5357,7 @@ describe.concurrent("bin links of a failed optional dependency (hoisted)", () =>
 
   // With SIGCHLD ignored, Linux reaps the script itself and bun cannot wait for it. Bun then
   // treats a script that exited 0 as failed, through a second exit path.
-  test.concurrent.skipIf(!isLinux)("a script that bun cannot wait for", async () => {
+  test.concurrent.skipIf(!isLinux || isOhos)("a script that bun cannot wait for", async () => {
     const { packageDir } = await registry.createTestDir({
       bunfigOpts: { linker: "hoisted" },
       files: {

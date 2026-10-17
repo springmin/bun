@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { bunEnv, bunExe, isASAN, isDebug, isWindows, normalizeBunSnapshot, tempDir } from "harness";
+import { bunEnv, bunExe, isASAN, isDebug, isOhos, isWindows, normalizeBunSnapshot, tempDir } from "harness";
 import {
   chmodSync,
   existsSync,
@@ -1155,7 +1155,7 @@ describe.concurrent("a note says that a plugin that is built in is installed in 
 });
 
 describe.concurrent("every run evaluates an eslint.config.js", () => {
-  const timeout = isDebug || isASAN ? 120_000 : 30_000;
+  const timeout = isDebug || isASAN || isOhos ? 120_000 : 30_000;
 
   /** A project. `write` writes a file as if that had been a minute ago. `run`: the rules that report something. */
   function project(files: Record<string, string>) {
@@ -1345,7 +1345,7 @@ describe.concurrent("`process.argv` of a configuration is the command line", () 
 });
 
 describe.concurrent("what is built in is not loaded to evaluate an eslint.config.js", () => {
-  const timeout = isDebug || isASAN ? 120_000 : 30_000;
+  const timeout = isDebug || isASAN || isOhos ? 120_000 : 30_000;
   // The parts of typescript-eslint that count, in the shape that TypeScript gives them. Each large module notes that it is loaded.
   const notes = (directory: string) =>
     `require("node:fs").appendFileSync(__dirname + "/${"../".repeat(directory.split("/").length)}loaded.txt", "${directory}\\n");\n`;
@@ -4694,7 +4694,7 @@ describe.concurrent("the configuration files of ESLint 8", () => {
           Object.fromEntries(some.filter(it => it.name in known).map(it => [it.name, known[it.name]])),
         );
       },
-      30_000,
+      isOhos ? 120_000 : 30_000,
     );
   }
 });

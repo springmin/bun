@@ -120,8 +120,15 @@ async function setupTest(): Promise<TestCtx> {
   let released = false;
   try {
     const { packageDir, packageJson } = await verdaccio.createTestDir({ bunfigOpts: { linker: "hoisted" } });
+    // A `node-gyp` earlier in PATH than the project's own would run instead of the
+    // fixtures' one: for a dependency's scripts the original PATH comes first.
+    const path = (baseEnv.PATH ?? "")
+      .split(":")
+      .filter(dir => dir && !existsSync(join(dir, "node-gyp")))
+      .join(":");
     const env: Record<string, string> = {
       ...baseEnv,
+      PATH: path,
       BUN_INSTALL_CACHE_DIR: join(packageDir, ".bun-cache"),
       BUN_TMPDIR: join(packageDir, ".bun-tmp"),
       TMPDIR: join(packageDir, ".bun-tmp"),
@@ -560,7 +567,11 @@ const canForceExdevTmpdir =
   isLinux &&
   (() => {
     try {
-      return statSync("/dev/shm").dev !== statSync(tmpdir()).dev;
+      if (statSync("/dev/shm").dev === statSync(tmpdir()).dev) return false;
+      // Writing is what the test needs; the directory can be listed but not written.
+      const probe = mkdtempSync("/dev/shm/bun-exdev-probe-");
+      rmSync(probe, { recursive: true, force: true });
+      return true;
     } catch {
       return false;
     }

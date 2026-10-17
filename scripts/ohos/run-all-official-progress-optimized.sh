@@ -53,6 +53,21 @@ export BUN_OHOS="${BUN_OHOS:-1}"
 # OHOS: device tools live in /system/bin (mkfifo, ...), which the runner's PATH
 # does not always carry; the module-graph isolation fixture calls mkfifo.
 case ":$PATH:" in *":/system/bin:"*) ;; *) export PATH="$PATH:/system/bin" ;; esac
+# OHOS: a global node-gyp (~/npm/bin) shadows the fake node-gyp the install tests
+# put in their fixtures: a dependency script's PATH lists the original PATH before
+# the project's node_modules/.bin (upstream's order), and CI has no node-gyp.
+# Drop the dirs that provide one so the test environment matches CI.
+_ohos_path=""
+_ohos_ifs="$IFS"
+IFS=":"
+for _ohos_dir in $PATH; do
+  if [ -n "$_ohos_dir" ] && [ ! -e "$_ohos_dir/node-gyp" ] && [ ! -L "$_ohos_dir/node-gyp" ]; then
+    _ohos_path="${_ohos_path:+$_ohos_path:}$_ohos_dir"
+  fi
+done
+IFS="$_ohos_ifs"
+export PATH="$_ohos_path"
+unset _ohos_path _ohos_ifs _ohos_dir
 # CI 标志：全量测试即 CI 运行。expectBundled 等依赖 isCI 决定超时
 # （isCI → 无超时；否则 bundler 快照测试 5s 超时，OHOS 慢设备必现）。
 export CI="${CI:-1}"

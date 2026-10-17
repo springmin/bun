@@ -10,6 +10,7 @@ import {
   expectMaxObjectTypeCount,
   getMaxFD,
   isLinux,
+  isOhos,
   isWindows,
   libcPathForDlopen,
   tempDir,
@@ -4974,7 +4975,10 @@ describe("shutdown(true)", () => {
         });
 
         if (!secure) continue;
-        it.skipIf(isWindows)(
+        // OHOS: the kernel (HongMeng, not Linux) does not reset a connection when
+        // data arrives after shutdown(SHUT_RD), so the handshake completes and
+        // reports the self-signed certificate instead.
+        it.skipIf(isWindows || isOhos)(
           `${socket} with allowHalfOpen: ${allowHalfOpen}, before its handshake completes`,
           async () => {
             expect(await callsAfterShutdown({ role, allowHalfOpen, secure, handshakeDone: false })).toEqual({
