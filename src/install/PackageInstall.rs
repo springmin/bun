@@ -1541,6 +1541,20 @@ impl PackageFiles<'_> {
 
                 bun_sys::copy_file::copy_file_with_state(in_file, outfile, &mut copy_file_state)
                     .map_err(|err| copy_failed(err.into(), entry.path.as_bytes(), failed_file))?;
+
+                // The folder compare reads each file's size and mtime: a copy whose
+                // mtime is its own creation time would read as changed.
+                let _ = sys::futimens(
+                    outfile,
+                    sys::TimeLike {
+                        sec: stat.st_atime as i64,
+                        nsec: stat.st_atime_nsec as i64,
+                    },
+                    sys::TimeLike {
+                        sec: stat.st_mtime as i64,
+                        nsec: stat.st_mtime_nsec as i64,
+                    },
+                );
             }
 
             Ok(())
@@ -2379,8 +2393,7 @@ impl PackageFiles<'_> {
 
         let result = match method {
             #[cfg(target_os = "macos")]
-            Method::Clonefile => self.install_with_clonefile(destination_dir),
-            #[cfg(target_os = "macos")]
+            Method::Clonefile => self.install_with_clonefile(destination_dir),            #[cfg(target_os = "macos")]
             Method::ClonefileEachDir => {
                 self.install_with_clonefile_each_dir(destination_dir, skip_dirs)
             }

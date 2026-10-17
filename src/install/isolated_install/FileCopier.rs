@@ -193,32 +193,35 @@ impl FileCopier {
                 };
 
                 #[cfg(unix)]
-                {
+                let src_stat = {
                     let stat = bun_sys::fstat(src.handle())?;
                     // SAFETY: fchmod is safe to call with any fd + mode; errors are ignored (`_ =`).
                     unsafe {
                         let _ = bun_sys::c::fchmod(dest.handle().native(), stat.st_mode);
                     }
-                    // The folder compare reads each file's size and mtime: a copy
-                    // whose mtime is its own creation time would read as changed.
-                    let _ = bun_sys::futimens(
-                        dest.handle(),
-                        bun_sys::TimeLike {
-                            sec: stat.st_atime as i64,
-                            nsec: stat.st_atime_nsec as i64,
-                        },
-                        bun_sys::TimeLike {
-                            sec: stat.st_mtime as i64,
-                            nsec: stat.st_mtime_nsec as i64,
-                        },
-                    );
-                }
+                    stat
+                };
 
                 bun_sys::copy_file::copy_file_with_state(
                     src.handle(),
                     dest.handle(),
                     &mut copy_file_state,
                 )?;
+
+                // The folder compare reads each file's size and mtime: a copy whose
+                // mtime is its own creation time would read as changed.
+                #[cfg(unix)]
+                let _ = bun_sys::futimens(
+                    dest.handle(),
+                    bun_sys::TimeLike {
+                        sec: src_stat.st_atime as i64,
+                        nsec: src_stat.st_atime_nsec as i64,
+                    },
+                    bun_sys::TimeLike {
+                        sec: src_stat.st_mtime as i64,
+                        nsec: src_stat.st_mtime_nsec as i64,
+                    },
+                );
             }
         }
 

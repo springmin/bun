@@ -2909,6 +2909,20 @@ mod posix_impl {
         let result = copy_file(source.fd(), dest_file.fd());
         if result.is_err() {
             let _ = unlinkat(dest_dir, dest);
+        } else {
+            // The copy stands in for a hard link, and the folder compare reads each
+            // file's size and mtime: keep the source's, or every install copies again.
+            let _ = futimens(
+                dest_file.fd(),
+                TimeLike {
+                    sec: stat.st_atime as i64,
+                    nsec: stat.st_atime_nsec as i64,
+                },
+                TimeLike {
+                    sec: stat.st_mtime as i64,
+                    nsec: stat.st_mtime_nsec as i64,
+                },
+            );
         }
         let _ = source.close();
         let _ = dest_file.close();
