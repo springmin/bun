@@ -199,6 +199,19 @@ impl FileCopier {
                     unsafe {
                         let _ = bun_sys::c::fchmod(dest.handle().native(), stat.st_mode);
                     }
+                    // The folder compare reads each file's size and mtime: a copy
+                    // whose mtime is its own creation time would read as changed.
+                    let _ = bun_sys::futimens(
+                        dest.handle(),
+                        bun_sys::TimeLike {
+                            sec: stat.st_atime as i64,
+                            nsec: stat.st_atime_nsec as i64,
+                        },
+                        bun_sys::TimeLike {
+                            sec: stat.st_mtime as i64,
+                            nsec: stat.st_mtime_nsec as i64,
+                        },
+                    );
                 }
 
                 bun_sys::copy_file::copy_file_with_state(

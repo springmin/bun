@@ -1117,6 +1117,22 @@ pub(crate) fn copy_file_fallback(
     sys::copy_file::copy_file(inf.handle(), outf.handle())?;
     if let Ok(stat) = sys::fstat(inf.handle()) {
         let _ = sys::fchmod(outf.handle(), stat.st_mode);
+        // A copy that stands in for a hard link keeps the source's times: the
+        // folder compare reads the mtime (see `is_hardlinked_copy`).
+        #[cfg(unix)]
+        {
+            let _ = sys::futimens(
+                outf.handle(),
+                sys::TimeLike {
+                    sec: stat.st_atime as i64,
+                    nsec: stat.st_atime_nsec as i64,
+                },
+                sys::TimeLike {
+                    sec: stat.st_mtime as i64,
+                    nsec: stat.st_mtime_nsec as i64,
+                },
+            );
+        }
     }
     Ok(())
 }

@@ -377,12 +377,12 @@ impl PackageManager {
             None => path.append(original_path.as_slice())?,
         }
 
-        // OHOS: prepend bun's directory AND node's directory to PATH and set
+        // OHOS: put bun's directory first and node's directory last, and set
         // NODE=bun so lifecycle scripts resolve both `bun` and `node` (and use
         // bun's process.dlopen, which auto-signs .node ELF files). node is
-        // installed to ~/.harmonybrew/bin on OHOS — NOT ~/.bun — so scripts
-        // run with an empty PATH (tests deliberately set PATH="") would fail
-        // to find `node` if only bun's dir were prepended.
+        // installed to ~/.harmonybrew/bin on OHOS — NOT ~/.bun — so a script
+        // with none of it in PATH (tests set PATH="") still finds `node` at the
+        // end; bun's own `node` shim, earlier in PATH, stays the one scripts get.
         #[cfg(target_env = "ohos")]
         {
             let bun_dir_bytes = bun_core::self_exe_path().ok()
@@ -405,10 +405,12 @@ impl PackageManager {
                     bun_dir.len() + 1 + node_dir_len + current_path.len() + 1,
                 )?;
                 ohos_path.append(bun_dir)?;
+                ohos_path.append(current_path.as_slice())?;
+                // Last: bun puts a `node` shim earlier in PATH, and a script's
+                // `node` must be bun; this only covers a PATH with no other `node`.
                 if let Some(node_dir) = node_dir_bytes.as_deref() {
                     ohos_path.append(node_dir)?;
                 }
-                ohos_path.append(current_path.as_slice())?;
                 path = ohos_path;
             }
         }

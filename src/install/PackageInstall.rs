@@ -480,6 +480,18 @@ fn is_hardlinked_copy(src: &Dir, dest: &Dir) -> bool {
                         .ok()?
                         .st_ino
                 }
+                // OHOS: link(2) is denied, so a copied folder cannot share inodes
+                // with its source. The copy keeps each file's size and mtime (see
+                // `copy_file_fallback`): compare those instead.
+                EntryKind::File if cfg!(target_env = "ohos") => {
+                    let st = sys::fstatat(dir, &bun_core::ZBox::from_bytes(name)).ok()?;
+                    (st.st_size as u64)
+                        .wrapping_mul(1000003)
+                        .wrapping_add(st.st_mtime as u64)
+                        .wrapping_mul(1000003)
+                        .wrapping_add(st.st_mtime_nsec as u64)
+                        | 1
+                }
                 EntryKind::File => entry.ino,
                 EntryKind::Directory if name == b"node_modules" => continue,
                 EntryKind::Directory => 0,
