@@ -2331,8 +2331,6 @@ impl<'a> PackageInstaller<'a> {
                     );
                 }
             }
-                }
-            }
 
             self.finish_install(
                 dependency_id,

@@ -783,6 +783,8 @@ fn lay_link(
                 .map_err(|_| "failed to copy target")
         }
         FolderLink::LeftOut(why) => Err(why),
+    }
+}
 
 /// Whether both directories have the same `package.json` (or neither can be read).
 fn package_json_matches(src: &Dir, dest: &Dir) -> bool {

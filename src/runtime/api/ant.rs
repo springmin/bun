@@ -21,6 +21,15 @@ use bun_jsc::{
     ArrayBuffer, CallFrame, JSArray, JSFunction, JSGlobalObject, JSObject, JSValue, JsResult,
 };
 
+/// An `Array` of `items`. The bindgen surface only exposes an empty array.
+fn js_array_of(global: &JSGlobalObject, items: &[JSValue]) -> JsResult<JSValue> {
+    let array = JSArray::create_empty(global, items.len())?;
+    for (i, item) in items.iter().enumerate() {
+        array.put_index(global, u32::try_from(i).expect("int cast"), *item)?;
+    }
+    Ok(array)
+}
+
 // ─── C ABI from src/jsc/bindings/stringWidth.cpp ────────────────────────────
 
 unsafe extern "C" {
@@ -278,7 +287,7 @@ impl CellSegmenter {
         for g in &t.graphemes {
             items.push(bun_string_jsc::create_utf8_for_js(global, g)?);
         }
-        JSArray::create(global, &items)
+        js_array_of(global, &items)
     }
 
     #[bun_jsc::host_fn(getter)]
@@ -288,7 +297,7 @@ impl CellSegmenter {
         for k in &t.sgr_keys {
             items.push(bun_string_jsc::create_utf8_for_js(global, k)?);
         }
-        JSArray::create(global, &items)
+        js_array_of(global, &items)
     }
 
     #[bun_jsc::host_fn(getter)]
@@ -298,7 +307,7 @@ impl CellSegmenter {
         for k in &t.sgr_close_keys {
             items.push(bun_string_jsc::create_utf8_for_js(global, k)?);
         }
-        JSArray::create(global, &items)
+        js_array_of(global, &items)
     }
 
     #[bun_jsc::host_fn(getter)]
@@ -308,7 +317,7 @@ impl CellSegmenter {
         for u in &t.uris {
             items.push(bun_string_jsc::create_utf8_for_js(global, u)?);
         }
-        JSArray::create(global, &items)
+        js_array_of(global, &items)
     }
 
     /// `segment(text, cells, runs, reordered) -> count`
