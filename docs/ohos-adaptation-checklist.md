@@ -364,3 +364,15 @@ PATH="" bun install --no-save  # uses-what-bin-slow 场景
 **最终全量回归（2026-10-17 20:30，`1.4.4-canary.1+fc0b5573a`）**：2,310 文件 / **2,294 通过** / 16 失败 / **97,378 用例通过** / 60 用例失败 / 4 超时 / 2h21m。16 个失败全部为 **PARALLEL=4 下 lint/format/check 重文件饱和**（单文件 5-27 分钟，4 worker 时耗时膨胀 5-8 倍），**逐个单跑均 0 fail**：check 631/0、entry-points 472/0、parallel 45/0、format 1052/0、glob 45/0、svelte 233/0、doctor 26/0、bunfig 402/0、js-plugins 135/0、robustness 123/0、rule-throws 51/0、lint 536/0、config-files 1081/0、socket 173/19skip/0、ls 32/0、create-jsx 23/0。与 10-16 对比：文件通过 +21、用例通过 +946、用例失败 −115、超时 −3。**建议**：未来全量对 lint/format/check 加串行锁（flock）或 PARALLEL=2。
 
 **经验**：`sys::linkat` 的 OHOS 复制回退是 folder 依赖行为的**统一入口**——以后任何「文件身份/时间」语义问题先查 `src/sys/lib.rs` 的 syscall 包装层，而不是安装器的各个复制器。
+
+---
+
+## 十一、合并 `a407eae88a..017b2439a7`（37 提交，2026-10-18）
+
+**合并**：37 个上游提交（SQL 整合 #45304、`bun lint`/`check`/`fmt` 大改 #45595、bindgen `Bun.*` #45590/#45450、WebSocket 关闭握手重写 #45223、yarn.lock 迁移 #45616、YAML.parse #45593、bake #45605、symlink 安装 #45477、WebKit bump `87ee10da087b` #45567）。**14 处冲突**（src 4 + 测试 10）：取上游结构 + 重放 OHOS 补丁（`is_linked_folder` 的 package.json 身份、OHOS ELF 签名、`is_executable_file` 的 `access(X_OK)`、loop post handler、序列化策略）。**完整影响评估**：1196 个上游独占文件 0 差异、239 个本地独占文件 0 差异、87 个双方文件逐行核对（仅有意差异）。评估还发现并修复了 2 个残留冲突标记 + 2 处拼接线。
+
+**构建期修复**（`d5fcb57721`）：3 处冲突拼接的括号重复（`PackageInstall.rs`/`PackageInstaller.rs`/`libuwsockets.cpp`）、`ant.rs` 的 `JSArray::create` 改为 `create_empty`+`put_index`（bindgen 迁移）。**WebKit**：切到 `87ee10da087b`（partial clone blob 拉取重试 12 次）+ 重放 suspend/resume 补丁。
+
+**测试适配**（`bedb1edf28`、`d5fcb57721` 后）：`bun-install-git-deps` cached-clone 测试 240s；lifecycle 用真实 uname；`bun-pack` 新 describe 的 ulimit 门控；**`is_hardlinked_copy` 的 folder 内文件链接在 OHOS 按 size+mtime 比较**（代码修复）；`postgres`/`mysql` 的 `/proc/self/net/tcp` 门控；WebSocket send 背压（3+1 用例）门控；`serve` 背压载荷 64MB（OHOS 回环 rmem 16MB）；`node-dns` 的 EAI_AGAIN 门控；runner 给 `socket.test.ts` 加网络重试。
+
+**结果**：全量 2349 文件 / **2339 通过** / 10 失败（全部单跑复验通过：format 1118/0、js-plugins 146/0、serve 330/0、socket 177/0、type-export 70/0、snapshot 61/0、websocket-server 215/0、backpressure-buffer 21/1skip、node-dns 169/1skip、create-jsx 23/0）/ 106,919 用例通过。
