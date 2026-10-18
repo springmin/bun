@@ -1368,7 +1368,7 @@ mod _impl {
 
     pub(crate) fn user_info(
         cx: &mut JsScope<'_>,
-        options: crate::generated_bindgen::node_os::UserInfoOptions<'_>,
+        options: &crate::generated_bindgen::node_os::UserInfoOptions<'_>,
     ) -> JsResult<JSValue> {
         let _ = options; // TODO:
 

@@ -1208,7 +1208,7 @@ test("every install warns about a patchedDependencies key that matches no instal
   expect(removed.exitCode).toBe(0);
 });
 
-test.concurrent.each<[string, (version: string) => string]>([
+test.each<[string, (version: string) => string]>([
   ["a tarball file", version => `file:./no-deps-${version}.tgz`],
   ["a tarball URL", version => `${registry.registryUrl()}no-deps/-/no-deps-${version}.tgz`],
 ])("every install warns about the patch of %s that the dependency no longer names", async (_, spec) => {
@@ -1232,7 +1232,7 @@ test.concurrent.each<[string, (version: string) => string]>([
   expect(warningLines(await frozen(dir))).toEqual(moved);
 });
 
-test.concurrent("a patchedDependencies key without a version is pointed out where it is in package.json", async () => {
+test("a patchedDependencies key without a version is pointed out where it is in package.json", async () => {
   const dir = await setup({
     "package.json": pkgJson({ "no-deps": "1.0.0" }, { patchedDependencies: { "no-deps": "patches/no-deps.patch" } }),
     "patches/no-deps.patch": NO_DEPS_PATCH,
@@ -1560,8 +1560,39 @@ test.each([
   expect(exitCode).toBe(0);
 });
 
-test(
-  "`bun update --latest` holds back only the entry it rewrote; a member's own dist-tag entry still follows its tag",
+// The `pre-3` tag points to 3.0.1. A dist-tag is rewritten to a range, same as in `dependencies`.
+test.each([
+  ["a pin", "3.0.1", "3.0.1"],
+  ["a range", "^3.0.1", "^3.0.1"],
+  ["a dist-tag", "pre-3", "^3.0.1"],
+])(
+  "`bun update --latest` does not downgrade a catalog entry that is ahead of `latest`: %s",
+  async (_, entry, written) => {
+    const dir = await setup({
+      "package.json": {
+        ...ROOT,
+        catalog: { "dep-with-tags": entry },
+        catalogs: { tools: { "dep-with-tags": entry } },
+        dependencies: { "dep-with-tags": "catalog:" },
+      },
+      "packages/pkg1/package.json": member("pkg1", { "dep-with-tags": "catalog:tools" }),
+    });
+    expect(await lockedVersions(dir, "dep-with-tags")).toStrictEqual(["3.0.1"]);
+
+    const { stderr, exitCode } = await run(dir, "update", "--latest");
+    expect(stderr).not.toContain("error:");
+    expect(await packageJsonOf(dir)).toMatchObject({
+      catalog: { "dep-with-tags": written },
+      catalogs: { tools: { "dep-with-tags": written } },
+    });
+    expect(await lockedVersions(dir, "dep-with-tags")).toStrictEqual(["3.0.1"]);
+    expect(await installedVersion(dir, "dep-with-tags")).toBe("3.0.1");
+    await frozen(dir);
+    expect(exitCode).toBe(0);
+  },
+);
+
+test(  "`bun update --latest` holds back only the entry it rewrote; a member's own dist-tag entry still follows its tag",
   async () => {
     const dir = await setup({
       "package.json": { ...ROOT, dependencies: { "dep-with-tags": "3.0.1" } },
