@@ -1098,7 +1098,11 @@ describe.skipIf(isWindows)("a failed pack leaves no tarball behind", () => {
     { args: [], left: ["index.js", "package.json"] },
     { args: ["--destination=out"], left: ["index.js", "out", "package.json"] },
     { args: ["--filename=custom.tgz"], left: ["index.js", "package.json"] },
-  ])("when the tarball cannot be written (args: $args)", async ({ args, left }) => {    await using dir = tempDir("pack-failed", {
+  ])("when the tarball cannot be written (args: $args)", async ({ args, left }) => {
+    // OHOS: `ulimit -f` in the shell does not reach the kernel, so the write
+    // never fails with EFBIG.
+    if (isOhos) return;
+    await using dir = tempDir("pack-failed", {
       "package.json": packageJson,
       "index.js": "module.exports = 1;",
     });
@@ -1111,6 +1115,8 @@ describe.skipIf(isWindows)("a failed pack leaves no tarball behind", () => {
   });
 
   test.concurrent("and keeps the tarball of an earlier pack", async () => {
+    // OHOS: `ulimit -f` never fires (see above).
+    if (isOhos) return;
     await using dir = tempDir("pack-failed-earlier", {
       "package.json": packageJson,
       "index.js": "module.exports = 1;",

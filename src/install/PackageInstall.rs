@@ -468,6 +468,18 @@ pub(crate) fn make_open_real_dir(base: &Dir, sub_path: &ZStr) -> sys::Maybe<Dir>
     open()
 }
 
+/// OHOS: link(2) is denied, so a copy cannot share an inode with what it stands for.
+/// Size and mtime are what a copy keeps (see `linkat_copy_fallback`).
+#[cfg(target_env = "ohos")]
+fn ohos_copy_key(st: &sys::Stat) -> u64 {
+    (st.st_size as u64)
+        .wrapping_mul(1000003)
+        .wrapping_add(st.st_mtime as u64)
+        .wrapping_mul(1000003)
+        .wrapping_add(st.st_mtime_nsec as u64)
+        | 1
+}
+
 /// Whether `dest` is still a hardlinked copy of `src`: both have the same entry names and inodes.
 /// `rel` is the path of `src` inside the `file:` folder.
 fn is_hardlinked_copy(root: &mut FolderRoot<'_>, rel: &mut Vec<u8>, src: &Dir, dest: &Dir) -> bool {
@@ -493,12 +505,7 @@ fn is_hardlinked_copy(root: &mut FolderRoot<'_>, rel: &mut Vec<u8>, src: &Dir, d
                 // `copy_file_fallback`): compare those instead.
                 EntryKind::File if cfg!(target_env = "ohos") => {
                     let st = sys::fstatat(dir, &bun_core::ZBox::from_bytes(name)).ok()?;
-                    (st.st_size as u64)
-                        .wrapping_mul(1000003)
-                        .wrapping_add(st.st_mtime as u64)
-                        .wrapping_mul(1000003)
-                        .wrapping_add(st.st_mtime_nsec as u64)
-                        | 1
+                    ohos_copy_key(&st)
                 }
                 EntryKind::File => entry.ino,
                 EntryKind::Directory if name == b"node_modules" => continue,
@@ -523,6 +530,9 @@ fn is_hardlinked_copy(root: &mut FolderRoot<'_>, rel: &mut Vec<u8>, src: &Dir, d
                             let link = [name, &b"/"[..], &text[..], &[0xff; INO_LEN][..]].concat();
                             entries.push(link.into_boxed_slice());
                             continue;
+                        }
+                        FolderLink::File(_, target) if cfg!(target_env = "ohos") => {
+                            ohos_copy_key(&target)
                         }
                         FolderLink::File(_, target) => target.st_ino,
                         FolderLink::LeftOut(_) => continue,

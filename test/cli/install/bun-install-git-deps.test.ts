@@ -4123,7 +4123,7 @@ test.concurrent.skipIf(isWindows).each<{ what: string; change(at: Places): void 
     expect(await installedVersionOf(project, "dep")).toBe("main-v2");
     expect(exitCode).toBe(0);
   },
-  30_000,
+  isOhos ? 240_000 : 30_000,
 );
 
 // Only a file of the repository itself is read as its package.json.

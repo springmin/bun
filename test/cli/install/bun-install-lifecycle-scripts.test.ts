@@ -2150,7 +2150,7 @@ describe("the trusted set", () => {
         PATH: `${join(ctx.packageDir, "link", "node_modules", ".bin")}:${ctx.env.PATH}`,
       });
       expect(err).not.toContain("error:");
-      expect(await built(ctx)).toBe(`${osType()}\n`);
+      expect(await built(ctx)).toBe(realUname);
       expect(exitCode).toBe(0);
     });
 

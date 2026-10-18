@@ -2,7 +2,7 @@ import type { Server, ServerWebSocket, Subprocess, WebSocketHandler } from "bun"
 import { serve, spawn } from "bun";
 import { estimateShallowMemoryUsageOf } from "bun:jsc";
 import { afterEach, describe, expect, it } from "bun:test";
-import { bunEnv, bunExe, forceGuardMalloc, isASAN, isDebug, isWindows, tempDir, tls as tlsCert } from "harness";
+import { bunEnv, bunExe, forceGuardMalloc, isASAN, isDebug, isOhos, isWindows, tempDir, tls as tlsCert } from "harness";
 import { once } from "node:events";
 import net, { isIP } from "node:net";
 import path from "node:path";
@@ -635,7 +635,9 @@ describe("Server", () => {
         done();
       },
     }));
-    test("drain", done => ({
+    // OHOS: the send path does not report backpressure (the same write-path gap as
+    // the stalled-TLS tests), so these never trigger.
+    test.skipIf(isOhos)("drain", done => ({
       backpressureLimit: 1,
       open(ws) {
         const data = new Uint8Array(1 * 1024 * 1024);
@@ -754,7 +756,7 @@ describe("Server", () => {
         done();
       },
     }));
-    test("backpressureLimit", done => ({
+    test.skipIf(isOhos)("backpressureLimit", done => ({
       backpressureLimit: 1,
       open(ws) {
         const data = new Uint8Array(1 * 1024 * 1024);
@@ -784,7 +786,7 @@ describe("Server", () => {
         done();
       },
     }));
-    test("closeOnBackpressureLimit", done => ({
+    test.skipIf(isOhos)("closeOnBackpressureLimit", done => ({
       closeOnBackpressureLimit: true,
       backpressureLimit: 1,
       open(ws) {

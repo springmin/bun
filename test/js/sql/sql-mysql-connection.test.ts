@@ -1,6 +1,6 @@
 import { randomUUIDv7, SQL } from "bun";
 import { describe, expect, test } from "bun:test";
-import { bunEnv, bunExe, describeWithContainer, isLinux, isWindows } from "harness";
+import { bunEnv, bunExe, describeWithContainer, isLinux, isOhos, isWindows } from "harness";
 import { once } from "node:events";
 import net from "node:net";
 import {
@@ -1071,7 +1071,8 @@ describe("scripted server", () => {
   });
 
   // The kernel's view of the client's socket, as in fetch-tcp-keepalive.test.ts: "02" is the keepalive timer.
-  test.skipIf(!isLinux)("a TCP connection has keepalive on", async () => {
+  // OHOS: /proc/self/net/tcp is denied by the sandbox (EACCES).
+  test.skipIf(!isLinux || isOhos)("a TCP connection has keepalive on", async () => {
     const { port, server } = await mysqlServer({ onCommand: socket => void socket.write(mysqlOkPacket(1)) });
     try {
       await using sql = new SQL({ url: `mysql://root@127.0.0.1:${port}/db`, max: 1 });
