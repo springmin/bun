@@ -4966,7 +4966,9 @@ it.each([
 // the whole stream into uWS's internal buffer before the client reads anything.
 it("applies backpressure to a ReadableStream response while the client drains", async () => {
   const chunk = Buffer.alloc(256 * 1024, 0x61);
-  const chunkCount = 64; // 16 MB — well above loopback socket-buffer capacity
+  // OHOS: the loopback receive buffer grows to 16 MB (net.ipv4.tcp_rmem), so 16 MB
+  // never exceeds it; 64 MB does.
+  const chunkCount = isOhos ? 256 : 64; // 16 MB — well above loopback socket-buffer capacity
   let sent = 0;
 
   using server = serve({

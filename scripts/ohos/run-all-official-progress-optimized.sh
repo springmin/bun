@@ -403,6 +403,8 @@ run_test() {
   # 这些文件用例失败时重试一次（默认只对超时重试）。
   _retry_on_fail=0
   case "$f" in
+    # 2026-10-18: the `www.example.com` handshake test depends on public DNS; flakes.
+    */js/bun/net/socket.test.ts|\
     */websocket/websocket-server.test.ts|*/test/fake-timers/fake-timers.test.ts|\
     */bundler/transpiler/transpiler.test.js|*/http/proxy.test.ts)
       _retry_on_fail=1 ;;
