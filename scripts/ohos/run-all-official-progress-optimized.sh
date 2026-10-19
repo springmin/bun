@@ -23,9 +23,11 @@ BUN_TIMEOUT=${BUN_TIMEOUT:-600000}
 
 # OHOS /tmp lives on hmfs with hmmac=inherit_parent: creates succeed but
 # rename() is denied by the MAC layer, which the install path needs
-# (extract → rename into the cache dir). Use the app's private tmp unless
-# TMPDIR is set explicitly.
-export TMPDIR="${TMPDIR:-/data/storage/el2/base/tmp}"
+# (extract → rename into the cache dir). Force the app's private tmp instead
+# of inheriting an outer TMPDIR, which may be the app cacheDir. Override with
+# BUN_TEST_TMPDIR when a different location is required.
+export TMPDIR="${BUN_TEST_TMPDIR:-/data/storage/el2/base/tmp}"
+export TMP="$TMPDIR" TEMP="$TMPDIR"
 
 # The OHOS SDK's lld links against the SDK's bundled libxml2, but its
 # $ORIGIN/../lib RUNPATH is not honored in this environment: every run-time

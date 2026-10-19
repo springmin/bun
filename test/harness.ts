@@ -85,6 +85,12 @@ function detectASAN(): boolean {
 
 export const bunEnv: NodeJS.Dict<string> = {
   ...process.env,
+  // OHOS: pin TMPDIR explicitly. `...process.env` already carries it, but a
+  // spawn with a hand-built env would drop it and bun would fall back to
+  // /tmp (rename denied by MAC) or the app cacheDir.
+  ...(isOHOS && {
+    TMPDIR: process.env.BUN_TEST_TMPDIR || process.env.TMPDIR || "/data/storage/el2/base/tmp",
+  }),
   // Windows spells PATH `Path`. `{ ...bunEnv, PATH }` would then hold both, and which one a child
   // process gets depends on the other variables.
   ...(isWindows && { Path: undefined, PATH: process.env.PATH }),
