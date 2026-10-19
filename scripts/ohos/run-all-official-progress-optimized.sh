@@ -403,7 +403,10 @@ run_test() {
   # 这些文件用例失败时重试一次（默认只对超时重试）。
   _retry_on_fail=0
   case "$f" in
+    # 2026-10-19: pass solo; lost one case each in the 2026-10-19 full run.
     # 2026-10-18: the `www.example.com` handshake test depends on public DNS; flakes.
+    */js/web/fetch/fetch.test.ts|*/js/bun/shell/bunshell.test.ts|\
+    */integration/next-pages/test/dev-server.test.ts|\
     */js/bun/net/socket.test.ts|\
     */websocket/websocket-server.test.ts|*/test/fake-timers/fake-timers.test.ts|\
     */bundler/transpiler/transpiler.test.js|*/http/proxy.test.ts)

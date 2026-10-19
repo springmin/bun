@@ -376,3 +376,15 @@ PATH="" bun install --no-save  # uses-what-bin-slow 场景
 **测试适配**（`bedb1edf28`、`d5fcb57721` 后）：`bun-install-git-deps` cached-clone 测试 240s；lifecycle 用真实 uname；`bun-pack` 新 describe 的 ulimit 门控；**`is_hardlinked_copy` 的 folder 内文件链接在 OHOS 按 size+mtime 比较**（代码修复）；`postgres`/`mysql` 的 `/proc/self/net/tcp` 门控；WebSocket send 背压（3+1 用例）门控；`serve` 背压载荷 64MB（OHOS 回环 rmem 16MB）；`node-dns` 的 EAI_AGAIN 门控；runner 给 `socket.test.ts` 加网络重试。
 
 **结果**：全量 2349 文件 / **2339 通过** / 10 失败（全部单跑复验通过：format 1118/0、js-plugins 146/0、serve 330/0、socket 177/0、type-export 70/0、snapshot 61/0、websocket-server 215/0、backpressure-buffer 21/1skip、node-dns 169/1skip、create-jsx 23/0）/ 106,919 用例通过。
+
+---
+
+## 十二、合并 `017b2439a7..5900354623`（22 提交，2026-10-19）
+
+**合并**：22 个上游提交（bake 配置/插件/app pages #45828/#45902/#45682、install 整合后续 #45710、WebSocket 客户端跟进 #45720、58 个 `node:*`/`Bun` natives bindgen #45851、sql 修复 #45711、types/bindgen/gzip #45794）。**2 处冲突**：`src/runtime/cli/filter_run.rs`（保留 OHOS pipe-drain 函数 + 上游新 `finish()`）、`test/cli/install/bun-update-transitive.test.ts`（取上游新测试后序列化）。**完整影响评估**：203 个上游独占文件 0 差异、291 个本地独占文件 0 差异、39 个双方文件逐行核对（仅 1 处有意差异 = 序列化的 `test.each`）。构建 124M 成功，冒烟通过。
+
+**重大发现：磁盘 100% 满**（931G/932G，仅 47M 可用）——TMPDIR 累积了 **113,925 个测试夹具条目**（数周），加上 37 个旧日志（含 513MB partial）。清理后释放 **~260GB**（732G→672G，73%）。此前多轮的"负载型失败"、OOM、文件挂起（`type-export`/`snapshot` 2h+）均由磁盘耗尽引起。
+
+**全量结果（清理后首轮）**：2350 文件 / **2347 通过** / 3 失败 / **107,409 用例通过** / 15 用例失败 / **0 超时** / 2h12m。3 个失败（`next-pages dev-server`、`bunshell`、`fetch.test`）**逐个单跑均通过**（网络/负载瞬时型）→ 已加入 runner 重试名单。
+
+**运维建议**：每轮全量前检查 `/data/storage/el2/base/tmp` 的条目数与磁盘余量（`df`）；测试夹具会累积，建议保留 >100GB 可用空间。
