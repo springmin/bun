@@ -1607,22 +1607,12 @@ pub mod fs {
             }
             #[cfg(any(target_os = "linux", target_os = "freebsd"))]
             {
-                // OHOS /tmp is read-only erofs. Check TMPDIR environment
-                // first, then fall back to known-writable paths.
                 #[cfg(target_env = "ohos")]
                 {
-                    // Respect explicit TMPDIR from the environment.
-                    if let Some(tmp) = env_var::TMPDIR.get_not_empty() {
-                        if !tmp.is_empty() {
-                            return tmp;
-                        }
-                    }
-                    // Check if /tmp is actually writable.
-                    if unsafe { libc::access(b"/tmp\0".as_ptr() as *const libc::c_char, libc::W_OK) } == 0
-                    {
-                        return b"/tmp";
-                    }
-                    // Fallback order: $HOME/tmp → /data/storage/el2/base/tmp
+                    // OHOS /tmp is writable but rename(2) is denied by the MAC layer
+                    // (hmmac=inherit_parent): install/extract and child processes need
+                    // a temp dir where rename works, so skip /tmp entirely.
+                    // Fallback order: $HOME/tmp → /data/storage/el2/base/tmp.
                     if let Some(home) = env_var::HOME.get_not_empty() {
                         let mut buf = [0u8; 2048];
                         let len = home.len().min(buf.len() - 5);

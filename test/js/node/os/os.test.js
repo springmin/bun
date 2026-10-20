@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { realpathSync } from "fs";
-import { isWindows } from "harness";
+import { bunEnv, bunExe, isOhos, isWindows } from "harness";
 import { isIPv4, isIPv6 } from "node:net";
 import * as os from "node:os";
 
@@ -410,4 +410,20 @@ it("with new, each function does what it does in Node", () => {
   for (const name of ["freemem", "totalmem", "release", "version"]) {
     expect(() => new os[name]()).toThrow("is not a constructor");
   }
+});
+
+it("tmpdir falls back to a writable app directory on OHOS", () => {
+  if (!isOhos) return;
+  const env = { ...bunEnv };
+  delete env.TMPDIR;
+  delete env.TMP;
+  delete env.TEMP;
+  const { stdout, exitCode } = Bun.spawnSync({
+    cmd: [bunExe(), "-e", "console.log(require('node:os').tmpdir())"],
+    env,
+  });
+  expect(exitCode).toBe(0);
+  const tmp = stdout.toString().trim();
+  expect(tmp).not.toBe("/tmp");
+  expect(tmp.length).toBeGreaterThan(0);
 });
