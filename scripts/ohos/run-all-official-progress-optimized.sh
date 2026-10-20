@@ -570,6 +570,21 @@ run_test() {
     out="$PDIR/out_${idx}_a${attempt}.tmp"
     if [ "$_sub" = "run" ]; then _bt="--smol"; else _bt="$BT"; fi
     _ensure_pdir
+
+    # OHOS: do not start a new file while the system is short on memory. The
+    # install-heavy tail can otherwise fork-bomb the run into an OOM kill.
+    _mem_waited=0
+    while :; do
+      _avail=$(awk '/MemAvailable/ {print $2}' /proc/meminfo 2>/dev/null)
+      [ -n "$_avail" ] && [ "$_avail" -ge "${OHOS_MIN_MEM_KB:-3145728}" ] && break
+      sleep 5
+      _mem_waited=$((_mem_waited + 5))
+      if [ "$_mem_waited" -ge 300 ]; then
+        echo "  [mem] MemAvailable still below ${OHOS_MIN_MEM_KB:-3145728}KB after ${_mem_waited}s" >> "$REPORT"
+        break
+      fi
+    done
+
     if [ -n "$WRAP" ]; then
       # OHOS CI 无 TTY，用 script 分配 PTY
       $WRAP "$BUN_EXE $_sub $_bt \"$f\"" /dev/null > "$out" 2>&1 &
