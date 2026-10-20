@@ -466,7 +466,7 @@ describe.concurrent("bun fmt", () => {
     });
 
     // With `ulimit -f 16` a write fails with EFBIG once it is 8 KB into a file, much like on a full disk.
-    test.skipIf(isWindows)("keeps its old text when writing it in place fails partway", async () => {
+    test.skipIf(isWindows || isOhos)("keeps its old text when writing it in place fails partway", async () => {
       const text = `{${Array.from({ length: 3000 }, (_, i) => `"k${i}":   [1,2,3]`).join(",")}}\n`;
       using dir = tempDir("bun-format", { "a.json": text });
       linkSync(join(String(dir), "a.json"), join(String(dir), "other-name.txt"));
@@ -582,7 +582,7 @@ describe.concurrent("bun fmt", () => {
   });
 
   // Every write to /dev/full fails with ENOSPC, as on a full disk.
-  describe.skipIf(!isLinux)("what is printed to standard output", () => {
+  describe.skipIf(!isLinux || isOhos)("what is printed to standard output", () => {
     /** `bun fmt` with `script` around it, in which `"$0" "$@"` is the command. */
     async function inShell(script: string, args: string[]) {
       using dir = tempDir("bun-format", { "a.js": ugly });

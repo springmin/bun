@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { bunEnv, bunExe, isASAN, isDebug, isLinux, isRoot, isWindows, tempDir } from "harness";
+import { bunEnv, bunExe, isASAN, isDebug, isLinux, isOhos, isRoot, isWindows, tempDir } from "harness";
 import {
   chmodSync,
   existsSync,
@@ -2393,7 +2393,7 @@ export const a: number[] = [file, one, two];
     });
 
     // Every write to /dev/full fails with ENOSPC, as on a full disk.
-    test.skipIf(!isLinux)("what can't be written to standard output is an error with exit code 2", async () => {
+    test.skipIf(!isLinux || isOhos)("what can't be written to standard output is an error with exit code 2", async () => {
       using dir = project({ "a.ts": `export {};\n` });
       await using proc = spawn({
         cmd: ["sh", "-c", 'exec "$0" "$@" > /dev/full', bunExe(), "check", "--listFilesOnly"],

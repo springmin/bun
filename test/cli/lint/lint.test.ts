@@ -8919,7 +8919,7 @@ export default { meta: { name: "q" }, rules: { marks, marked } };\n`,
 
     // Every write to /dev/full fails with ENOSPC, as on a full disk.
     test
-      .skipIf(!isLinux)
+      .skipIf(!isLinux || isOhos)
       .each([[["-f", "json"]], [["--fix-dry-run", "-f", "json"]], [["--print-config", "a.js"]], [["--rules"]]])(
       "exits with code 2 when writing to standard output fails: %j",
       async args => {
