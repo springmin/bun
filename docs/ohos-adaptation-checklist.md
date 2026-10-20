@@ -407,3 +407,15 @@ PATH="" bun install --no-save  # uses-what-bin-slow 场景
 **构建/部署**：124M，`1.4.4-canary.1+a945dc576`，冒烟 + os 测试 60/60 通过。
 
 **全量结果**：2351 文件 / **2348 通过** / 3 失败 / **108,832 用例通过** / 21 用例失败 / **0 超时** / **1h45m52s**。3 个失败全部为本轮上游**新增的写失败测试**：`/dev/full`（OHOS 上不可访问）与 `ulimit -f`（OHOS 为 no-op）→ 已用 `isOhos` 门控（check 1、format 4、lint 4 用例），3 文件单跑复验 **803 / 1659 / 707 全绿**。`next-pages` 首跑 SIGTERM 超时、重试通过。cacheDir 全程保持 8 项（TMPDIR pin 生效），TMPDIR 新增夹具约 12k 条。
+
+---
+
+## 十四、合并 `eb807b7718..ea6a2c7b7c`（2 提交，2026-10-20）
+
+**合并**：2 个上游提交（源码位置统一 #45677：coverage / stack frames / call sites / source maps 与源码一致；根证书更新 #46159）。**0 冲突**（自动合并）。**完整影响评估**：40 个上游独占文件 0 差异、330 个本地独占文件 0 差异、2 个双方文件（`scripts/build/deps/webkit.ts`、`src/standalone_graph/StandaloneModuleGraph.rs`）逐行核对 0 缺失。
+
+**WebKit 升级**：`87ee10da087b` → `274ebb3cf600`（JSC control flow profiler 基本块/函数范围与文本一致）。OHOS `suspend-resume` 补丁涉及的文件在两个 commit 间无变化，checkout 后保持应用；perl 路径替换保留。
+
+**全量结果（第 13 轮，`1.4.4-canary.1+c788fb5fe`）**：2352 文件 / **2351 通过** / 1 失败 / **0 超时** / **109,151 用例通过** / **1h48m15s**。唯一失败 `bake/dev/ssg-pages-router`（dev server 关闭超时）单跑两次均 **9/0** → 瞬时型，已加入重试名单。
+
+**OOM 事故与修复**：首次全量在 98%（安装测试密集段）触发系统 OOM（`fork: Out of memory`，32GB 耗尽），6 个文件连带失败——`bun-install` 的 `+122/-644` 为 OOM 下的解析假象，单跑 **766/0**；其余 5 个文件（filesink、bun-run-dir、self-reference、tsconfig-override、bun-update-security-simple）单跑全绿。runner 增加**内存水位守卫**：`MemAvailable < 3GB` 时暂停启动新文件（最多等 300s）→ 重跑 0 超时、0 OOM。
