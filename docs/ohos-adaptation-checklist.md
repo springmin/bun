@@ -388,3 +388,22 @@ PATH="" bun install --no-save  # uses-what-bin-slow 场景
 **全量结果（清理后首轮）**：2350 文件 / **2347 通过** / 3 失败 / **107,409 用例通过** / 15 用例失败 / **0 超时** / 2h12m。3 个失败（`next-pages dev-server`、`bunshell`、`fetch.test`）**逐个单跑均通过**（网络/负载瞬时型）→ 已加入 runner 重试名单。
 
 **运维建议**：每轮全量前检查 `/data/storage/el2/base/tmp` 的条目数与磁盘余量（`df`）；测试夹具会累积，建议保留 >100GB 可用空间。
+
+---
+
+## 十三、合并 `5900354623..eb807b7718`（11 提交，2026-10-20）
+
+**合并**：11 个上游提交（bake `getServerSideProps`/`getStaticProps`/`getStaticPaths` #45911、`.tsx` pages + `bake.config.ts` 框架 #45905/#45996、dev error overlay #45921/#45959、`bun check` 1.4–7.8x #45800、install peer deps 重写 #45898、6 个类 bindgen #45888、flaky 测试修复 #45873/#46135/#46017）。**10 处冲突**（src 3 + 测试 7）：`PackageInstall.rs`（保留 `ohos_copy_key` + 上游注释）、`npm.rs`（保留 O_TMPFILE linkat 的 OHOS EPERM/EACCES 回退）、`cli/mod.rs`（先跑上游 `--cwd <dir> <cmd>` 解析，再做 `bun node` 模式）；4 个序列化策略测试取上游后 `concurrent → serial`；`isolated-install`/`security-scanner` 保留 OHOS skip + 上游改名；`spawn-stdin-destroy` 合并注释。**完整影响评估**：707 个上游独占文件 0 差异、269 个本地独占文件 0 差异、61 个双方文件逐行核对（剩余差异均为上游改名/换行）。
+
+**TMPDIR 修复（三处）**：
+1. `run-all-official-progress-optimized.sh`：`export TMPDIR="${BUN_TEST_TMPDIR:-/data/storage/el2/base/tmp}"` + `TMP`/`TEMP`，不再继承外层（可能是 app cacheDir）的值；
+2. `test/harness.ts` 的 `bunEnv`：OHOS 显式钉住 `TMPDIR`，手写 env 的 spawn 也不再丢；
+3. 运行时（`bin_entry`/`resolver`）：OHOS `/tmp` 虽可写但 **rename(2) 被 MAC 拒绝**（`hmmac=inherit_parent`），TMPDIR 未设置时不再选 `/tmp`，直接回退 `$HOME/tmp` → `/data/storage/el2/base/tmp`；每个 bun 进程启动即设置 TMPDIR，`os.tmpdir()` 同步生效。新增 `os.test.js` 回归用例（OHOS）。
+
+**cacheDir 发现**：`/data/storage/el2/base/cache` 累积了 **4,940 项 / 5.55GB** bun 测试夹具（子进程未继承 TMPDIR 时落到 app cacheDir）→ 清理后保留 8 项非测试缓存；`~/tmp` 清 4 个旧夹具。定向验证：外层 `TMPDIR=cacheDir` 启动 runner 跑 428 用例，cacheDir **0 新增**、夹具全部进 app tmp。
+
+**/tmp FIFO 残留（不可删，已记录）**：SELinux `u:object_r:tmp_file:s0` 对 `fifo_file` 禁止 `unlink`/`rename`（新建 FIFO 同样 EPERM；系统 `rm` 亦失败）。130 个 FIFO / 0 字节，已归并为隐藏目录 `.bun-test-fifo-residue-*`；仅系统策略变更或更高权限服务可清除。
+
+**构建/部署**：124M，`1.4.4-canary.1+a945dc576`，冒烟 + os 测试 60/60 通过。
+
+**全量结果**：2351 文件 / **2348 通过** / 3 失败 / **108,832 用例通过** / 21 用例失败 / **0 超时** / **1h45m52s**。3 个失败全部为本轮上游**新增的写失败测试**：`/dev/full`（OHOS 上不可访问）与 `ulimit -f`（OHOS 为 no-op）→ 已用 `isOhos` 门控（check 1、format 4、lint 4 用例），3 文件单跑复验 **803 / 1659 / 707 全绿**。`next-pages` 首跑 SIGTERM 超时、重试通过。cacheDir 全程保持 8 项（TMPDIR pin 生效），TMPDIR 新增夹具约 12k 条。
