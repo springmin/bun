@@ -11,6 +11,7 @@ test("stdin destroy after exit crash", async () => {
       stdin: "pipe",
     });
 
+    // The crash was in the first read of `child.stdin` after the exit.
     // The fixture throws immediately, so the child has always exited by the time
     // stdin is touched. Wait for the runtime to report it instead of racing a
     // fixed sleep: process startup alone is ~70ms on OHOS, so an 80ms sleep lands

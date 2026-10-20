@@ -7,7 +7,6 @@
     macro(Archive) \
     macro(FFI) \
     macro(FetchSession) \
-    macro(FileSystemRouter) \
     macro(Image) \
     macro(markdown) \
     macro(S3Client) \

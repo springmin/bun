@@ -612,8 +612,8 @@ test.skipIf(!canForceExdevTmpdir)(
           TMPDIR: shmTmp,
           BUN_TMPDIR: shmTmp,
           TEMP: shmTmp,
-          // keep `node-gyp` resolvable only via the shim dir bun appends to
-          // PATH; the shim execs $npm_config_node_gyp so the test stays offline
+          // Keep `node-gyp` resolvable only through the shim directory that Bun appends to PATH. The shim runs
+          // $npm_config_node_gyp, so the test stays offline.
           PATH: "/usr/bin:/bin",
           npm_config_node_gyp: fakeNodeGyp,
         },
@@ -1469,7 +1469,7 @@ describe("the trusted set", () => {
   );
 
   test.each(linkers)(
-    "bun pm untrusted and trust leave workspace members alone, whose scripts always run (%s)",
+    "bun pm untrusted and trust skip workspaces, whose scripts always run (%s)",
     async linker => {
       using ctx = await project(linker, {
         "package.json": {
@@ -1600,7 +1600,7 @@ describe("the trusted set", () => {
         "bun.lock": ["lifecycle-postinstall"],
       });
 
-      // What the command wrote holds for a fresh install, and nothing is left to report.
+      // A fresh install respects what the command wrote, and there's nothing left to report.
       await removeNodeModules(ctx);
       const install = await bun(ctx, ["install"]);
       expect(install.out).not.toContain("Blocked");
@@ -1754,7 +1754,8 @@ describe("the trusted set", () => {
       expect(again.exitCode).toBe(0);
     });
 
-    test("nothing runs inside the global store, which other projects share", async () => {      const manifest = { name: "foo", dependencies: { "lifecycle-postinstall": "1.0.0" } };
+    test("nothing runs inside the global store, which other projects share", async () => {
+      const manifest = { name: "foo", dependencies: { "lifecycle-postinstall": "1.0.0" } };
       using ctx = await project(
         "isolated",
         { "package.json": manifest, "other/package.json": manifest },
@@ -1779,7 +1780,7 @@ describe("the trusted set", () => {
       expect(await recorded(ctx)).toEqual({ "package.json": ["lifecycle-postinstall"], "bun.lock": null });
       expect(trust.exitCode).toBe(0);
 
-      // The install gives the trusted package a directory of its own and runs the script there.
+      // The install gives the trusted package its own directory and runs the script there.
       const install = await bun(ctx, ["install"]);
       expect(install.err).not.toContain("error:");
       expect(lstatSync(join(ctx.packageDir, entry)).isSymbolicLink()).toBeFalse();
@@ -1885,7 +1886,7 @@ describe("the trusted set", () => {
     });
   });
 
-  describe.each(linkers)("what the trust commands run (%s)", linker => {
+  describe.each(linkers)("the scripts that the trust commands run (%s)", linker => {
     // Appends `id` to $SCRIPT_RUNS.
     const scripted = (name: string, id: string) => ({
       name,
@@ -1932,7 +1933,7 @@ describe("the trusted set", () => {
       "native/package.json": scripted("native", "native"),
     };
 
-    test("bun pm trust runs what an install runs once the name is listed", async () => {
+    test("bun pm trust runs the scripts that an install runs once the name is listed", async () => {
       using ctx = await project(linker, {
         "package.json": { name: "foo", dependencies: { addon: "file:./addon", host: "file:./host" } },
         ...hostFiles,
@@ -1968,7 +1969,7 @@ describe("the trusted set", () => {
       expect(install.exitCode).toBe(0);
     });
 
-    test("bun pm trust --all runs what is blocked, and nothing of a trusted package", async () => {
+    test("bun pm trust --all runs the blocked scripts, and none of a trusted package's", async () => {
       using ctx = await project(linker, {
         "package.json": {
           name: "foo",
@@ -2009,7 +2010,7 @@ describe("the trusted set", () => {
       expect(install.exitCode).toBe(0);
     });
 
-    test("a package that another one ships inside itself is left alone, as by an install", async () => {
+    test("a package that another one ships inside itself is skipped, like in an install", async () => {
       using ctx = await project(linker, {
         "package.json": { name: "foo", dependencies: { host: "file:./host.tgz" } },
       });
@@ -2079,7 +2080,7 @@ describe("the trusted set", () => {
       },
     );
 
-    // It narrows only: what a config file or the flag turned off stays off.
+    // It can only turn scripts off. If a config file or the flag turned them off, they stay off.
     test.each([
       [".npmrc", { ".npmrc": "ignore-scripts=true\n" }, []],
       ["--ignore-scripts", {}, ["--ignore-scripts"]],
@@ -2101,7 +2102,8 @@ describe("the trusted set", () => {
     });
   });
 
-  // `payload` is trusted by nobody and has no script. Its `bin` names a command that `native`, which is trusted, runs.
+  // Nobody trusts `payload`, and it has no script. Its `bin` has the name of a command that `native`, which is trusted,
+  // runs.
   describe.skipIf(isWindows)("a bin of another package does not replace a command inside a trusted script", () => {
     const files = (script: "preinstall" | "postinstall", trusted: boolean) => ({
       "package.json": {
@@ -2140,7 +2142,7 @@ describe("the trusted set", () => {
       expect(exitCode).toBe(0);
     });
 
-    // As a shell or a tool writes it from `$PWD`.
+    // The way a shell or a tool writes it from `$PWD`.
     test("that directory in front of PATH, spelled through a link", async () => {
       using ctx = await project("hoisted", files("postinstall", true));
       expect((await bun(ctx, ["install", "--ignore-scripts"])).exitCode).toBe(0);
@@ -2154,7 +2156,8 @@ describe("the trusted set", () => {
       expect(exitCode).toBe(0);
     });
 
-    test("bun pm trust", async () => {      using ctx = await project("hoisted", files("postinstall", false));
+    test("bun pm trust", async () => {
+      using ctx = await project("hoisted", files("postinstall", false));
       expect((await bun(ctx, ["install"])).out).toContain("Blocked 1 postinstall");
       const { err, exitCode } = await bun(ctx, ["pm", "trust", "native"]);
       expect(err).not.toContain("error:");
@@ -2176,7 +2179,7 @@ describe("the trusted set", () => {
 
   // A working directory keeps the case it was typed in, and `bun run` writes PATH from it.
   test.skipIf(!isWindows)(
-    "the project's node_modules/.bin comes last for a dependency's script, however the working directory is spelled",
+    "the project's node_modules/.bin comes last for a dependency's script, no matter how the working directory is spelled",
     async () => {
       const printPath = `${bunExe()} -e 'await Bun.write("path.txt", String(process.env.PATH))'`;
       using ctx = await project("hoisted", {
@@ -2425,7 +2428,7 @@ const fakeNodeGyp: ScriptPackage = {
   files: { "node-gyp.js": `#!/usr/bin/env node\nrequire("fs").writeFileSync("build.node", "built");\n` },
 };
 
-// `dist` is not there when the packages are linked. The root's script lists what it finds.
+// `dist` doesn't exist yet when the packages are linked. The root's script lists what it finds.
 describe.each(["hoisted", "isolated"] as const)("a bin whose file a script writes (%s)", linker => {
   const build = "mkdir dist && cp cli.js dist/tool";
   const files = { "cli.js": "#!/usr/bin/env node\n" };
@@ -2468,7 +2471,7 @@ describe.each(["hoisted", "isolated"] as const)("a bin whose file a script write
     await expectLinked(ctx, { dependencies: { tool: "1.0.0" }, trustedDependencies: ["tool"] });
   });
 
-  test("the first package in the order of the links keeps a name", async () => {
+  test("the first package to link a bin name keeps it", async () => {
     using ctx = await setupScriptPackages(linker, {
       "a-tool": { bin: { tool: "cli.js" }, files },
       tool: { bin: { tool: "dist/tool" }, scripts: { postinstall: build }, files },
@@ -2479,7 +2482,7 @@ describe.each(["hoisted", "isolated"] as const)("a bin whose file a script write
 
   // The file of the bin is in the tarball, so nothing is left to link after the script.
   test.skipIf(isWindows || linker === "isolated")(
-    "a program that a script puts in place of its link stays",
+    "a program that a script writes in place of its link is kept",
     async () => {
       using ctx = await setupScriptPackages(linker, {
         tool: { bin: { tool: "cli.js" }, scripts: { postinstall: "rm ../.bin/tool && cp cli.js ../.bin/tool" }, files },
@@ -2490,7 +2493,8 @@ describe.each(["hoisted", "isolated"] as const)("a bin whose file a script write
   );
 });
 
-describe.each(["hoisted", "isolated"] as const)("bun add --trust (%s)", linker => {  // The isolated linker decides on its task threads whether a package is trusted. Under ASAN
+describe.each(["hoisted", "isolated"] as const)("bun add --trust (%s)", linker => {
+  // The isolated linker decides on its task threads whether a package is trusted. Under ASAN
   // this is also the shape that caught those threads growing the trusted set they read.
   test("runs and records every named package next to packages that stay untrusted", async () => {
     const trusted = Array.from({ length: 80 }, (_, i) => `trusted-${i}`).sort();
@@ -2570,7 +2574,7 @@ describe.each(["hoisted", "isolated"] as const)("a git dependency of another pac
     return repo;
   }
 
-  test("what it depends on is run and recorded by bun add --trust host", async () => {
+  test("bun add --trust host also runs and records its dependencies", async () => {
     using repo = addonRepo({ dependencies: { leaf: "1.0.0" } });
     using ctx = await setupScriptPackages(linker, {
       host: { dependencies: { addon: `git+${pathToFileURL(String(repo)).href}` } },
@@ -2634,7 +2638,7 @@ describe.each(["hoisted", "isolated"] as const)(
       return Object.assign(ctx, { runs });
     }
 
-    test("has no scripts of its own for an install", async () => {
+    test("has no scripts that an install runs", async () => {
       using ctx = await setup(["x"]);
       for (const [i, args] of [["install"], ["install"], ["install", "--frozen-lockfile"], ["ci"]].entries()) {
         await rm(join(ctx.packageDir, "node_modules"), { recursive: true, force: true });
@@ -2645,7 +2649,7 @@ describe.each(["hoisted", "isolated"] as const)(
       }
     });
 
-    test("has no scripts of its own for bun pm trust", async () => {
+    test("has no scripts that bun pm trust runs", async () => {
       using ctx = await setup();
       expect((await ctx.bun("install")).exitCode).toBe(0);
       const { out, err, exitCode } = await ctx.bun("pm", "trust", "x");
@@ -2802,9 +2806,9 @@ describe.each(["hoisted", "isolated"] as const)("default node-gyp script (%s)", 
   });
 });
 
-// Each script reports that it runs, then stays alive until the test writes a line into its pipe:
-// how many run at once is counted, not timed.
-describe.each(["hoisted", "isolated"] as const)("scripts that run at once (%s)", linker => {
+// Each script reports that it's running and then stays alive until the test writes a line into its pipe. So the number
+// of scripts that run at once is counted, not timed.
+describe.each(["hoisted", "isolated"] as const)("scripts that run at the same time (%s)", linker => {
   const names = ["a", "b", "c", "d"];
 
   test.skipIf(isWindows).each([
@@ -2849,13 +2853,13 @@ describe.each(["hoisted", "isolated"] as const)("scripts that run at once (%s)",
           trustedDependencies: names,
         }),
       );
-      // With a lockfile the linker downloads what it links; without one everything is there before it starts.
+      // With a lockfile, the linker downloads what it links. Without one, everything is downloaded before it starts.
       expect((await ctx.bun("install", "--lockfile-only")).exitCode).toBe(0);
 
       const gates = join(ctx.packageDir, "gates");
       await mkdir(gates);
       expect(Bun.spawnSync({ cmd: ["mkfifo", ...names.map(name => join(gates, name))] }).exitCode).toBe(0);
-      // Open for reading too, so that a line written before the script opens its end stays in the pipe.
+      // Also opened for reading, so that a line written before the script opens its end stays in the pipe.
       const pipes = new Map(
         names.map(name => [name, openSync(join(gates, name), fsConstants.O_RDWR | fsConstants.O_NONBLOCK)]),
       );
@@ -2904,7 +2908,7 @@ describe.each(["hoisted", "isolated"] as const)("scripts that run at once (%s)",
   );
 
   test.skipIf(isWindows)(
-    "a script that ends makes room for the next one, while another goes on",
+    "a script that ends makes room for the next one while another keeps running",
     async () => {
       using ctx = await setupScriptPackages(
         linker,
@@ -2943,7 +2947,7 @@ describe.each(["hoisted", "isolated"] as const)("scripts that run at once (%s)",
         stderr: "pipe",
       });
       try {
-        // The first one goes on to the end: each of the others has to start beside it.
+        // The first one keeps running to the end, so each of the others has to start while it runs.
         for (let count = 2; count <= names.length; count++) {
           while (started().length < count) {
             if (proc.exitCode !== null) throw new Error(`bun install exited with ${proc.exitCode}`);
@@ -3034,8 +3038,8 @@ describe.each(["hoisted", "isolated"] as const)("the install after a failed scri
     };
   }
 
-  // One at a time, so that the third script to start is the one that fails: two have finished and
-  // are not run again, one has not started.
+  // One at a time, so that the third script to start is the one that fails. Two have finished and aren't run again, and
+  // one hasn't started.
   test.skipIf(isWindows).each([
     { title: "preinstall", script: "preinstall", args: [] },
     { title: "install", script: "install", args: [] },
@@ -3066,7 +3070,7 @@ describe.each(["hoisted", "isolated"] as const)("the install after a failed scri
     expect(await install("third.txt", 100, ...args)).toEqual({ errors: [], ran: [], exitCode: 0 });
   });
 
-  test.skipIf(isWindows)("all at once: every script runs in the end", async () => {
+  test.skipIf(isWindows)("all at the same time: every script runs in the end", async () => {
     const { ctx, install } = await setup("postinstall");
     using _ = ctx;
 
@@ -3116,7 +3120,7 @@ describe.each(["hoisted", "isolated"] as const)("the install after a failed scri
     ]);
     expect(ran("first.txt")).toHaveLength(1);
     expect(first.exitCode).toBe(1);
-    // Whatever did not run is not in place either.
+    // Packages whose scripts didn't run aren't installed either.
     const inPlace = waiting.filter(name => existsSync(ctx.installed(name, "package.json")));
     expect(inPlace.filter(name => !ran("first.txt").includes(name))).toEqual([]);
 
@@ -3127,8 +3131,9 @@ describe.each(["hoisted", "isolated"] as const)("the install after a failed scri
     expect(second.exitCode).toBe(0);
   });
 
-  // The root's `dep` is another package: hoisted, each parent has its own copy, and the first fails before the walk is at the last.
-  test.skipIf(isWindows)("copies that the failed install had not come to", async () => {
+  // The root's `dep` is a different package. With the hoisted linker, each parent has its own copy, and the first one
+  // fails before the walk reaches the last.
+  test.skipIf(isWindows)("copies that the failed install hadn't reached", async () => {
     const parents = Array.from({ length: 40 }, (_, i) => `parent-${i}`);
     using ctx = await setupScriptPackages(linker, {
       scripted: { scripts: { postinstall: `echo ran >> "$RUNS" && test -z "$FAIL"` } },
@@ -3181,7 +3186,7 @@ describe.each(["hoisted", "isolated"] as const)("the install after a failed scri
   });
 });
 
-test.concurrent("prints a failed script's output without changing non-UTF-8 bytes", async () => {
+test("prints a failed script's output without changing non-UTF-8 bytes", async () => {
   using dir = tempDir("lifecycle-output-bytes", {
     "package.json": JSON.stringify({
       name: "app",
@@ -3214,7 +3219,7 @@ test.concurrent("prints a failed script's output without changing non-UTF-8 byte
 
 // `bun x node-gyp` avoids running Bun's own node-gyp shim again by removing the PATH entry that equals
 // BUN_WHICH_IGNORE_CWD.
-test.concurrent.skipIf(!isLinux)(
+test.skipIf(!isLinux)(
   "BUN_WHICH_IGNORE_CWD matches a PATH entry when TMPDIR isn't valid UTF-8",
   async () => {
     using dir = tempDir("lifecycle-tmpdir-bytes", {
@@ -3338,8 +3343,8 @@ test.skipIf(!isLinux).each([
   expect(exitCode).toBe(1);
 });
 
-// `baz` is an optional dependency of the project and its postinstall fails. Whether the install goes
-// on without it depends on who else needs it, not on the dependency the linker placed it for.
+// `baz` is an optional dependency of the project, and its postinstall fails. Whether the install continues without it
+// depends on who else needs it, not on the dependency that the linker placed it for.
 describe.each(["hoisted", "isolated"] as const)("failed script of an optional dependency (%s)", linker => {
   const packages: Record<string, ScriptPackage> = {
     baz: { scripts: { postinstall: "exit 1" } },
@@ -3425,8 +3430,8 @@ describe.each(["hoisted", "isolated"] as const)("failed script of an optional de
     await expectOutcome(ctx, [...args, "--frozen-lockfile"], required);
   });
 
-  // The package is installed and blocked; the second install trusts it and runs its script.
-  // Not with `--production`: that is a frozen install, which does not look for newly trusted names.
+  // The package is installed and blocked. The second install trusts it and runs its script. `--production` is excluded,
+  // because it's a frozen install, which doesn't look for newly trusted names.
   const unfrozen = shapes.filter(({ args }) => !args.includes("--production"));
   test.each(unfrozen)("$title (trusted by a later install)", async ({ manifest, args, required }) => {
     using ctx = await setupScriptPackages(linker, packages);
@@ -3439,8 +3444,8 @@ describe.each(["hoisted", "isolated"] as const)("failed script of an optional de
     await expectOutcome(ctx, args, required);
   });
 
-  // `--filter` says what this install links, not who needs a package: the copy that would be
-  // removed may be the one an earlier install linked for the other workspace.
+  // `--filter` chooses what this install links, not who needs a package. The copy that would be removed may be the one
+  // that an earlier install linked for the other workspace.
   test.each([
     { title: "needs it", other: { dependencies: { baz: "1.0.0" } }, required: true },
     { title: "may use it", other: { optionalDependencies: { baz: "1.0.0" } }, required: false },
@@ -4212,7 +4217,7 @@ for (const forceWaiterThread of isLinux ? [false, true] : [false]) {
           stdout: "ignore",
           stdin: "ignore",
           stderr: "pipe",
-          // what the `bun run setup` that started this install leaves behind
+          // These are left behind by the `bun run setup` that started this install.
           env: { ...testEnv, npm_lifecycle_event: "setup", npm_lifecycle_script: "bun install" },
         });
         const [err, exitCode] = await Promise.all([stderr.text(), exited]);

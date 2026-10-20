@@ -864,7 +864,7 @@ describe("`bun audit`", () => {
       expect(exitCode).toBe(0);
     });
 
-    // No answer says nothing about the packages. `npm audit` fails on it too.
+    // No response says nothing about the packages. `npm audit` fails in that case too.
     test.each([
       ["", 200],
       [" \n", 200],
@@ -879,7 +879,8 @@ describe("`bun audit`", () => {
       }
     });
 
-    test("--audit-level filtering out every advisory prints a clean audit, not nothing", async () => {      const { stdout, stderr, exitCode } = await auditAgainst(
+    test("--audit-level filtering out every advisory prints a clean audit, not nothing", async () => {
+      const { stdout, stderr, exitCode } = await auditAgainst(
         JSON.stringify({ ms: [{ severity: "low", title: "minor", url: "https://example.com/minor" }] }),
         ["--audit-level", "critical"],
       );
@@ -902,7 +903,7 @@ describe("`bun audit`", () => {
           "ms\x1b[31m": [{ severity: "critical", title: "not a real package", url: "https://example.com/fake" }],
         }),
       );
-      // Not normalizeBunSnapshot: it rewrites the backslashes the escapes are made of.
+      // Doesn't use normalizeBunSnapshot, because it rewrites the backslashes in the escapes.
       expect(withoutHeader(stdout)).toBe(
         [
           "ms@0.7.0",
@@ -1658,7 +1659,8 @@ describe("`bun audit fix`", () => {
     expect(exitCode).toBe(0);
   });
 
-  test("fixes a transitive dependency and leaves its dependent alone", async () => {    await using server = startRegistry({ "no-deps": [adv("<1.0.1")] });
+  test("fixes a transitive dependency and leaves its dependent alone", async () => {
+    await using server = startRegistry({ "no-deps": [adv("<1.0.1")] });
     using dir = await setup(server, { name: "foo", dependencies: { "one-range-dep": "1.0.0", "no-deps": "1.0.0" } });
     await reinstall(dir, { name: "foo", dependencies: { "one-range-dep": "1.0.0" } });
     let lockfile = await lock(dir);
@@ -2901,7 +2903,7 @@ describe("`bun audit fix`", () => {
     await runBunInstall(installEnv(dir), dir, { frozenLockfile: true });
   });
 
-  test("an override written as a $reference is reported as the blocker and left alone", async () => {
+  test("an override written as a $reference is reported as the blocker and isn't changed", async () => {
     await using server = startRegistry({ "no-deps": [adv("<1.0.1")] });
     using dir = await setup(server, {
       name: "foo",
@@ -2986,7 +2988,8 @@ describe("`bun audit fix`", () => {
     await runBunInstall(installEnv(dir), dir, { frozenLockfile: true });
   });
 
-  test("a peer edge that rejects the fix is split off and labelled with the peer dependent", async () => {    await using server = startRegistry({ "no-deps": [adv("<=1.0.1")] });
+  test("a peer edge that rejects the fix is split off and labelled with the peer dependent", async () => {
+    await using server = startRegistry({ "no-deps": [adv("<=1.0.1")] });
     const rootPkgJson = (noDeps: string) =>
       JSON.stringify({ name: "foo", dependencies: { "mismatched-peer-deps-lvl1": "1.0.0", "no-deps": noDeps } });
     using dir = tempDir("audit-fix-", { "package.json": rootPkgJson("1.0.1") });
@@ -3093,7 +3096,8 @@ describe("`bun audit fix`", () => {
     expectClean(await audit(dir), 2);
   });
 
-  test("a depth-3 blocker names the immediate dependent", async () => {    await using server = startRegistry({ "no-deps": [adv("<1.1.0")] });
+  test("a depth-3 blocker names the immediate dependent", async () => {
+    await using server = startRegistry({ "no-deps": [adv("<1.1.0")] });
     using dir = await setup(server, { name: "foo", dependencies: { "one-one-dep": "1.0.0" } });
     const lockBefore = await lock(dir);
     expect(lockBefore).toContain('"no-deps@1.0.1"');
@@ -4779,7 +4783,8 @@ describe("`bun audit fix --latest`", () => {
     },
   );
 
-  test("a ~ range keeps its ~", async () => {    await using server = noDeps1x();
+  test("a ~ range keeps its ~", async () => {
+    await using server = noDeps1x();
     using dir = await setup(server, { name: "foo", dependencies: { "no-deps": "~1.0.0" } });
     expect(await lock(dir)).toContain('"no-deps@1.0.1"');
 
@@ -5122,7 +5127,8 @@ describe("`bun audit fix --latest`", () => {
     expect(await lock(dir)).toBe(lockBefore);
   });
 
-  // Both dependents declare no-deps@^1.0.0, which also rejects 2.0.0; the override is what the user can change, so it alone is reported.
+  // Both dependents declare no-deps@^1.0.0, which also rejects 2.0.0. The override is what the user can change, so only
+  // the override is reported.
   test(
     "a range held by an overrides entry is blocked on the override, which --latest rewrites",
     async () => {
