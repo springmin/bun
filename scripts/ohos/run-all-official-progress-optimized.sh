@@ -283,6 +283,12 @@ _ohos_watchdog_for() {
       BT="--expose-internals --smol --timeout ${BUN_TIMEOUT}"
       ;;
     # ── cli/install 连续多日 600s 超时的大文件 ──
+    # 2026-10-23: a malformed GitHub dependency usually fails in ~3s; a hung
+    # network fetch otherwise costs the full 600s twice.
+    */cli/install/hosted-git-info/boundary-conditions.test.ts)
+      WT=180
+      BT="--expose-internals --smol --timeout ${BUN_TIMEOUT}"
+      ;;
     # 单跑实测 4-10 分钟（bun-install 386s / bun-add-filter 599s / bun-add
     # 226s），并行 5 worker 时资源竞争使耗时膨胀超过默认 TMOUT=300s。
     # 给足 2×TMOUT 让它们按单跑速度完成，而非超时误杀。
@@ -416,7 +422,8 @@ run_test() {
     */websocket/websocket-server.test.ts|*/test/fake-timers/fake-timers.test.ts|\
     */bundler/transpiler/transpiler.test.js|*/http/proxy.test.ts|\
     */js/bun/css/nth-anplusb-ident.test.ts|\
-    */js/bun/dns/dns-interleave.test.ts|*/js/bun/dns/resolve-dns.test.ts)
+    */js/bun/dns/dns-interleave.test.ts|*/js/bun/dns/resolve-dns.test.ts|\
+    */cli/install/hosted-git-info/boundary-conditions.test.ts)
       _retry_on_fail=1 ;;
     # node-dns queries public DNS (socketify.dev etc.); passes solo but
     # flakes under full-run network load

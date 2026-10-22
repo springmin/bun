@@ -436,3 +436,5 @@ PATH="" bun install --no-save  # uses-what-bin-slow 场景
 - **3 个瞬时**：`nth-anplusb-ident`、`dns-interleave`、`resolve-dns` 单跑全绿（DNS 段本轮异常缓慢，`resolve-dns` 2416s + 重试）→ 已加入 runner 重试名单。
 
 门控后单跑：spawn.ipc 19/1skip、waiter 2/1skip、password 84/2skip、fs 3skip、http2 425/1skip、hardlink 12skip、crash-handler 28/12skip、run_command 21/15skip，全部 0 fail。
+
+**确认轮（第 15 轮，`ecb391122`）**：2360 文件 / **2359 通过** / **0 FAIL** / 1 超时 / **110,605 用例通过** / **1h58m41s**。8 个 OHOS 门控与 3 个瞬时重试全部生效；唯一超时 `cli/install/hosted-git-info/boundary-conditions`（畸形 GitHub URL 安装，单跑 **2.6s / 6-0**）为网络挂起 → 已加 180s 短看门狗 + 重试名单。
