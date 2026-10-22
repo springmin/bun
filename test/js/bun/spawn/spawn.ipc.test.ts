@@ -1,6 +1,6 @@
 import { spawn } from "bun";
 import { describe, expect, it } from "bun:test";
-import { bunEnv, bunExe, gcTick, isWindows, tempDir } from "harness";
+import { bunEnv, bunExe, gcTick, isOhos, isWindows, tempDir } from "harness";
 import path from "path";
 
 // The receiver rejects a JSON line that's longer than the UTF-8 encoding of a max-length string can be.
@@ -230,7 +230,8 @@ describe("ipc mode json", () => {
     expect(exitCode).toBe(0);
   });
 
-  it.concurrent.skipIf(isWindows)("closes the channel when an unterminated line exceeds the length limit", async () => {
+  // OHOS: closing the socket does not surface as a disconnect on the peer, so the sender exits 1.
+  it.concurrent.skipIf(isWindows || isOhos)("closes the channel when an unterminated line exceeds the length limit", async () => {
     // The complete lines are delivered. The bytes after them are never terminated by a newline.
     expect(await runReceiver("json", `write(Buffer.from('{"n":1}\\n{"n":2}\\n'));` + flood)).toEqual({
       stdout: ['MESSAGE {"n":1}', 'MESSAGE {"n":2}', "SENDER_EXIT 42"],

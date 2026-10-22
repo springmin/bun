@@ -419,3 +419,20 @@ PATH="" bun install --no-save  # uses-what-bin-slow 场景
 **全量结果（第 13 轮，`1.4.4-canary.1+c788fb5fe`）**：2352 文件 / **2351 通过** / 1 失败 / **0 超时** / **109,151 用例通过** / **1h48m15s**。唯一失败 `bake/dev/ssg-pages-router`（dev server 关闭超时）单跑两次均 **9/0** → 瞬时型，已加入重试名单。
 
 **OOM 事故与修复**：首次全量在 98%（安装测试密集段）触发系统 OOM（`fork: Out of memory`，32GB 耗尽），6 个文件连带失败——`bun-install` 的 `+122/-644` 为 OOM 下的解析假象，单跑 **766/0**；其余 5 个文件（filesink、bun-run-dir、self-reference、tsconfig-override、bun-update-security-simple）单跑全绿。runner 增加**内存水位守卫**：`MemAvailable < 3GB` 时暂停启动新文件（最多等 300s）→ 重跑 0 超时、0 OOM。
+
+---
+
+## 十五、合并 `ea6a2c7b7c..38afee6c84`（47 提交，2026-10-22）
+
+**合并**：47 个上游提交（node:http/http2 拒绝畸形请求 #46456、install 回退 copyfile #46480、bunx 平台二进制 #46468、react-compiler 修复 #42482、compile 回退启动检查 #46461、usockets send 超限 #46452、install/bunx/bun patch/bun pm pack/`bun:` 导入回归修复 #46455、http3 头部/GOAWAY #46436、`Bun.stringWidth` 二次复杂度 #46389、pack 否定 `!(` #46240、ws 异步上下文 #46390、install overrides 范围 #46230、`bun lint` 仅 canary #46438、bun check 回归 #46417、node:http FIN 后 body #44419、TLS 会话失效 #46409、`bun test --isolate` 宏 #46405、Bun.write 未处理拒绝 #41721、dev server barrel exports #46229、postgres Bind 文本 #46408、WebKit bump `d6375c72` #45427 等）。**23 处冲突**（src 7 + 测试 16）：`webkit.ts`（上游 `hardeningFlags` + OHOS `-fPIC`）、`zstd.ts`（上游新 patch + OHOS qsort patch 的函数式补丁列表）、`BunProcess.cpp`（上游 scoped `begin/endDlOpenAction` + OHOS 自动签名）、`JSCFFIBridge.cpp`（上游 `Bun__FFI__jsValueToSlotSlow` + OHOS `#else` 桩）、`run_command.rs`（上游 `top_level_dir()` + OHOS `Option` 恢复）、`spawn/process.rs`（上游 `start()` + `START_LOCK` + OHOS `prewarm/ensure_eventfd`）、`StandaloneModuleGraph.rs`（上游边界检查 + `link_vaddr`）；测试 16 处保留 OHOS 门控（isOhos 超时/硬链接/ulimit/`/dev/full`）与上游改名/新导入，`bun-audit` 取上游后序列化。**完整影响评估**：2,619 个上游独占文件 0 差异、218 个本地独占文件 0 差异、114 个双方文件逐行核对（仅 1 处 zstd 补丁列表形态为有意差异）。
+
+**WebKit 升级**：`274ebb3cf600` → `d6375c72affe`（suspend 信号处理器从 context 读中断栈指针）。OHOS `suspend-resume` 补丁在新 commit 上**干净应用**。
+
+**构建/部署**：125M，`1.4.4-canary.1+ecb391122`（构建修复：`append_real_store_path` 的 Result）。定向回归 os 60/0、ffi 151/0、bun-install 770/0、isolated-install 277/0 全绿。
+
+**全量结果（第 14 轮）**：2360 文件 / **2349 通过** / 11 失败 / 1 超时 / **110,142 用例通过** / **2h34m52s**。11 个失败全部定位并处理：
+- **3 个本轮新增上游测试**（沙箱语义）：hardlink 后端 `nlink` 恒为 1、`operator new` OOM 不触发 handler、spawn 期间信号阻塞窗口不可观测 → 已用 `isOhos` 门控；
+- **5 个依赖 ulimit/cwd/socket 语义**：`ulimit -n/-v` 为 no-op（waiter thread EMFILE、argon2 地址空间限制）、删除 cwd 后 `realpath.native` 返回旧路径、IPC 关闭不产生对端 disconnect、http2 transport close 挂起 20 分钟 → 已门控；
+- **3 个瞬时**：`nth-anplusb-ident`、`dns-interleave`、`resolve-dns` 单跑全绿（DNS 段本轮异常缓慢，`resolve-dns` 2416s + 重试）→ 已加入 runner 重试名单。
+
+门控后单跑：spawn.ipc 19/1skip、waiter 2/1skip、password 84/2skip、fs 3skip、http2 425/1skip、hardlink 12skip、crash-handler 28/12skip、run_command 21/15skip，全部 0 fail。

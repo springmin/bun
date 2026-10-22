@@ -1,6 +1,6 @@
 import { password } from "bun";
 import { describe, expect, test } from "bun:test";
-import { bunEnv, bunExe, isASAN, isDebug, isLinux } from "harness";
+import { bunEnv, bunExe, isASAN, isDebug, isLinux, isOhos } from "harness";
 
 const placeholder = "hey";
 
@@ -598,7 +598,8 @@ describe("argon2 when memoryCost can't be allocated", () => {
     expect(exitCode).toBe(0);
   });
 
-  test.skipIf(isASAN || !isLinux)("throws PASSWORD_OUT_OF_MEMORY (address-space limit)", async () => {
+  // OHOS: `ulimit -v` is a no-op, so the address-space limit is never applied.
+  test.skipIf(isASAN || !isLinux || isOhos)("throws PASSWORD_OUT_OF_MEMORY (address-space limit)", async () => {
     // 4 GiB is the largest cost verify() accepts. ASAN builds can't start under this limit.
     const gib = 1024 * 1024; // in KiB, the unit of both ulimit -v and memoryCost
     const { result, exitCode } = await runChild(

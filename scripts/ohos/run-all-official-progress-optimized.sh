@@ -407,13 +407,16 @@ run_test() {
   case "$f" in
     # 2026-10-19: pass solo; lost one case each in the 2026-10-19 full run.
     # 2026-10-20: bake dev-server close timed out under load; passes solo twice.
+    # 2026-10-22: pass solo; lost cases under the full run (allocator timing / transient DNS).
     # 2026-10-18: the `www.example.com` handshake test depends on public DNS; flakes.
     */js/web/fetch/fetch.test.ts|*/js/bun/shell/bunshell.test.ts|\
     */integration/next-pages/test/dev-server.test.ts|\
     */bake/dev/ssg-pages-router.test.ts|\
     */js/bun/net/socket.test.ts|\
     */websocket/websocket-server.test.ts|*/test/fake-timers/fake-timers.test.ts|\
-    */bundler/transpiler/transpiler.test.js|*/http/proxy.test.ts)
+    */bundler/transpiler/transpiler.test.js|*/http/proxy.test.ts|\
+    */js/bun/css/nth-anplusb-ident.test.ts|\
+    */js/bun/dns/dns-interleave.test.ts|*/js/bun/dns/resolve-dns.test.ts)
       _retry_on_fail=1 ;;
     # node-dns queries public DNS (socketify.dev etc.); passes solo but
     # flakes under full-run network load

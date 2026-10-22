@@ -107,7 +107,8 @@ test.skipIf(!isLinux)("a child that exits does not interrupt a system call of th
 });
 
 // The first spawn starts the waiter thread, which needs its own file descriptor.
-test.skipIf(!isLinux)("`exited` rejects when the waiter thread can't start, and the next spawn retries", async () => {
+// OHOS: `ulimit -n` is a no-op, so the waiter thread cannot be starved of descriptors.
+test.skipIf(!isLinux || isOHOS)("`exited` rejects when the waiter thread can't start, and the next spawn retries", async () => {
   const script = `
     const fs = require("node:fs");
     const stdio = ["inherit", "inherit", "inherit"];

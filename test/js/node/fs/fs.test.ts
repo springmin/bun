@@ -3361,7 +3361,8 @@ it.if(isPosix)("realpath reads its path the way Node does", async () => {
   expect(exitCode).toBe(0);
 });
 
-it.if(isLinux)("realpath.native throws ENOENT for a working directory that was removed", async () => {
+// OHOS: getcwd() keeps the removed directory's path instead of failing with ENOENT.
+it.if(isLinux && !isOhos)("realpath.native throws ENOENT for a working directory that was removed", async () => {
   using dir = tempDir("fs-realpath-removed-cwd", {});
 
   const script = `
