@@ -263,6 +263,10 @@ extern "C" ssize_t posix_spawn_bun(
 #endif
 
     sigfillset(&blockall);
+#if OS(LINUX)
+    // The kernel kills the process if a seccomp trap fires while SIGSYS is blocked.
+    sigdelset(&blockall, SIGSYS);
+#endif
     sigprocmask(SIG_SETMASK, &blockall, &oldmask);
 #if !OS(ANDROID) && !defined(__OHOS__)
     pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &cs);
@@ -312,6 +316,11 @@ extern "C" ssize_t posix_spawn_bun(
         struct sigaction sa = { 0 };
         sa.sa_handler = SIG_DFL;
         for (int i = 0; i < NSIG; i++) {
+#if OS(LINUX)
+            // close_range() below still needs the handler that turns a seccomp trap into ENOSYS.
+            if (i == SIGSYS)
+                continue;
+#endif
             sigaction(i, &sa, 0);
         }
 
@@ -460,7 +469,6 @@ extern "C" ssize_t posix_spawn_bun(
         }
 #endif
 
-        sigprocmask(SIG_SETMASK, &childmask, 0);
         if (!envp)
             envp = environ;
 
@@ -499,6 +507,11 @@ extern "C" ssize_t posix_spawn_bun(
         if (current_max_fd < 2) current_max_fd = 2;
         closeRangeOrLoop(current_max_fd + 1, INT_MAX, true);
 
+        // The caller's mask may block SIGSYS, so apply it after close_range().
+        sigprocmask(SIG_SETMASK, &childmask, 0);
+#if OS(LINUX)
+        sigaction(SIGSYS, &sa, 0);
+#endif
         if (execve(path, argv, envp) == -1) {
             return childFailed();
         }
