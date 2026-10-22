@@ -264,7 +264,8 @@ for (const mode of ctrlCModes) {
 
 // A signal that arrives before `bun run` knows the script's pid is forwarded once the spawn returns.
 // `bun run` blocks every signal during the spawn, which is visible in /proc/<pid>/status.
-test.skipIf(!isLinux)(
+// OHOS: the waiter thread owns child reaping and the blocked-signal window is not observable there.
+test.skipIf(!isLinux || isOhos)(
   "forwards a signal that arrives while bun run is spawning the script",
   async () => {
     using dir = tempDir("run-signal-in-spawn", {
