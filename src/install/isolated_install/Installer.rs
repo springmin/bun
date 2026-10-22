@@ -1168,11 +1168,13 @@ impl Task {
                     #[cfg(target_env = "ohos")]
                     {
                         let mut store_path = AutoAbsPath::init_top_level_dir();
-                        installer.append_real_store_path(
-                            &mut store_path,
-                            self.entry_id,
-                            Which::Staging,
-                        );
+                        installer
+                            .append_real_store_path(
+                                &mut store_path,
+                                self.entry_id,
+                                Which::Staging,
+                            )
+                            .map_err(TaskError::SymlinkDependencies)?;
                         crate::package_installer::ohos_sign_native_binaries(store_path.slice());
                     }
 
