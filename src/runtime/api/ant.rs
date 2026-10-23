@@ -16,19 +16,10 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 
 use bun_core::strings;
-use bun_jsc::bun_string_jsc;
+use bun_jsc::bindgen::{self, JsHeap, JsLocal, JsScope};
 use bun_jsc::{
-    ArrayBuffer, CallFrame, JSArray, JSFunction, JSGlobalObject, JSObject, JSValue, JsResult,
+    ArrayBuffer, CallFrame, JSFunction, JSGlobalObject, JSObject, JSValue, JsResult,
 };
-
-/// An `Array` of `items`. The bindgen surface only exposes an empty array.
-fn js_array_of(global: &JSGlobalObject, items: &[JSValue]) -> JsResult<JSValue> {
-    let array = JSArray::create_empty(global, items.len())?;
-    for (i, item) in items.iter().enumerate() {
-        array.put_index(global, u32::try_from(i).expect("int cast"), *item)?;
-    }
-    Ok(array)
-}
 
 // ─── C ABI from src/jsc/bindings/stringWidth.cpp ────────────────────────────
 
@@ -221,7 +212,6 @@ struct Tables {
     style_ids: HashMap<(u32, u32), u32>,
 }
 
-#[bun_jsc::JsClass]
 pub(crate) struct CellSegmenter {
     ambiguous_is_narrow: bool,
     screen: ScreenOptions,
@@ -229,11 +219,9 @@ pub(crate) struct CellSegmenter {
 }
 
 impl CellSegmenter {
-    pub(crate) fn constructor(
-        global: &JSGlobalObject,
-        frame: &CallFrame,
-    ) -> JsResult<Box<Self>> {
-        let [options] = frame.arguments_as_array::<1>();
+    pub(crate) fn constructor(cx: &mut JsScope<'_>, options: JsLocal<'_>) -> JsResult<Self> {
+        let global = cx.global();
+        let options = options.to_js();
 
         let mut segmenter = CellSegmenter {
             ambiguous_is_narrow: true,
@@ -277,60 +265,53 @@ impl CellSegmenter {
             t.style_ids.insert((0, 0), 0);
         }
 
-        Ok(Box::new(segmenter))
+        Ok(segmenter)
     }
 
-    #[bun_jsc::host_fn(getter)]
-    pub(crate) fn get_graphemes(this: &Self, global: &JSGlobalObject) -> JsResult<JSValue> {
-        let t = this.state.borrow();
-        let mut items = Vec::with_capacity(t.graphemes.len());
-        for g in &t.graphemes {
-            items.push(bun_string_jsc::create_utf8_for_js(global, g)?);
-        }
-        js_array_of(global, &items)
+    pub(crate) fn get_graphemes<'a>(&self, heap: &JsHeap<'a>) -> bindgen::Result<'a, JsLocal<'a>> {
+        let t = self.state.borrow();
+        bindgen::to_js::array(heap, t.graphemes.iter(), |heap, g| {
+            bindgen::to_js::utf8(heap, &**g)
+        })
     }
 
-    #[bun_jsc::host_fn(getter)]
-    pub(crate) fn get_sgr_keys(this: &Self, global: &JSGlobalObject) -> JsResult<JSValue> {
-        let t = this.state.borrow();
-        let mut items = Vec::with_capacity(t.sgr_keys.len());
-        for k in &t.sgr_keys {
-            items.push(bun_string_jsc::create_utf8_for_js(global, k)?);
-        }
-        js_array_of(global, &items)
+    pub(crate) fn get_sgr_keys<'a>(&self, heap: &JsHeap<'a>) -> bindgen::Result<'a, JsLocal<'a>> {
+        let t = self.state.borrow();
+        bindgen::to_js::array(heap, t.sgr_keys.iter(), |heap, k| {
+            bindgen::to_js::utf8(heap, &**k)
+        })
     }
 
-    #[bun_jsc::host_fn(getter)]
-    pub(crate) fn get_sgr_close_keys(this: &Self, global: &JSGlobalObject) -> JsResult<JSValue> {
-        let t = this.state.borrow();
-        let mut items = Vec::with_capacity(t.sgr_close_keys.len());
-        for k in &t.sgr_close_keys {
-            items.push(bun_string_jsc::create_utf8_for_js(global, k)?);
-        }
-        js_array_of(global, &items)
+    pub(crate) fn get_sgr_close_keys<'a>(&self, heap: &JsHeap<'a>) -> bindgen::Result<'a, JsLocal<'a>> {
+        let t = self.state.borrow();
+        bindgen::to_js::array(heap, t.sgr_close_keys.iter(), |heap, k| {
+            bindgen::to_js::utf8(heap, &**k)
+        })
     }
 
-    #[bun_jsc::host_fn(getter)]
-    pub(crate) fn get_uris(this: &Self, global: &JSGlobalObject) -> JsResult<JSValue> {
-        let t = this.state.borrow();
-        let mut items = Vec::with_capacity(t.uris.len());
-        for u in &t.uris {
-            items.push(bun_string_jsc::create_utf8_for_js(global, u)?);
-        }
-        js_array_of(global, &items)
+    pub(crate) fn get_uris<'a>(&self, heap: &JsHeap<'a>) -> bindgen::Result<'a, JsLocal<'a>> {
+        let t = self.state.borrow();
+        bindgen::to_js::array(heap, t.uris.iter(), |heap, u| {
+            bindgen::to_js::utf8(heap, &**u)
+        })
     }
 
     /// `segment(text, cells, runs, reordered) -> count`
     ///
     /// Returns the cell count, or `-requiredCells` when `cells` is too small
     /// (caller grows both buffers and calls again).
-    #[bun_jsc::host_fn(method)]
     pub(crate) fn segment(
         &self,
-        global: &JSGlobalObject,
-        frame: &CallFrame,
+        cx: &mut JsScope<'_>,
+        text: JsLocal<'_>,
+        cells: JsLocal<'_>,
+        runs: JsLocal<'_>,
+        _reordered: JsLocal<'_>,
     ) -> JsResult<JSValue> {
-        let [text, cells_val, runs_val, _reordered] = frame.arguments_as_array::<4>();
+        let global = cx.global();
+        let text = text.to_js();
+        let cells_val = cells.to_js();
+        let runs_val = runs.to_js();
         if !cells_val.js_type().is_typed_array_or_array_buffer()
             || !runs_val.js_type().is_typed_array_or_array_buffer()
         {
@@ -355,13 +336,23 @@ impl CellSegmenter {
     }
 
     /// `setCell(cells, screenWidth, x, y, charIndex, packed) -> damage`
-    #[bun_jsc::host_fn(method)]
     pub(crate) fn set_cell(
         &self,
-        global: &JSGlobalObject,
-        frame: &CallFrame,
+        cx: &mut JsScope<'_>,
+        cells: JsLocal<'_>,
+        screen_width: JsLocal<'_>,
+        x: JsLocal<'_>,
+        y: JsLocal<'_>,
+        char_index: JsLocal<'_>,
+        packed: JsLocal<'_>,
     ) -> JsResult<JSValue> {
-        let [cells_val, width, x, y, char_index, packed] = frame.arguments_as_array::<6>();
+        let global = cx.global();
+        let cells_val = cells.to_js();
+        let width = screen_width.to_js();
+        let x = x.to_js();
+        let y = y.to_js();
+        let char_index = char_index.to_js();
+        let packed = packed.to_js();
         if !cells_val.js_type().is_typed_array_or_array_buffer() {
             return Err(global.throw_invalid_arguments(format_args!(
                 "CellSegmenter.setCell expects an Int32Array"
@@ -396,14 +387,28 @@ impl CellSegmenter {
     }
 
     /// `paint(screenCells, screenWidth, x, y, lineCells, count, undefined, charMap, words) -> damage`
-    #[bun_jsc::host_fn(method)]
     pub(crate) fn paint(
         &self,
-        global: &JSGlobalObject,
-        frame: &CallFrame,
+        cx: &mut JsScope<'_>,
+        screen_cells: JsLocal<'_>,
+        screen_width: JsLocal<'_>,
+        x: JsLocal<'_>,
+        y: JsLocal<'_>,
+        line_cells: JsLocal<'_>,
+        count: JsLocal<'_>,
+        _options: JsLocal<'_>,
+        char_map: JsLocal<'_>,
+        words: JsLocal<'_>,
     ) -> JsResult<JSValue> {
-        let [cells_val, width, x, y, line_cells_val, count, _opts, char_map, words] =
-            frame.arguments_as_array::<9>();
+        let global = cx.global();
+        let cells_val = screen_cells.to_js();
+        let width = screen_width.to_js();
+        let x = x.to_js();
+        let y = y.to_js();
+        let line_cells_val = line_cells.to_js();
+        let count = count.to_js();
+        let char_map = char_map.to_js();
+        let words = words.to_js();
         if !cells_val.js_type().is_typed_array_or_array_buffer()
             || !line_cells_val.js_type().is_typed_array_or_array_buffer()
             || !char_map.js_type().is_typed_array_or_array_buffer()
@@ -987,7 +992,7 @@ pub(crate) fn create(global: &JSGlobalObject, _: &JSObject) -> JSValue {
     ant.put(
         global,
         b"CellSegmenter",
-        bun_jsc::codegen::js::get_constructor::<CellSegmenter>(global),
+        crate::generated_bindgen::cell_segmenter::js_CellSegmenter::get_constructor(global),
     );
     ant
 }

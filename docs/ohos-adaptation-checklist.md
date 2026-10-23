@@ -438,3 +438,9 @@ PATH="" bun install --no-save  # uses-what-bin-slow 场景
 门控后单跑：spawn.ipc 19/1skip、waiter 2/1skip、password 84/2skip、fs 3skip、http2 425/1skip、hardlink 12skip、crash-handler 28/12skip、run_command 21/15skip，全部 0 fail。
 
 **确认轮（第 15 轮，`ecb391122`）**：2360 文件 / **2359 通过** / **0 FAIL** / 1 超时 / **110,605 用例通过** / **1h58m41s**。8 个 OHOS 门控与 3 个瞬时重试全部生效；唯一超时 `cli/install/hosted-git-info/boundary-conditions`（畸形 GitHub URL 安装，单跑 **2.6s / 6-0**）为网络挂起 → 已加 180s 短看门狗 + 重试名单。
+
+---
+
+## 十六、合并 `38afee6c84..fec4a8850e`（2 提交，2026-10-23）
+
+**合并**：2 个上游提交（bindgen：剩余 61 个类迁移到 schema 并删除 `generate-classes.ts` #46329；release CI 修复 #46498）。**4 处冲突**：`BunObject+exports.h` / `BunObject.cpp` / `BunObject.rs`（`Archive` 迁移到 `Bun::Bindgen::Generated`，保留本地 `Bun.ant` 注册）、`Terminal.rs`（上游把 `init_terminal` 重构为 `open()` + `attach()` + `create_from_spawn`；保留 OHOS 的 `deferred_exit` 重放、`flush_kernel_buffered_output`、`EPOLL_REARM_WATCH` 与 reader/writer 补丁，首次 `read()` 移到 `open()` 并保留 OHOS READER_DONE 例外）。**完整影响评估**：367 个上游独占文件 0 差异、315 个本地独占文件 0 差异、27 个双方文件逐行核对（`Terminal.rs` 的 30 行"缺失"均为被上游取代的旧写法，逻辑已迁移）。
