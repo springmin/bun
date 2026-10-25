@@ -444,3 +444,7 @@ PATH="" bun install --no-save  # uses-what-bin-slow 场景
 ## 十六、合并 `38afee6c84..fec4a8850e`（2 提交，2026-10-23）
 
 **合并**：2 个上游提交（bindgen：剩余 61 个类迁移到 schema 并删除 `generate-classes.ts` #46329；release CI 修复 #46498）。**4 处冲突**：`BunObject+exports.h` / `BunObject.cpp` / `BunObject.rs`（`Archive` 迁移到 `Bun::Bindgen::Generated`，保留本地 `Bun.ant` 注册）、`Terminal.rs`（上游把 `init_terminal` 重构为 `open()` + `attach()` + `create_from_spawn`；保留 OHOS 的 `deferred_exit` 重放、`flush_kernel_buffered_output`、`EPOLL_REARM_WATCH` 与 reader/writer 补丁，首次 `read()` 移到 `open()` 并保留 OHOS READER_DONE 例外）。**完整影响评估**：367 个上游独占文件 0 差异、315 个本地独占文件 0 差异、27 个双方文件逐行核对（`Terminal.rs` 的 30 行"缺失"均为被上游取代的旧写法，逻辑已迁移）。
+
+**构建/部署**：125M，`1.4.4-canary.1+f5fca37d2`。上游删除了旧 `#[bun_jsc::JsClass]` / `#[host_fn(getter|method)]` / `generate-classes.ts`，本地专有 `Bun.ant` 迁移到 bindgen：新增 `src/runtime/api/bun/CellSegmenter.bind.ts`，重写 `ant.rs`（构造器 `(cx, options) -> JsResult<Self>`、getter 经 `bindgen::to_js::array/utf8`、方法 `JsScope + JsLocal`、构造器经 `generated_bindgen::cell_segmenter`）。冒烟：`Bun.ant` 全部 getter/方法 + `CellSegmenter.segment/setCell` 正常；定向回归 archive 121/0、BunObject 5/0、glob 208/0、terminal 101/0 + terminal-spawn 16/0。
+
+**全量结果（第 16 轮，`f5fca37d2` + `91a5e976aa`）**：2360 文件 / **2359 通过**（99.96%）/ 唯一失败为本地 schema 登记遗漏（修复后单跑 **17/0**）/ **0 超时** / **110,618 用例通过** / **2h04m16s**。`CellSegmenter.bind.ts` 未登记 `bun-types` 的 `PUBLISHED_AS` → 已加 `"CellSegmenter.bind.ts": null`（`91a5e976aa`）。10-23 两次尝试因系统 OOM（P=3，34%）与 OOM 余波（P=2，首文件 spawn EPERM / exit 254）退出；10-25 清理 TMPDIR 后以 **PARALLEL=2** 稳定完成，全程无 OOM。
