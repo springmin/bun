@@ -314,6 +314,7 @@ const PUBLISHED_AS: Record<string, string | null> = {
   "BlockList.bind.ts": null,
   "BunObject.bind.ts": "typeof Bun & { braces: typeof Bun.$.braces; shellEscape: typeof Bun.$.escape }",
   "BunObjectInternals.bind.ts": null,
+  "CellSegmenter.bind.ts": null,
   "Crypto.bind.ts":
     'typeof Bun & { Crypto: Class<Omit<Crypto, "subtle">>; timingSafeEqual: typeof import("node:crypto").timingSafeEqual }',
   "CryptoHasher.bind.ts": "typeof Bun",
