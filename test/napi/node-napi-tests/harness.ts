@@ -11,7 +11,7 @@ import { bunExe, bunEnv, isCI, isMusl } from "../../harness";
 const abortingJsNativeApiTests = ["test_finalizer/test_fatal_finalize.js"];
 
 // Must match the npm_config_target passed to node-gyp below (without the leading "v").
-const NODE_HEADERS_VERSION = "26.3.0";
+const NODE_HEADERS_VERSION = "26.12.1";
 
 // On musl CI (Alpine) clang lives under /usr/lib/llvm23 (no dash); the OHOS
 // port builds against a Homebrew-style prefix whose clang is on PATH instead
