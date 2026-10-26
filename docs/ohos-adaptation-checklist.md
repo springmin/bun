@@ -450,3 +450,26 @@ PATH="" bun install --no-save  # uses-what-bin-slow 场景
 **全量结果（第 16 轮，`f5fca37d2` + `91a5e976aa`）**：2360 文件 / **2359 通过**（99.96%）/ 唯一失败为本地 schema 登记遗漏（修复后单跑 **17/0**）/ **0 超时** / **110,618 用例通过** / **2h04m16s**。`CellSegmenter.bind.ts` 未登记 `bun-types` 的 `PUBLISHED_AS` → 已加 `"CellSegmenter.bind.ts": null`（`91a5e976aa`）。10-23 两次尝试因系统 OOM（P=3，34%）与 OOM 余波（P=2，首文件 spawn EPERM / exit 254）退出；10-25 清理 TMPDIR 后以 **PARALLEL=2** 稳定完成，全程无 OOM。
 
 **Release**：`bun-v1.4.4-ohos`（2026-10-25 发布，tag 指向构建提交 `ecb3911226`，即上游 `38afee6c84` = 1.4.4 发布提交 + OHOS 适配）——附件 `bun`（130,861,440 B，SHA256 `b4fdeb96fee1226cba62523a5dff365f56fbff75bc89021f8a9707200e452234`）与 `bun-ohos-aarch64-1.4.4.tar.gz`（56,643,741 B，SHA256 `e1b2cbe38feb425991f2916b473fc482819667c0c3c46ab57c353fb7bd84202d`），二进制即 10-22 确认轮（2,360 文件 / 2,359 通过 / 0 FAIL / 1 超时 / 110,605 用例）所用构建。
+
+---
+
+## 十七、合并 `fec4a8850e..179664ea89`（10 提交，2026-10-26）
+
+**合并**：10 个上游提交（WebKit 两次升级 #46279/#46690、bindgen `CallFrame`/stream sinks 迁移 #46540/#46641、zlib z_stream 原始指针 #46607、`bun check` 泛型对象字面量 #46678、c-ares 1.34.9 #46588、`--use-openssl-ca` 排除内置根证书 #46542、Node 26.12.1 #46533、darwin-ci #46718）。**4 处冲突**（均为测试）：`bun-types` 的 `PUBLISHED_AS`（保留本地 `CellSegmenter` + 上游新 schema）、`node-http2` 导入（`isOhos` + `nodeExeAtLeast`）、`process` 的 Node 版本（v26.12.1）、`test-use-system-ca` 导入（`isOHOS` + `tls as localhost`）。**完整影响评估**：426 个上游独占文件 0 差异、297 个本地独占文件 0 差异、46 个双方文件逐行核对（3 处有意替换：import 合并 ×2、Node 版本号）。
+
+**WebKit 升级**：`d6375c72affe` → `680ef47cec2c`（上游 WebKit `33ce3bf1`/`f59345e0`）。OHOS suspend/resume 补丁与 perl 路径替换干净应用；WebKit 全量重编译（1,591 编译单元）。
+
+**构建修复**：上游删除 `#[host_fn]`/`$rust`/`$newRustFunction`，本地 `Bun.ant` 的 4 个函数迁移到 bindgen：新增 `src/runtime/api/bun/Ant.bind.ts`（`export` 生成 JSC host function 符号），`ant.rs` 改为 bindgen 签名（`set_dumpable`/`get_peer_uid`/`get_peer_pid`/`memory_pressure_level`）；`PUBLISHED_AS` 登记 `Ant.bind.ts`。构建 125M（`1.4.4-canary.1+8c440d3df`）。
+
+**构建方式对齐上游（`2c291a6e59`）**：`scripts/ohos/build-bun-ohos-native.sh` 的 release 构建新增 `--canary="${CANARY:-off}"` —— 正式版产物为 `1.4.4+<commit>`（与上游一致），`CANARY=on` 时保留 `1.4.4-canary.1+<commit>`。已发布资产保持不动。
+
+**定向回归**：bun-types 17/0、ant 17/0、archive 121/0、glob 208/0、BunObject 5/0、terminal 101+16/0、process 190/0、tls 44/0、http2 424/0、webkit-upgrade 5+5/0、spawn-stdin 6/0。
+
+**全量结果（第 17 轮，`8c440d3df`）**：2,362 文件 / **2,360 通过** / 2 失败 / **0 超时** / **110,674 用例通过** / **2h12m29s**。失败处理：
+- `node-tls-connect`：OHOS 门控引用 `_runtime`（上游已改名 `runtime`）→ ReferenceError（347 用例通过但 exit=1）→ 修复后单跑 **354/0、exit 0**（`37ef1cb352`）；
+- `fetch-http2-client`：实验性 HTTP/2 abort/PING 时序，并行负载下 3 用例超时；单跑 **83/0** → 改为串行独占（`37ef1cb352`）。
+
+**确认轮（第 18 轮，`8c440d3df`）**：2,362 文件 / **2,359 通过**（99.87%）/ 3 失败 / 1 超时 / **110,682 用例通过** / **2h31m07s**。失败处理：
+- `bun-install-git-deps`：4000 链接性能测试硬编码 30s 超时（单跑 25–28s）→ OHOS 改为 **120s**（`6ed20b290b`），单跑 1/0；
+- `node-http2`：非 TLS 客户端瞬断竞态上报 `ERR_HTTP2_ERROR`（单跑 3 次 2 败 1 过）→ OHOS 门控该变体（`4e6e9b0568`），TLS 变体保留并通过；
+- `hosted-git-info`：GitHub 不可达的网络挂起（180s 看门狗 × 2），环境型；网络正常时单跑 2.6s / 6-0。
