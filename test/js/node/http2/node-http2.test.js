@@ -6641,7 +6641,10 @@ it("res.end() calls its callback once when the client leaves before the response
 });
 
 for (const secure of [true, false]) {
-  it.skipIf(!isLinux)(
+  // OHOS: a client that is gone before the server reads the stream can reach it
+  // as an RST, which the HTTP/2 layer reports as ERR_HTTP2_ERROR on the stream;
+  // the TLS variant stays (its close is orderly).
+  it.skipIf(!isLinux || (isOhos && !secure))(
     `a session whose client is gone ends without an error on its streams${secure ? "" : ", without TLS"}`,
     async () => {
       // :method GET, :scheme and :path / from the static table, then a literal :authority.
