@@ -4301,7 +4301,7 @@ test.concurrent(
     }
     expect(cpuTime.chain).toBeLessThan(3 * cpuTime.star);
   },
-  30_000,
+  isOhos ? 120_000 : 30_000,
 );
 
 // For the other kinds of entry, Bun installs whatever git itself writes.
