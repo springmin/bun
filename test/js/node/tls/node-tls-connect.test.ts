@@ -5179,7 +5179,7 @@ describe("new tls.TLSSocket(socket) on the client side", () => {
     // OHOS: the device's node does not resume a session passed with a socket
     // (`tls.connect({ socket, session })` and `new TLSSocket(socket, { session })`
     // report false); the bun leg above still runs.
-    it.skipIf(skip || (isOhos && _runtime === "node"))("a session that is set before the handshake starts is resumed", async () => {
+    it.skipIf(skip || (isOhos && runtime === "node"))("a session that is set before the handshake starts is resumed", async () => {
       expect(await session()).toEqual({
         "tls.connect({ port, session })": true,
         "tls.connect({ socket, session })": true,

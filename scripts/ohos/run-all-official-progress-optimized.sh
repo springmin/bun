@@ -505,7 +505,7 @@ run_test() {
     *source-lints/host-export-callers.test.ts|*shell/bunshell-instance.test.ts|\
     *module-graph/module-graph-isolation.test.ts|\
     *issue/27272.test.ts|*s3/s3.test.ts|*s3/s3-list-objects.test.ts|*s3/s3.leak.test.ts|\
-    *bake/dev-and-prod.test.ts)
+    *bake/dev-and-prod.test.ts|*fetch/fetch-http2-client.test.ts)
       _serial=1
       _exclusive=1 ;;
     # The rest of the load-sensitive set passed once serialized.
