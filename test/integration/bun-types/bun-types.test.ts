@@ -309,6 +309,7 @@ function checkForEmptyInterfaces(program: ts.Program) {
  * `Class<T>`: the constructor of a class of which only the instances, `T`, are published.
  */
 const PUBLISHED_AS: Record<string, string | null> = {
+  "Ant.bind.ts": null,
   "Archive.bind.ts": "typeof Bun",
   "Blob.bind.ts": "typeof Bun & { Blob: Class<Bun.BunFile> }",
   "BlockList.bind.ts": null,

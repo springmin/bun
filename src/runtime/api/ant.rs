@@ -18,7 +18,11 @@ use std::collections::HashMap;
 use bun_core::strings;
 use bun_jsc::bindgen::{self, JsHeap, JsLocal, JsScope};
 use bun_jsc::{
-    ArrayBuffer, CallFrame, JSFunction, JSGlobalObject, JSObject, JSValue, JsResult,
+    ArrayBuffer, JSFunction, JSGlobalObject, JSObject, JSValue, JsResult,
+};
+
+use crate::generated_bindgen::ant::{
+    Bun__ant__getPeerPid, Bun__ant__getPeerUid, Bun__ant__memoryPressureLevel, Bun__ant__setDumpable,
 };
 
 // ─── C ABI from src/jsc/bindings/stringWidth.cpp ────────────────────────────
@@ -131,37 +135,24 @@ mod os {
     }
 }
 
-#[bun_jsc::host_fn]
-fn ant_set_dumpable(_global: &JSGlobalObject, frame: &CallFrame) -> JsResult<JSValue> {
-    let [flag] = frame.arguments_as_array::<1>();
+pub(crate) fn set_dumpable(_cx: &mut JsScope<'_>, flag: JsLocal<'_>) -> bool {
+    let flag = flag.to_js();
     let flag = if flag.is_undefined_or_null() { true } else { flag.to_boolean() };
-    Ok(JSValue::from(os::set_dumpable(flag)))
+    os::set_dumpable(flag)
 }
 
-#[bun_jsc::host_fn]
-fn ant_get_peer_uid(_global: &JSGlobalObject, frame: &CallFrame) -> JsResult<JSValue> {
-    let [fd] = frame.arguments_as_array::<1>();
-    match os::peer_cred(fd.to_int32()) {
-        Some(cred) => Ok(JSValue::from(cred.uid)),
-        None => Ok(JSValue::NULL),
-    }
+pub(crate) fn get_peer_uid(_cx: &mut JsScope<'_>, fd: JsLocal<'_>) -> Option<u32> {
+    os::peer_cred(fd.to_js().to_int32()).map(|cred| cred.uid)
 }
 
-#[bun_jsc::host_fn]
-fn ant_get_peer_pid(_global: &JSGlobalObject, frame: &CallFrame) -> JsResult<JSValue> {
-    let [fd] = frame.arguments_as_array::<1>();
-    match os::peer_cred(fd.to_int32()) {
-        Some(cred) if cred.pid > 0 => Ok(JSValue::from(cred.pid)),
-        _ => Ok(JSValue::NULL),
-    }
+pub(crate) fn get_peer_pid(_cx: &mut JsScope<'_>, fd: JsLocal<'_>) -> Option<i32> {
+    os::peer_cred(fd.to_js().to_int32())
+        .filter(|cred| cred.pid > 0)
+        .map(|cred| cred.pid)
 }
 
-#[bun_jsc::host_fn]
-fn ant_memory_pressure_level(_global: &JSGlobalObject, _frame: &CallFrame) -> JsResult<JSValue> {
-    match os::memory_pressure_level() {
-        Some(level) => Ok(JSValue::from(level)),
-        None => Ok(JSValue::NULL),
-    }
+pub(crate) fn memory_pressure_level(_cx: &mut JsScope<'_>) -> Option<i32> {
+    os::memory_pressure_level()
 }
 
 // ─── CellSegmenter ──────────────────────────────────────────────────────────
@@ -966,17 +957,17 @@ pub(crate) fn create(global: &JSGlobalObject, _: &JSObject) -> JSValue {
     ant.put(
         global,
         b"setDumpable",
-        JSFunction::create(global, "setDumpable", __jsc_host_ant_set_dumpable, 1, Default::default()),
+        JSFunction::create(global, "setDumpable", Bun__ant__setDumpable, 1, Default::default()),
     );
     ant.put(
         global,
         b"getPeerUid",
-        JSFunction::create(global, "getPeerUid", __jsc_host_ant_get_peer_uid, 1, Default::default()),
+        JSFunction::create(global, "getPeerUid", Bun__ant__getPeerUid, 1, Default::default()),
     );
     ant.put(
         global,
         b"getPeerPid",
-        JSFunction::create(global, "getPeerPid", __jsc_host_ant_get_peer_pid, 1, Default::default()),
+        JSFunction::create(global, "getPeerPid", Bun__ant__getPeerPid, 1, Default::default()),
     );
     ant.put(
         global,
@@ -984,7 +975,7 @@ pub(crate) fn create(global: &JSGlobalObject, _: &JSObject) -> JSValue {
         JSFunction::create(
             global,
             "memoryPressureLevel",
-            __jsc_host_ant_memory_pressure_level,
+            Bun__ant__memoryPressureLevel,
             0,
             Default::default(),
         ),
