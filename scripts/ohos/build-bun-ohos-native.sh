@@ -537,12 +537,16 @@ phase_build() {
     # (config.ts), which flips WebKit's CMAKE_BUILD_TYPE RelWithDebInfo ->
     # Release and invalidates the existing WebKit build dir. OHOS has never
     # been validated with LTO; keep the previous codegen.
+    # Version: upstream release binaries report "1.4.4+<commit>" (canary off),
+    # so a release build defaults to --canary=off. Set CANARY=on for a canary
+    # build ("1.4.4-canary.1+<commit>").
     if ! "$BUN" scripts/build.ts \
       --profile=release \
       --os=ohos \
       --arch=aarch64 \
       --webkit=local \
       --lto=off \
+      --canary="${CANARY:-off}" \
       --cache-dir="$cache_dir" \
       --ohos-sdk-root="$OHOS_SDK" \
       --ohos-sysroot="$SYSROOT" \
