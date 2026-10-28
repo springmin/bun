@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
-import { bunEnv, bunExe, isASAN, isWindows, strictSystemAllocatorEnv, tempDir } from "harness";
+import { bunEnv, bunExe, isASAN, isOhos, isWindows, strictSystemAllocatorEnv, tempDir } from "harness";
+import { renameSync } from "fs";
 import { join } from "path";
 
 const systemCC = process.env.CC || Bun.which("cc") || Bun.which("clang") || Bun.which("gcc");
@@ -98,6 +99,22 @@ test.skipIf(isWindows || isASAN || !systemCC)(
       stderr: expect.not.stringContaining("error"),
       exitCode: 0,
     });
+
+    if (isOhos) {
+      // OHOS refuses to dlopen an unsigned ELF; sign the freshly built library
+      // the way the build signs every other one on the device.
+      const signTool = Bun.which("binary-sign-tool") ?? "/storage/Users/currentUser/.harmonybrew/bin/binary-sign-tool";
+      const signed = library + ".signed";
+      await using sign = Bun.spawn({
+        cmd: [signTool, "sign", "-selfSign", "1", "-inFile", library, "-outFile", signed],
+        env: bunEnv,
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+      const [stderr, exitCode] = await Promise.all([sign.stderr.text(), sign.exited]);
+      expect({ stderr, exitCode }).toEqual({ stderr: expect.not.stringContaining("error"), exitCode: 0 });
+      renameSync(signed, library);
+    }
 
     for (const env of [bunEnv, { ...bunEnv, ...strictSystemAllocatorEnv }]) {
       await using run = Bun.spawn({

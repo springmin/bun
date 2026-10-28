@@ -178,6 +178,7 @@ echo "Bun: $($BUN_EXE --version 2>/dev/null)"
 echo "Date: $(date)"
 echo "Parallel: $PARALLEL | Timeout: ${TMOUT}s (bundler: ${TMOUT_BUNDLER}s) | Retries: ${RETRIES}"
 echo "VendoredNodeTests: $([ "$SKIP_VENDORED_NODE_TESTS" = "1" ] && echo "EXCLUDED (original scope only)" || echo "INCLUDED (full upstream isTest)")"
+echo "AOT/TrimTests: EXCLUDED (upstream feature not yet supported on OHOS)"
 echo ""
 } | tee "$REPORT" >/dev/null
 
@@ -213,13 +214,21 @@ const isClusterTest = p => {
 // run drivers.
 const isTestStrict = p => isJs(p) && /\.test|spec\./.test(basename(p));
 const isHidden = p => /node_modules|node\.js/.test(dirname(p).replaceAll("\\", "/")) || /^\./.test(basename(p));
+// AOT standalone executables and the trim/link tests are upstream features
+// whose generated executables OHOS does not run yet; excluded like the
+// vendored Node tests so they do not flood the report.
+const isUnsupportedOnOhos = p => {
+  const u = p.replaceAll("\\", "/");
+  return u.startsWith("test/aot/") || u.startsWith("test/internal/trim/link-")
+    || /^test\/cli\/(run\/run-aot|test\/test-aot|aot-|crash-if-interpreter-is-used)/.test(u);
+};
 const tests = [];
 const walk = (cwd, rel) => {
   for (const e of readdirSync(join(cwd, rel), { withFileTypes: true })) {
     const f = join(rel, e.name);
     if (isHidden(f)) continue;
-    if (e.isFile()) { if (isNodeTest(f) || isClusterTest(f) || isTestStrict(f)) tests.push(f); }
-    else if (e.isDirectory()) walk(cwd, f);
+    if (e.isDirectory()) { if (f === "test/aot") continue; walk(cwd, f); }
+    else if (e.isFile()) { if (isUnsupportedOnOhos(f)) continue; if (isNodeTest(f) || isClusterTest(f) || isTestStrict(f)) tests.push(f); }
   }
 };
 walk(process.cwd(), "test");
