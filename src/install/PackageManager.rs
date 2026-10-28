@@ -2405,6 +2405,8 @@ pub fn init(
         }
         &mut *loader_ptr
     };
+    // The `[Nms] ".env"` line is a timing trace, like the other `print_elapsed` traces of install.
+    env.quiet_loaded_files = !cli.log_level.is_verbose();
     if !cli.env_files.is_empty() {
         // Load these before the cwd changes, because their paths are relative to it.
         env.load_process()?;
@@ -3312,7 +3314,7 @@ fn parse_runtime_root(
         });
     manager.lockfile = lockfile;
     if parse_log.errors > 0 {
-        parse_log.append_to_with_recycled(log, true);
+        parse_log.append_to(log);
     }
     result
 }

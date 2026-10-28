@@ -60,9 +60,3 @@
 [ OPENHARMONY ] test/js/third_party/postgres/postgres.test.ts [ Skip ] # needs external service credentials
 [ OPENHARMONY ] test/js/third_party/prisma/prisma.test.ts [ Skip ] # needs external service credentials
 [ OPENHARMONY ] test/js/third_party/stripe/stripe.test.ts [ Skip ] # needs external service credentials
-
-# `bun lint` is a command in canary builds only (IS_ENABLED in
-# src/runtime/cli/lint_command.rs), so nothing in this directory can run on a
-# release build. Remove when a release has `bun lint`.
-[ STABLE ] test/cli/lint/ [ SKIP ] # a release build has no `bun lint`
-
