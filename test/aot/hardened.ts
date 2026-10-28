@@ -1,5 +1,5 @@
 // test/harness.ts imports this file, so it takes nothing from there.
-import { closeSync, openSync, readSync } from "node:fs";
+import { closeSync, existsSync, openSync, readSync } from "node:fs";
 
 function isPositionIndependent(path: string) {
   const header = Buffer.alloc(18);
@@ -12,8 +12,15 @@ function isPositionIndependent(path: string) {
   return header.readUInt16LE(16) === 3;
 }
 
+// Bun reports `"linux"` on OpenHarmony, and OHOS requires PIE, so the PIE
+// probe below would call every OHOS build hardened. Keep in sync with
+// `isOHOS` in test/harness.ts (this file is imported by it, so no import).
+const isOhos =
+  process.env.BUN_OHOS === "1" ||
+  (process.platform === "linux" && process.arch === "arm64" && existsSync("/system/lib/ld-musl-aarch64.so.1"));
+
 /** Whether the Bun under test was built with `--hardened=on`. */
-export const isHardened = process.platform === "linux" && isPositionIndependent(process.execPath);
+export const isHardened = process.platform === "linux" && !isOhos && isPositionIndependent(process.execPath);
 
 /**
  * Whether it was built without `--lock-environment=off` too. An executable that such a build compiles ahead of time does
