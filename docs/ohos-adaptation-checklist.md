@@ -473,3 +473,24 @@ PATH="" bun install --no-save  # uses-what-bin-slow 场景
 - `bun-install-git-deps`：4000 链接性能测试硬编码 30s 超时（单跑 25–28s）→ OHOS 改为 **120s**（`6ed20b290b`），单跑 1/0；
 - `node-http2`：非 TLS 客户端瞬断竞态上报 `ERR_HTTP2_ERROR`（单跑 3 次 2 败 1 过）→ OHOS 门控该变体（`4e6e9b0568`），TLS 变体保留并通过；
 - `hosted-git-info`：GitHub 不可达的网络挂起（180s 看门狗 × 2），环境型；网络正常时单跑 2.6s / 6-0。
+
+---
+
+## 十八、合并 `179664ea89..11c367163a`（15 提交，2026-10-28）
+
+**合并**：15 个上游提交（libarchive → 安全 Rust tar #46638、HdrHistogram → Rust #46650、bytemuck → `bun_pod` #47037、`bun build --compile --aot` #45631、**WebKit 三次升级**（最终 `fcc1ea0973a4`）、两处 UAF 修复 #46825/#46834、`bun lint` release/JS 插件 #46439/#46980、bunx/install 修复等）。**15 处冲突**：3 个构建脚本（`webkit.ts` 上游重写为无 cmake 的直接构建图 `webkitBuildSpec`、`flags.ts`、`source.ts`、`bun.ts`）、7 个源码/C++（`BunProcess.cpp`、`JSCFFIBridge.cpp`、`c-bindings.cpp`、`StandaloneModuleGraph.rs`、`elf.rs`、`libarchive` 删除）、3 个测试、`.gitignore`、`Cargo.toml`。**完整影响评估**：19,335 个上游独占文件 0 差异、255 个本地独占文件 0 差异、89 个双方文件逐行核对。
+
+**WebKit 升级**：`680ef47cec2c` → `fcc1ea0973a4`（三次升级）；OHOS suspend/resume 补丁干净应用；上游把 WebKit 构建从 cmake 改为**直接构建图**（`webkitLists` + `Sources.txt` + AOT 生成步骤）。
+
+**构建修复**：
+- `Bun.ant`/`CellSegmenter` 适配 `bun_pod::Unaligned<u32>`（`cast_slice_mut` → `&mut [u32]`，显式类型）；
+- `bun_archive` 移植 OHOS `symlinkat` EPERM/EACCES 重试（`src/archive/lib.rs`）；
+- 恢复上游 `elf.rs`（旧 `write_bun_section` 已迁移至 `elf_payload.rs`；`normalize_interpreter` 等上游新函数完整保留）；
+- `scripts/build/aot.ts` 增加 OHOS → `Linux` 目标映射（AOT builtins 表）；`unseen-code.builtins.ts` 登记 `%CellSegmenter%`；
+- `node_fs.rs` 适配 `stat_` 的 `Option<stat>` 语义（大文件读取分支）；
+- `test/aot/hardened.ts`：OHOS 强制 PIE，不再被 `isPositionIndependent` 误判为 hardened。
+构建 **142M**（`1.4.4+cd044c6fd`，`canary:off`，与上游正式版版本格式一致）。
+
+**定向回归**：archive 134/0、bun-install 770/0、streaming-extract 133/0、bun-build-compile 75/0、bun-pack 384/0、fs 618/0、zlib 472/0、histogram 98/0、perf_hooks 24/0、ffi 151/0、process 191/0、ant 17/0、bun-types 17/0、glob 208/0、terminal 101/0。
+
+**推送/同步**：`2450bc6c84`（合并）→ `cd044c6fdc`（archive/elf）→ `94fe9f50e7`（API 适配）→ `d3740f3592`（hardened 检测）；all-tests src 树 **6,467 文件一致**（新增 `src/tar`、`src/aot`、`src/pod`、`src/archive` 等，移除 libarchive/HdrHistogram）。
