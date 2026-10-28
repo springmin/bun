@@ -41,6 +41,9 @@ export function builtinTableTarget(cfg: Pick<CodegenFields, "os" | "abi">): Buil
       return "FreeBSD";
     case "linux":
       return "Linux";
+    case "ohos":
+      // OHOS is Linux-like: the AOT builtins table has no OHOS target.
+      return "Linux";
   }
 }
 

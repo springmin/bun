@@ -315,8 +315,8 @@ impl CellSegmenter {
         let mut cells_ab = ArrayBuffer::from_typed_array(global, cells_val);
         let mut runs_ab = ArrayBuffer::from_typed_array(global, runs_val);
         let count = {
-            let cells = cells_ab.as_u32();
-            let runs = runs_ab.as_u32();
+            let cells: &mut [u32] = bun_core::cast_slice_mut(cells_ab.as_u32());
+            let runs: &mut [u32] = bun_core::cast_slice_mut(runs_ab.as_u32());
             let mut state = self.state.borrow_mut();
             let mut parser = Parser::new(self, &mut state, &text, cells, runs);
             parser.run();
@@ -357,7 +357,7 @@ impl CellSegmenter {
         let packed = packed.to_u32();
 
         let mut cells_ab = ArrayBuffer::from_typed_array(global, cells_val);
-        let cells = cells_ab.as_u32();
+        let cells: &mut [u32] = bun_core::cast_slice_mut(cells_ab.as_u32());
 
         let width_code = packed & self.screen.width_mask;
         let advance = if width_code == self.screen.wide {
@@ -420,10 +420,10 @@ impl CellSegmenter {
         let mut map_ab = ArrayBuffer::from_typed_array(global, char_map);
         let mut words_ab = ArrayBuffer::from_typed_array(global, words);
 
-        let cells = cells_ab.as_u32();
-        let line = line_ab.as_u32();
-        let map = map_ab.as_u32();
-        let words_buf = words_ab.as_u32();
+        let cells: &mut [u32] = bun_core::cast_slice_mut(cells_ab.as_u32());
+        let line: &mut [u32] = bun_core::cast_slice_mut(line_ab.as_u32());
+        let map: &mut [u32] = bun_core::cast_slice_mut(map_ab.as_u32());
+        let words_buf: &mut [u32] = bun_core::cast_slice_mut(words_ab.as_u32());
 
         let mut cursor = start_x;
         for i in 0..count {

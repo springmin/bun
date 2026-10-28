@@ -7802,13 +7802,17 @@ impl NodeFS {
         unsafe { buf.expand_to_capacity() };
 
         #[cfg(unix)]
-        if path_is_path && sys::S::ISREG(stat_.st_mode as u32) {
-            let end = (stat_.st_size as u64).min(max_size).min(buf.len() as u64) as usize;
-            if end.saturating_sub(total) >= LARGE_FILE_BYTES {
-                let position = args.offset as u64 + total as u64;
-                let count = read_large_file(fd, &mut buf[total..end], position)?;
-                total += count;
-                sys::set_file_offset(fd, position + count as u64)?;
+        if path_is_path {
+            if let Some(stat) = stat_ {
+                if sys::S::ISREG(stat.st_mode as u32) {
+                    let end = (stat.st_size as u64).min(max_size).min(buf.len() as u64) as usize;
+                    if end.saturating_sub(total) >= LARGE_FILE_BYTES {
+                        let position = args.offset as u64 + total as u64;
+                        let count = read_large_file(fd, &mut buf[total..end], position)?;
+                        total += count;
+                        sys::set_file_offset(fd, position + count as u64)?;
+                    }
+                }
             }
         }
 
