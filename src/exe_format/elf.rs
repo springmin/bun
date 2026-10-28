@@ -50,6 +50,157 @@ impl ElfFile {
 }
 
 impl<D: core::ops::DerefMut<Target = [u8]>> ElfFile<D> {
+    /// If PT_INTERP points into a Nix/Guix store path, rewrite it to the
+    /// standard FHS path so `bun build --compile` output stays portable when
+    /// the bun binary itself was patchelf'd (NixOS autoPatchelfHook). See #24742.
+    ///
+    /// Skipped when the host system itself uses a Nix/Guix store interpreter
+    /// (i.e. the running bun process has a store-path PT_INTERP): on NixOS
+    /// `/lib64/ld-linux-x86-64.so.2` is a stub that refuses to run generic
+    /// binaries, so normalizing there would break locally-run compiled output
+    /// (#29290). Cross-compile-style portability is preserved on any non-Nix
+    /// Linux host that happens to have a patchelf'd bun installed.
+    ///
+    /// Store paths are always longer than the FHS path, so this is an in-place
+    /// shrink — no segment moves. No-op for any other interpreter.
+    pub fn normalize_interpreter(&mut self) {
+        // Don't rewrite on Nix/Guix hosts — the FHS path is a stub loader there.
+        if host_uses_nix_store_interpreter() {
+            return;
+        }
+
+        let ehdr = read_ehdr(&self.data);
+        let phdr_size = size_of::<Elf64_Phdr>();
+
+        // Bounds-check the program header table up-front; --compile-executable-path
+        // accepts arbitrary files, so a corrupt e_phoff/e_phnum must not panic.
+        let phdr_table_end = ehdr
+            .e_phoff
+            .saturating_add((ehdr.e_phnum as u64).saturating_mul(phdr_size as u64));
+        if phdr_table_end > self.data.len() as u64 {
+            return;
+        }
+
+        for i in 0..ehdr.e_phnum as usize {
+            let phdr_offset = usize::try_from(ehdr.e_phoff).expect("int cast") + i * phdr_size;
+            let phdr: Elf64_Phdr = read_struct(&self.data[phdr_offset..][..phdr_size]);
+            if phdr.p_type != PT_INTERP {
+                continue;
+            }
+
+            let interp_offset = usize::try_from(phdr.p_offset).expect("int cast");
+            let interp_filesz = usize::try_from(phdr.p_filesz).expect("int cast");
+            let is_interp_in_file = interp_offset
+                .checked_add(interp_filesz)
+                .is_some_and(|interp_end| interp_end <= self.data.len());
+            if !is_interp_in_file {
+                return;
+            }
+
+            // reshaped for borrowck — compute replacement under an
+            // immutable borrow, then take a mutable borrow for the writes.
+            let replacement: &'static [u8] = {
+                let interp_region = &self.data[interp_offset..][..interp_filesz];
+                let current = slice_to_nul(interp_region);
+
+                if !current.starts_with(b"/nix/store/") && !current.starts_with(b"/gnu/store/") {
+                    return;
+                }
+
+                let Some(last_slash) = strings::last_index_of_char(current, b'/') else {
+                    return;
+                };
+                let basename = &current[last_slash + 1..];
+
+                let mut found: Option<&'static [u8]> = None;
+                for entry in INTERP_MAP {
+                    if basename == entry.0 {
+                        found = Some(entry.1);
+                        break;
+                    }
+                }
+                let Some(replacement) = found else {
+                    return;
+                };
+
+                // FHS path + NUL must fit in the existing segment (always true for
+                // store paths: 32-char hash + pname + "/lib/" alone exceeds any FHS path).
+                if replacement.len() + 1 > interp_filesz {
+                    return;
+                }
+
+                bun_core::scoped_log!(
+                    elf,
+                    "rewriting PT_INTERP {} -> {}",
+                    bstr::BStr::new(current),
+                    bstr::BStr::new(replacement)
+                );
+
+                replacement
+            };
+
+            {
+                let interp_region = &mut self.data[interp_offset..][..interp_filesz];
+                interp_region[..replacement.len()].copy_from_slice(replacement);
+                interp_region[replacement.len()..].fill(0);
+            }
+
+            let new_size: u64 = replacement.len() as u64 + 1;
+            // p_filesz @ +32, p_memsz @ +40 in Elf64_Phdr
+            write_u64_le(&mut self.data[phdr_offset + 32..][..8], new_size);
+            write_u64_le(&mut self.data[phdr_offset + 40..][..8], new_size);
+
+            self.update_interp_section_size(ehdr, new_size);
+            return;
+        }
+    }
+
+    /// Best-effort: keep the `.interp` section header's `sh_size` consistent with
+    /// the rewritten PT_INTERP so `readelf -S` shows accurate metadata. The kernel
+    /// only consults PT_INTERP, so any failure here is silently ignored.
+    fn update_interp_section_size(&mut self, ehdr: Elf64_Ehdr, new_size: u64) {
+        let shdr_size = size_of::<Elf64_Shdr>();
+        let shnum = ehdr.e_shnum;
+        if shnum == 0 || ehdr.e_shstrndx >= shnum {
+            return;
+        }
+
+        let shdr_table_end =
+            (ehdr.e_shoff).saturating_add((shnum as u64).saturating_mul(shdr_size as u64));
+        if shdr_table_end > self.data.len() as u64 {
+            return;
+        }
+
+        let strtab_shdr = self.read_shdr(ehdr.e_shoff, ehdr.e_shstrndx);
+        let strtab_end = strtab_shdr.sh_offset.saturating_add(strtab_shdr.sh_size);
+        if strtab_end > self.data.len() as u64 {
+            return;
+        }
+        // reshaped for borrowck — copy strtab bounds out so we can
+        // re-borrow self.data mutably below.
+        let strtab_off = usize::try_from(strtab_shdr.sh_offset).expect("int cast");
+        let strtab_len = usize::try_from(strtab_shdr.sh_size).expect("int cast");
+
+        for i in 0..shnum as usize {
+            let shdr = self.read_shdr(ehdr.e_shoff, u16::try_from(i).expect("int cast"));
+            if shdr.sh_name as usize >= strtab_len {
+                continue;
+            }
+            let strtab = &self.data[strtab_off..][..strtab_len];
+            let name = slice_to_nul(&strtab[shdr.sh_name as usize..]);
+            if name != b".interp" {
+                continue;
+            }
+
+            // sh_size @ +32 in Elf64_Shdr
+            let shdr_offset = usize::try_from(ehdr.e_shoff).expect("int cast") + i * shdr_size;
+            write_u64_le(&mut self.data[shdr_offset + 32..][..8], new_size);
+            return;
+        }
+    }
+}
+
+impl<D: core::ops::DerefMut<Target = [u8]>> ElfFile<D> {
     /// Returns the file offset and section index of the `.bun` section.
     pub(crate) fn find_bun_section(&self, ehdr: Elf64_Ehdr) -> Result<BunSectionInfo, ElfError> {
         let shdr_size = size_of::<Elf64_Shdr>();
