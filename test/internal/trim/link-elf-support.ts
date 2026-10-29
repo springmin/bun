@@ -1,7 +1,7 @@
 import { trimExecutable } from "bun:internal-for-testing";
 import { afterAll, beforeAll, describe, expect } from "bun:test";
-import { bunEnv, isLinux, tempDir } from "harness";
-import { closeSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { bunEnv, isLinux, isOhos, tempDir } from "harness";
+import { chmodSync, closeSync, existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { openElf } from "../../../scripts/build/trim/elf-file.ts";
 import { readFeatureModel, type FeatureName } from "../../../scripts/build/trim/features.ts";
@@ -56,6 +56,18 @@ export const canLinkRustBitcode =
   canLink &&
   rustc !== null &&
   llvmMajorOf([rustc, "-vV"], /^LLVM version: (\d+)/m) <= llvmMajorOf([tools["ld.lld"]!, "--version"], /\bLLD (\d+)/);
+
+const signTool = Bun.which("binary-sign-tool") ?? "/storage/Users/currentUser/.harmonybrew/bin/binary-sign-tool";
+
+/** OHOS refuses to exec an ELF without a .codesign section; the toy links are plain clang output. */
+function signOnOhos(path: string) {
+  if (!isOhos) return;
+  const signed = path + ".signed";
+  const result = Bun.spawnSync({ cmd: [signTool, "sign", "-selfSign", "1", "-inFile", path, "-outFile", signed], env: bunEnv });
+  if (result.exitCode !== 0) throw new Error(`binary-sign-tool failed for ${path}: ${result.stderr}`);
+  renameSync(signed, path);
+  chmodSync(path, 0o755);
+}
 
 export const describeLink = describe.concurrent.skipIf(!canLink);
 
@@ -147,14 +159,18 @@ export async function wrapped(folder: string, program: Program = {}) {
   const linkInputs = writeLinkInputs(folder, { minimums, builtins });
   const command = [tools.clang!, "@in.rsp", ...baseLinkFlags("program.map"), ...linkFlags, "-o", "program"];
   const options = { demangler: tools["llvm-cxxfilt"]! };
-  return await run(linkArguments(linkInputs, command, options), folder);
+  const result = await run(linkArguments(linkInputs, command, options), folder);
+  if (result.exitCode === 0) signOnOhos(join(folder, "program"));
+  return result;
 }
 
 export async function inspectAndRun(folder: string, linkResult: ProcessResult, removed: FeatureName[] = [Extra]) {
   expect({ stderr: linkResult.stderr, exitCode: linkResult.exitCode }).toEqual({ stderr: "", exitCode: 0 });
   const inspection = await inspect(join(folder, "program"), tools["llvm-nm"]!);
+  signOnOhos(join(folder, "program"));
   const programResult = await run([join(folder, "program")], folder);
   const summary = trimExecutable(join(folder, "program"), join(folder, "trimmed"), removed);
+  signOnOhos(join(folder, "trimmed"));
   const trimmedResult = await run([join(folder, "trimmed")], folder);
   return { ...inspection, linkOutput: linkResult.stdout, summary, programResult, trimmedResult };
 }

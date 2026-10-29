@@ -1569,7 +1569,8 @@ export const linkerFlags: Flag[] = [
   },
   {
     flag: c => `-Wl,-Map=${linkerMapPath(c)}`,
-    when: c => (c.linux || c.freebsd) && writesLinkerMap(c),
+    // OHOS too: `--trimmable` reads the map to lay the link out by feature.
+    when: c => (c.linux || c.freebsd || c.ohos) && writesLinkerMap(c),
     desc: "Linker map",
   },
   {
@@ -1871,10 +1872,10 @@ export function orderFilePath(cfg: Pick<Config, "buildDir">): string {
  * step cannot work without them (see the `/lldmap` entry).
  */
 export function writesLinkerMap(
-  cfg: Pick<Config, "linux" | "darwin" | "windows" | "freebsd" | "release" | "asan" | "valgrind" | "linkerMap">,
+  cfg: Pick<Config, "linux" | "darwin" | "windows" | "freebsd" | "ohos" | "release" | "asan" | "valgrind" | "linkerMap">,
 ): boolean {
   if (!cfg.release || !cfg.linkerMap) return false;
-  if (cfg.linux || cfg.freebsd) return !cfg.asan && !cfg.valgrind;
+  if (cfg.linux || cfg.freebsd || cfg.ohos) return !cfg.asan && !cfg.valgrind;
   return cfg.darwin || cfg.windows;
 }
 

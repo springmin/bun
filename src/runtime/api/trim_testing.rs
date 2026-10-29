@@ -51,6 +51,18 @@ pub(crate) fn trim_executable(
     }
     write_executable(out, &bytes).map_err(|error| global.throw(format_args!("{error}")))?;
 
+    // OHOS: an ELF must carry a .codesign section to be executed, and trimming
+    // rewrote the file. Silent: the exec of the output reports the real error.
+    #[cfg(target_env = "ohos")]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        use std::os::unix::fs::PermissionsExt;
+        let out_path = std::path::Path::new(std::ffi::OsStr::from_bytes(out));
+        let _ = bun_sys::ensure_signed_inplace(out_path);
+        // The signing tool writes its output afresh; restore the exec bit.
+        let _ = std::fs::set_permissions(out_path, std::fs::Permissions::from_mode(0o755));
+    }
+
     Ok(describe_summary(&summary))
 }
 

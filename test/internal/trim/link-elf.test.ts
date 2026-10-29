@@ -1,6 +1,6 @@
 import { trimExecutable } from "bun:internal-for-testing";
 import { describe, expect, setDefaultTimeout, test } from "bun:test";
-import { tempDir } from "harness";
+import { isOhos, tempDir } from "harness";
 import { closeSync, existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { constants } from "node:os";
 import { join } from "node:path";
@@ -134,9 +134,12 @@ describeLink("a trimmable link", () => {
     expectRetained(result, ["main", "retained", "Bun__abortForRemovedFeature"]);
     expectCleanRuns(result);
     expect(summary.removedBytes).toBeGreaterThan(100_000);
-    expect(summary.fileBytesSaved).toBeGreaterThanOrEqual(128 * 1024);
-    const sizeOf = (name: string) => statSync(join(folder, name)).size;
-    expect(sizeOf("program") - sizeOf("trimmed")).toBe(summary.fileBytesSaved);
+    // OHOS pads segments to 64 KiB, so the removed bytes need not shrink the file.
+    if (!isOhos) {
+      expect(summary.fileBytesSaved).toBeGreaterThanOrEqual(128 * 1024);
+      const sizeOf = (name: string) => statSync(join(folder, name)).size;
+      expect(sizeOf("program") - sizeOf("trimmed")).toBe(summary.fileBytesSaved);
+    }
     expect(await exitCodeOf(folder, "trimmed", guardedArguments)).toBe(70);
     expect(await exitCodeOf(folder, "program", guardedArguments)).toBeLessThan(64);
   });

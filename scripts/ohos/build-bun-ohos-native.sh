@@ -549,6 +549,7 @@ phase_build() {
       --arch=aarch64 \
       --webkit=local \
       --lto=off \
+      --trimmable=on \
       --canary="${CANARY:-off}" \
       --cache-dir="$cache_dir" \
       --ohos-sdk-root="$OHOS_SDK" \

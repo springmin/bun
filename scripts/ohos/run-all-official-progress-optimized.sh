@@ -178,7 +178,7 @@ echo "Bun: $($BUN_EXE --version 2>/dev/null)"
 echo "Date: $(date)"
 echo "Parallel: $PARALLEL | Timeout: ${TMOUT}s (bundler: ${TMOUT_BUNDLER}s) | Retries: ${RETRIES}"
 echo "VendoredNodeTests: $([ "$SKIP_VENDORED_NODE_TESTS" = "1" ] && echo "EXCLUDED (original scope only)" || echo "INCLUDED (full upstream isTest)")"
-echo "AOT: INCLUDED (OHOS anonymous-code fallback); TrimLink: EXCLUDED (trim linker not ported)"
+echo "AOT: INCLUDED; TrimLink: INCLUDED (ELF); TrimMachO/TrimBehavior: EXCLUDED (feature model)"
 echo ""
 } | tee "$REPORT" >/dev/null
 
@@ -217,7 +217,12 @@ const isHidden = p => /node_modules|node\.js/.test(dirname(p).replaceAll("\\", "
 // AOT standalone executables and the trim/link tests are upstream features
 // whose generated executables OHOS does not run yet; excluded like the
 // vendored Node tests so they do not flood the report.
-const isUnsupportedOnOhos = p => p.replaceAll("\\", "/").startsWith("test/internal/trim/link-");
+const isUnsupportedOnOhos = p => {
+  const u = p.replaceAll("\\", "/");
+  // Mach-O links and the trim feature-removal semantics are not ported; the
+  // trim linker itself runs (link-elf* and link-elf-reach*).
+  return u.startsWith("test/internal/trim/link-macho") || u.startsWith("test/bundler/compile-trim-");
+};
 const tests = [];
 const walk = (cwd, rel) => {
   for (const e of readdirSync(join(cwd, rel), { withFileTypes: true })) {
