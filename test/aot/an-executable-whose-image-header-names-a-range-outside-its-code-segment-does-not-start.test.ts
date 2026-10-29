@@ -132,11 +132,15 @@ function loadFromPageBefore(file: Buffer, path: string, offset: number) {
 
 const results: Record<string, SpawnResult> = {};
 let folder = "";
-afterAll(() => {
-  if (folder) rmSync(folder, { recursive: true, force: true });
-});
+// The tests are skipped on OHOS (an edited copy loses its signature); do not
+// register the setup that edits the copy either.
+if (!isOhos)
+  afterAll(() => {
+    if (folder) rmSync(folder, { recursive: true, force: true });
+  });
 
-beforeAll(async () => {
+if (!isOhos)
+  beforeAll(async () => {
   folder = String(tempDir("aot-code-range", { "entry.ts": program }));
   const executable = join(folder, isWindows ? "out.exe" : "out");
   built(

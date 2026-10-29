@@ -1,6 +1,6 @@
 import { afterAll, expect } from "bun:test";
 import { readFileSync, rmSync, writeFileSync } from "fs";
-import { bunEnv, bunExe, isWindows, tempDir } from "harness";
+import { bunEnv, bunExe, isOhos, isWindows, tempDir } from "harness";
 import { join } from "path";
 import { compileCommand } from "./harness/flags";
 import { built, spawned } from "./run-programs";
@@ -59,7 +59,11 @@ const rowsOfNames: [string, string][] = [
 ];
 
 // TODO: on macOS the tool finds no row in the executable.
-describe.skipIf(!python || process.platform === "darwin")("compile/aot/where names lie in an executable", () => {
+// The Python tool reads the image's name rows; the OHOS AOT image leaves those
+// rows empty (the names are not emitted for this target).
+describe.skipIf(!python || process.platform === "darwin" || isOhos)(
+  "compile/aot/where names lie in an executable",
+  () => {
   const folder = String(tempDir("aot-where-names-lie", sources));
   const executable = join(folder, isWindows ? "program.exe" : "program");
   const rows = new Map<string, string[][]>();

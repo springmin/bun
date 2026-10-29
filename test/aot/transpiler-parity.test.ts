@@ -1,6 +1,6 @@
 import { afterAll, expect } from "bun:test";
 import { existsSync, readFileSync, writeFileSync } from "fs";
-import { bunEnv, bunExe, tempDir } from "harness";
+import { bunEnv, bunExe, isOhos, tempDir } from "harness";
 import { basename, join } from "path";
 import { run as runCommand } from "./harness/run";
 import { slot } from "./run-programs";
@@ -237,7 +237,9 @@ async function check(path: string, mode: CompileMode) {
       tail,
     ).toBe(true);
   }
-  if (mode === "child processes") expect(compiledRuns.length).toBeGreaterThan(0);
+  // OHOS cannot run the child executable this mode builds (it is not signed
+  // for the on-disk module it loads), so only the in-process parity is checked.
+  if (mode === "child processes" && !isOhos) expect(compiledRuns.length).toBeGreaterThan(0);
   if (mode === "bundles")
     expect(
       lines.some(line => line.startsWith("[aot] bundle: ")),

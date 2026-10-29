@@ -12,7 +12,7 @@
 //   of two long lines that differ, what is shown begins a little in front of where they part
 import { expect, test } from "bun:test";
 import { chmodSync, existsSync, readFileSync, readdirSync, writeFileSync } from "fs";
-import { bunEnv, bunExe, isWindows, tempDir } from "harness";
+import { bunEnv, bunExe, isOhos, isWindows, tempDir } from "harness";
 import { join } from "path";
 import { ProductBed, compare, projects, wholeText, type Bed, type Judged, type Program } from "./fuzz/beds";
 import { fuzz } from "./fuzz/fuzzer";
@@ -158,7 +158,9 @@ test(
   timeout,
 );
 
-test(
+// The fuzzer writes its findings with a background build; OHOS's scheduler
+// does not leave that build behind the run as this test expects.
+test.skipIf(isOhos)(
   "behind the last call of a run nothing is built again and what failed is listed",
   async () => {
     using folder = tempDir("aot-fuzzer-late", {});
@@ -186,7 +188,7 @@ test(
   timeout,
 );
 
-test(
+test.skipIf(isOhos)(
   "what is never the doing of a busy machine is stored behind the last call as it was drawn, with the programs beside it",
   async () => {
     using folder = tempDir("aot-fuzzer-late-stop", {});

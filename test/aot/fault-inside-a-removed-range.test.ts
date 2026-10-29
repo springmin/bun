@@ -1,5 +1,5 @@
 import { expect } from "bun:test";
-import { bunEnv, bunExe, isLinux, isMacOS, tempDir } from "harness";
+import { bunEnv, bunExe, isLinux, isMacOS, isOhos, tempDir } from "harness";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { locksEnvironment } from "./hardened";
@@ -70,7 +70,10 @@ function middleOfLargestHole(executable: string) {
 
 const offsetText = (offset: number) => (offset < 0 ? "-0x" : "+0x") + Math.abs(offset).toString(16);
 
-describe.skipIf(!isLinux && !isMacOS)("a fault at an address inside a removed range", () => {
+// The program maps a fixed private anonymous page at the hole with glibc's
+// mmap and asks the fault handler to classify the address; OHOS's mapping and
+// signal delivery do not follow that Linux/macOS model.
+describe.skipIf((!isLinux && !isMacOS) || isOhos)("a fault at an address inside a removed range", () => {
   const wanted: Record<string, unknown> = {
     "call": { stdout: "started\n", saysRemoved: true, exits70: true },
     "read": { stdout: "started\n", saysRemoved: false, exits70: false },
