@@ -1,5 +1,5 @@
 import { expect } from "bun:test";
-import { bunEnv, bunExe, isASAN, isWindows, tempDir } from "harness";
+import { bunEnv, bunExe, isASAN, isOhos, isWindows, tempDir } from "harness";
 import {
   chmodSync,
   chownSync,
@@ -452,7 +452,8 @@ Bun.file(__filename).text().then(text => console.log(text.split("\\n")[0]));
   expect(await run(String(dir), ["./built.exe"], { ...bunEnv, BUN_JSC_crashIfInterpreterIsUsed: "1" })).toEqual(plain);
 }, 120_000);
 
-test("embedded folders do not appear at the file system root", async () => {
+// The program lists "/", which the OHOS sandbox refuses (EACCES).
+test.skipIf(isOhos)("embedded folders do not appear at the file system root", async () => {
   using dir = tempDir("aot-in-place-inner-folders", {
     "app/main.cjs": `const fs = require("node:fs");
 const root = fs.statSync("/");
@@ -672,7 +673,9 @@ async function buildAddonWithLibrary(dir: string, flags = ["--compile-in-place"]
   return plain;
 }
 
-test.skipIf(!systemCC).each([
+// The addon links a library beside it; OHOS's loader does not search that
+// folder, and it refuses the test's unsigned `.so` in any case.
+test.skipIf(!systemCC || isOhos).each([
   ["in place", ["--compile-in-place"]],
   ["under its own root", []],
 ])(
@@ -702,7 +705,7 @@ const untrustedFolderSetups: Record<string, (folder: string) => boolean> = {
     isWindows ? icacls(folder, "/setowner", "*S-1-5-32-546") : tryChangeOwner(folder),
 };
 
-test.skipIf(!systemCC).each(Object.keys(untrustedFolderSetups))(
+test.skipIf(!systemCC || isOhos).each(Object.keys(untrustedFolderSetups))(
   "extracted libraries are not loaded from a folder %s",
   async setup => {
     using dir = tempDir("aot-in-place-planted-library", { ...addonWithLibrary, "temporary/.keep": "" });

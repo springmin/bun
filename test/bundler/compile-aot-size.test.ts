@@ -1,6 +1,6 @@
 import { readTrimTable } from "bun:internal-for-testing";
 import { describe, expect, test } from "bun:test";
-import { bunEnv, bunExe, isGlibc, isLinux, isWindows } from "harness";
+import { bunEnv, bunExe, isGlibc, isLinux, isOhos, isWindows } from "harness";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { spawned, unsupported } from "../aot/run-programs";
@@ -125,7 +125,9 @@ describe.skipIf(!canTrim)("bun build --compile --aot", () => {
       const executable = readFileSync(hello);
       expect(findToolStrings(bun)).toEqual(allToolStrings);
       expect(findToolStrings(executable)).toEqual([]);
-      if (isLinux) expect(countMappedBytes(executable) / countMappedBytes(bun)).toBeLessThan(0.53);
+      // The OHOS executable carries libc++_shared, its signature and a wider
+      // ELF layout, so the Linux ratio does not hold.
+      if (isLinux && !isOhos) expect(countMappedBytes(executable) / countMappedBytes(bun)).toBeLessThan(0.53);
     }, 600_000);
 
     test.skipIf(!isGlibc || process.arch !== "x64" || flags.length === 0)(

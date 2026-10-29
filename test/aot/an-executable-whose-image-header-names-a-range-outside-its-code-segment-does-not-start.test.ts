@@ -5,6 +5,7 @@ import {
   bunExe,
   isArm64,
   isLinux,
+  isOhos,
   isWindows,
   readElf64ProgramHeaders,
   tempDirWithBunTypes as tempDir,
@@ -180,7 +181,11 @@ const refusedWith = (sentence: string) => ({
   signal: null,
 });
 
-describe("an executable whose image header names a range outside its code segment does not start", () => {
+// Every case edits a copy of the executable; OHOS refuses to execute a copy
+// whose `.codesign` section no longer matches its bytes.
+describe.skipIf(isOhos)(
+  "an executable whose image header names a range outside its code segment does not start",
+  () => {
   test("an unedited copy runs", () => {
     expect(results.unedited).toEqual({ stdout: "answer 4.5 true\n", stderr: "", exitCode: 0, signal: null });
   });

@@ -1,5 +1,5 @@
 import { expect } from "bun:test";
-import { bunEnv, bunExe, isMusl, isWindows, tempDir } from "harness";
+import { bunEnv, bunExe, isMusl, isOhos, isWindows, tempDir } from "harness";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { slot, spawned } from "../run-programs";
@@ -22,7 +22,11 @@ const BANNER_WITH_CODE = "--banner=globalThis.fromBanner = 1;";
 const BANNER_MESSAGE = "--aot does not support --banner with code";
 const otherTarget = process.platform === "linux" ? "bun-darwin-x64" : "bun-linux-x64";
 const hostSystem = { linux: "linux", darwin: "darwin", win32: "windows" }[process.platform as string];
-const hostTarget = hostSystem && `bun-${hostSystem}-${process.arch}${isMusl ? "-musl" : ""}`;
+// OHOS runs Bun's linux/arm64 build. Its loader is musl, but the AOT compiler
+// names the host `bun-linux-arm64`, so the `-musl` spellings are cross targets.
+const hostTarget = isOhos
+  ? `bun-linux-${process.arch}`
+  : hostSystem && `bun-${hostSystem}-${process.arch}${isMusl ? "-musl" : ""}`;
 
 const programPath = (folder: string) => join(folder, exe("program"));
 

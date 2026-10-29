@@ -1,6 +1,6 @@
 import { spawn } from "bun";
 import { expect, setDefaultTimeout } from "bun:test";
-import { bunEnv, bunExe, isLinux, tempDir } from "harness";
+import { bunEnv, bunExe, isLinux, isOhos, tempDir } from "harness";
 import { readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "../aot/supported";
@@ -69,7 +69,8 @@ async function ran(env: Record<string, string>) {
   return { path: `/tmp/perf-${pid}.map`, maps };
 }
 
-test.if(isLinux)("BUN_JSC_useAOTPerfMap=1 writes a map that perf reads: names, in anonymous memory", async () => {
+// OHOS has no /tmp and no perf reader; the map's path and format are Linux's.
+test.if(isLinux && !isOhos)("BUN_JSC_useAOTPerfMap=1 writes a map that perf reads: names, in anonymous memory", async () => {
   const { path, maps } = await ran({ BUN_JSC_useAOTPerfMap: "1" });
   const map = readFileSync(path, "utf8");
   rmSync(path);

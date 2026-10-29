@@ -98,6 +98,15 @@ pub fn decide(input: &TrimInput<'_>, edges: &FeatureEdges) -> Decision {
         }
     }
 
+    // OHOS: the AOT image does not compile the builtins that startup links
+    // from source (Function.prototype.apply and call). With the source gone,
+    // that lookup parses an empty string, and the libc++ used on OHOS traps
+    // instead of failing. Keeping the source lets startup link them; a
+    // program only reaches it when it evaluates text, which keeps the same
+    // feature through its own use.
+    #[cfg(target_env = "ohos")]
+    unused.subtract(&FeatureSet::from_features(&[Feature::BuiltinSourceText]));
+
     let mut present = FeatureSet::all();
     present.subtract(&unused);
 

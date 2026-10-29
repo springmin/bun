@@ -1,6 +1,6 @@
 import { expect } from "bun:test";
 import { existsSync, statSync } from "fs";
-import { bunEnv, bunExe, isWindows, tempDirWithBunTypes as tempDir } from "harness";
+import { bunEnv, bunExe, isOhos, isWindows, tempDirWithBunTypes as tempDir } from "harness";
 import { join } from "path";
 import { built, slot, spawned } from "../run-programs";
 import { describe, test } from "../supported";
@@ -204,7 +204,9 @@ describe.concurrent("the hidden --aot- flags of a build", () => {
     300_000,
   );
 
-  test.skipIf(!nm)(
+  // OHOS signing rewrites the ELF after the symbol tail is written, so the
+  // symbols' `.strtab` is zeroed.
+  test.skipIf(!nm || isOhos)(
     "--aot-symbols adds a symbol for a compiled function",
     () =>
       slot(async () => {

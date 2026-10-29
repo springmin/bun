@@ -1,5 +1,5 @@
 import { expect } from "bun:test";
-import { bunEnv, bunExe, isASAN, isGlibc, isLinux, readElf64ProgramHeaders, tempDir } from "harness";
+import { bunEnv, bunExe, isASAN, isGlibc, isLinux, isOhos, readElf64ProgramHeaders, tempDir } from "harness";
 import { chmodSync, readFileSync } from "node:fs";
 import { release } from "node:os";
 import { join } from "node:path";
@@ -102,7 +102,7 @@ function mappingsOf(output: string) {
     }));
 }
 
-test.skipIf(!isLinux)(
+test.skipIf(!isLinux || isOhos)(
   "executable pages are file-backed and never writable",
   async () => {
     using dir = tempDir("aot-code-mapping", { "program.ts": program });
@@ -407,7 +407,7 @@ console.log(libc.symbols.abs(-5), calls > 0);
   120_000,
 );
 
-test.skipIf(!isLinux)("Bun has room for the program headers of an executable", async () => {
+test.skipIf(!isLinux || isOhos)("Bun has room for the program headers of an executable", async () => {
   const [note, descriptorSizeOffset, noteHeaderBytes] = [4, 4, 16];
   const rooms = readElf64ProgramHeaders(bunExe()).filter(header => header.type === note && header.align === 8n);
   expect(rooms.map(room => room.filesz)).toEqual([4104n]);
@@ -512,7 +512,7 @@ test.skipIf(!isLinux || refusesExecuteOnlyStart)(
   120_000,
 );
 
-test.skipIf(!isLinux)(
+test.skipIf(!isLinux || isOhos)(
   "an executable that the dynamic loader is started with runs its own code, not bytes of the loader's file",
   async () => {
     using dir = tempDir("aot-code-mapping-by-the-loader", { "program.ts": program });

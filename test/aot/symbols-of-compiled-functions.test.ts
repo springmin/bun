@@ -1,7 +1,7 @@
 // `bun build --compile --aot --aot-symbols` puts the functions of the program into the symbol table of a Linux executable, beside the symbols
 // that Bun has there itself, so that gdb and perf show them by name. The file is read here, with no tool.
 import { expect, setDefaultTimeout } from "bun:test";
-import { bunEnv, bunExe, isLinux, tempDir } from "harness";
+import { bunEnv, bunExe, isLinux, isOhos, tempDir } from "harness";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { run } from "./harness/run";
@@ -81,7 +81,9 @@ async function build(cwd: string, outfile: string, ...flags: string[]) {
   return join(cwd, outfile);
 }
 
-describe.skipIf(!isLinux)("--aot-symbols", () => {
+// OHOS signing rewrites the ELF after the symbol tail is written, so the
+// `.strtab` the symbols point into is zeroed.
+describe.skipIf(!isLinux || isOhos)("--aot-symbols", () => {
   test("the functions of the program join the symbols that Bun has", async () => {
     using dir = tempDir("aot-symbols", { "main.ts": main });
     const [without, withThem] = [

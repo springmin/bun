@@ -1,5 +1,5 @@
 import { expect } from "bun:test";
-import { bunEnv, bunExe, isASAN, isGlibc, isLinux, tempDir } from "harness";
+import { bunEnv, bunExe, isASAN, isGlibc, isLinux, isOhos, tempDir } from "harness";
 import { join } from "node:path";
 import { readElfFile, stackMayBeRead, stackMayBeWritten, type ElfFile } from "./elf-file";
 import { isHardened, locksEnvironment } from "./hardened";
@@ -143,8 +143,12 @@ async function withCompiledProgram(
 
 const canaryLoad = /\x64[\x48\x4c]\x8b[\x04\x0c\x14\x1c\x24\x2c\x34\x3c]\x25\x28\x00\x00\x00/g;
 const pageProbe = /\x48\x81\xec\x00\x10\x00\x00\x48\xc7\x04\x24\x00\x00\x00\x00/g;
-const systemLibrary =
-  /^(libc|libm|libdl|libpthread|ld-linux-[a-z0-9-]+|libc\.musl-[a-z0-9_]+|libstdc\+\+|libgcc_s|libicu(data|i18n|uc))\.so(\.\d+)*$/;
+const systemLibrary = new RegExp(
+  "^(libc|libm|libdl|libpthread|ld-linux-[a-z0-9-]+|libc\\.musl-[a-z0-9_]+|libstdc\\+\\+|libgcc_s|libicu(data|i18n|uc)" +
+    // OHOS ships the C++ runtime as a shared library that every executable needs.
+    (isOhos ? "|libc\\+\\+_shared" : "") +
+    ")\\.so(\\.\\d+)*$",
+);
 
 describe.skipIf(!isLinux)("every executable", () => {
   test("has a stack that cannot be executed", async () => {

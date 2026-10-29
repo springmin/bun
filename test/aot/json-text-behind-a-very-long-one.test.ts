@@ -1,7 +1,7 @@
 // JSON.stringify remembers how long its last long text was and asks for as much memory at once for the next one.
 // Where that much is no longer to be had, a far shorter text is still written by the engine's fast path, in what it needs.
 import { expect } from "bun:test";
-import { bunEnv, bunExe, isASAN, isLinux, tempDir } from "harness";
+import { bunEnv, bunExe, isASAN, isLinux, isOhos, tempDir } from "harness";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { built, spawned } from "./run-programs";
@@ -42,7 +42,8 @@ console.log(longText.length > 50_000_000, shortText.length > 200_000, pieces > 0
 
 describe("compile/aot/json-text-behind-a-very-long-one", () => {
   // A limit on address space is how the test makes memory scarce. AddressSanitizer reserves more than any such limit allows.
-  test.skipIf(!isLinux || isASAN)(
+  // The test makes memory scarce with `ulimit -v`, which OHOS does not enforce.
+  test.skipIf(!isLinux || isASAN || isOhos)(
     "short texts stay off the slow path when the memory that the long one took is not to be had again",
     async () => {
       using dir = tempDir("aot-json-text-behind-a-very-long-one", { "main.ts": program });

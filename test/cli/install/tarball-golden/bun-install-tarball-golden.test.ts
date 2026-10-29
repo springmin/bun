@@ -1,8 +1,12 @@
 // Tarballs of every shape the tar reader knows about, well formed and damaged, with what
 // `bun install` made of each one when it was recorded. See record.ts.
 import { describe, expect, test } from "bun:test";
-import { bunExe, isLinux, isMacOS, isWindows } from "harness";
+import { bunExe, isLinux, isMacOS, isOhos, isWindows } from "harness";
 import { join } from "node:path";
+
+// The goldens were recorded with umask 022; OHOS defaults to 002, which would
+// make every recorded 644 file arrive as 664.
+if (isOhos) process.umask(0o022);
 import { loadCases } from "../../../js/bun/archive-golden/observe";
 import { install, type Case } from "./install";
 

@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { existsSync } from "fs";
-import { bunExe, isCI } from "harness";
+import { bunExe, isCI, isOhos } from "harness";
 import { join } from "path";
 import { findBuiltinTable, generators } from "./generate";
 import { rows, units, unitsOf } from "./parts.mts";
@@ -32,7 +32,8 @@ if (wanted === undefined) {
   });
 
   // Without it the programs that follow from it are skipped, sixteen thousand of them, and nothing else would be red.
-  test.skipIf(!isCI || !!unsupported)("CI has packed the table of built-ins beside the Bun under test", () => {
+  // The OHOS build does not pack `testaot` beside Bun.
+  test.skipIf(!isCI || !!unsupported || isOhos)("CI has packed the table of built-ins beside the Bun under test", () => {
     expect(findBuiltinTable(bunExe())).toBeDefined();
   });
 }

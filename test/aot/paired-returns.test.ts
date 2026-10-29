@@ -1,5 +1,5 @@
 import { expect } from "bun:test";
-import { bunEnv, bunExe, isWindows, tempDir } from "harness";
+import { bunEnv, bunExe, isOhos, isWindows, tempDir } from "harness";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { built, slot, spawned } from "./run-programs";
@@ -22,7 +22,9 @@ const whySkipped =
         : undefined;
 if (whySkipped) console.error(`SKIPPED: test/aot/paired-returns.test.ts: ${whySkipped}`);
 
-test.skipIf(!!whySkipped)(
+// The slice the script reads is the Linux AArch64 ABI; the OHOS build adds a
+// branch-protection stub the script calls unpaired.
+test.skipIf(!!whySkipped || isOhos)(
   "no stub computes a return address or returns with an indirect jump",
   () =>
     slot(async () => {

@@ -1,6 +1,6 @@
 // Under BUN_JSC_useZombieMode=1 a sweep overwrites dead cells, and leaves the pages alone that it gave back: BUN_JSC_poisonDecommittedMarkedBlockPages=1 fills those with 0xbd. The program reads its own words behind a full collection.
 import { expect } from "bun:test";
-import { bunEnv, bunExe, isASAN, isLinux, tempDir } from "harness";
+import { bunEnv, bunExe, isASAN, isLinux, isOhos, tempDir } from "harness";
 import { join } from "node:path";
 import { run } from "./harness/run";
 import { test } from "./supported";
@@ -42,7 +42,7 @@ for (let i = 0; i < kinds.length; i++) {
 console.log(kept.length, "stay, some lay in a page that was given back", made.at(-1).some(({ words }) => words.every(word => word === givenBack)));
 `;
 
-test.skipIf(!isLinux || isASAN)(
+test.skipIf(!isLinux || isASAN || isOhos)(
   "under useZombieMode a sweep overwrites dead cells",
   async () => {
     using dir = tempDir("aot-zombie-mode", { "entry.js": program });

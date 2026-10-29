@@ -5,8 +5,9 @@ import { join } from "path";
 
 const systemCC = process.env.CC || Bun.which("cc") || Bun.which("clang") || Bun.which("gcc");
 
-// TinyCC's setjmp/longjmp error handling conflicts with ASan.
-test.skipIf(isWindows || isASAN || !systemCC)(
+// TinyCC's setjmp/longjmp error handling conflicts with ASan. OHOS refuses to
+// dlopen the test's freshly linked, unsigned shared library.
+test.skipIf(isWindows || isASAN || isOhos || !systemCC)(
   "C compiled by cc() and a shared library release and resize each other's blocks",
   async () => {
     using dir = tempDir("cc-shares-blocks", {

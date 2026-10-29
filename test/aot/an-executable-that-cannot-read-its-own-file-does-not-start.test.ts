@@ -1,5 +1,5 @@
 import { expect } from "bun:test";
-import { bunEnv, bunExe, isLinux, libcPathForDlopen, tempDir } from "harness";
+import { bunEnv, bunExe, isLinux, isOhos, libcPathForDlopen, tempDir } from "harness";
 import { chmodSync, copyFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { refusesExecuteOnlyStart } from "./execute-only-start";
@@ -104,7 +104,13 @@ describe.skipIf(!isLinux)("an executable", () => {
 
   test("that can read its own file starts, serves and runs a worker without a call of mremap()", async () => {
     expect(await start(mark => [executable, mark])).toEqual(started);
-    expect(await start(mark => [bunExe(), join(String(directory), "launcher.ts"), executable, mark])).toEqual(started);
+    // The launcher's filter kills the process at mremap(2). OHOS's loader uses
+    // it while starting an executable, so the filtered run cannot prove the
+    // executable itself avoids it.
+    if (!isOhos)
+      expect(await start(mark => [bunExe(), join(String(directory), "launcher.ts"), executable, mark])).toEqual(
+        started,
+      );
   }, 60_000);
 
   describe.skipIf(!refusesExecuteOnlyStart || readsEveryFile)("of a build with --execute-only-start=off", () => {

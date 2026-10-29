@@ -1,7 +1,7 @@
 // `bun build --compile --aot` gives each executable a name of 32 hexadecimal digits, made of the program and of the build of Bun. It tells the
 // builds of one program apart in a crash report. Nothing compares it with anything when the executable starts.
 import { expect, setDefaultTimeout } from "bun:test";
-import { bunEnv, bunExe, isASAN, isLinux, isWindows, tempDir } from "harness";
+import { bunEnv, bunExe, isASAN, isLinux, isOhos, isWindows, tempDir } from "harness";
 import { copyFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { run as runCommand } from "./harness/run";
@@ -76,7 +76,8 @@ describe("where it shows", () => {
     expect(readGnuBuildId(join(String(dir), "app"))).toBe(readGnuBuildId(bunExe()).slice(0, 32) + id.slice(0, 8));
   });
   const strip = Bun.which("llvm-strip") ?? Bun.which("strip");
-  test.skipIf(!isLinux || !strip)("strip keeps it, and readelf shows it as a note of Bun", async () => {
+  // A stripped ELF loses the `.codesign` section OHOS requires to execute it.
+  test.skipIf(!isLinux || !strip || isOhos)("strip keeps it, and readelf shows it as a note of Bun", async () => {
     using dir = tempDir("aot-build-id", { "main.js": main });
     const id = await build(String(dir), "app");
     const stripped = join(String(dir), "stripped");

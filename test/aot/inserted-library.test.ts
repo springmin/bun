@@ -1,5 +1,5 @@
 import { expect } from "bun:test";
-import { bunEnv, bunExe, isLinux, isMacOS, tempDir } from "harness";
+import { bunEnv, bunExe, isLinux, isMacOS, isOhos, tempDir } from "harness";
 import { join, resolve } from "node:path";
 import { run } from "./harness/run";
 import { test } from "./supported";
@@ -44,7 +44,9 @@ function emptySharedObject() {
   return file;
 }
 
-test.skipIf(!isMacOS && !isLinux)(
+// The fixture builds a bare ELF shared object; OHOS refuses to load one
+// without a `.codesign` section, so LD_PRELOAD never maps it.
+test.skipIf((!isMacOS && !isLinux) || isOhos)(
   "an executable runs its compiled code with libraries inserted by the loader",
   async () => {
     using dir = tempDir("aot-inserted-library", {

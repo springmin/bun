@@ -11,7 +11,7 @@
 //   $TESTAOT native <filter> --part=2/4                           every fourth of the native tests whose name holds the filter, from the second on
 import { expect, test } from "bun:test";
 import { existsSync } from "fs";
-import { isASAN, isCI, isWindows, tempDir } from "harness";
+import { isASAN, isCI, isOhos, isWindows, tempDir } from "harness";
 import { join } from "path";
 import {
   run,
@@ -32,7 +32,8 @@ for (const why of new Set([whySkipped, whyEngineTestsSkipped, whyNativeTestsSkip
 
 // 89 test files of this folder skip themselves where a tool is missing: collector-stress/, heat/, bad-time/, generated-code,
 // and this one. CI packs the tools beside Bun; AOT_TOOLS=required says the same of any other place.
-test.skipIf(isWindows || (!isCI && process.env.AOT_TOOLS !== "required"))("no tool is missing", () => {
+// The OHOS build does not pack `testaot` or `jsc` beside Bun.
+test.skipIf(isWindows || isOhos || (!isCI && process.env.AOT_TOOLS !== "required"))("no tool is missing", () => {
   expect([whyNativeTestsSkipped, whyShellSkipped, scriptSkipReason].filter(why => why !== undefined)).toEqual([]);
 });
 
