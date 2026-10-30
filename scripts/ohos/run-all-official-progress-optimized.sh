@@ -251,6 +251,13 @@ printf '\n' >> "$PDIR/test_files.txt" 2>/dev/null || true
 grep -v '^$' "$PDIR/test_files.txt" > "$PDIR/test_files.txt.tmp"
 mv "$PDIR/test_files.txt.tmp" "$PDIR/test_files.txt"
 
+# Optional resume: an exact list of already-completed files (one per line).
+# Used after an interrupted run so the next pass does not repeat them.
+if [ -n "${SKIP_LIST:-}" ] && [ -s "$SKIP_LIST" ]; then
+  grep -v -F -x -f "$SKIP_LIST" "$PDIR/test_files.txt" > "$PDIR/test_files.txt.resume" || true
+  mv "$PDIR/test_files.txt.resume" "$PDIR/test_files.txt"
+fi
+
 TOTAL_FILES=$(wc -l < "$PDIR/test_files.txt")
 echo "Found $TOTAL_FILES test files, running $PARALLEL parallel workers (TIMEOUT=${TMOUT}s, RETRIES=${RETRIES})"
 echo "Found $TOTAL_FILES test files" >> "$REPORT"
@@ -938,6 +945,7 @@ while IFS= read -r f; do
       # 异常残留：running 存在但 subshell 已死 → 清理（不写 timeout）
       if [ -f "$PDIR/running_$_j" ] && [ ! -f "$PDIR/result_$_j" ]; then
         _pid=$(cat "$PDIR/pid_$_j" 2>/dev/null || echo 0)
+        _pid=${_pid:-0}
         if [ "$_pid" -gt 0 ] && ! kill -0 "$_pid" 2>/dev/null; then
           # subshell 刚退出时 result 可能还在写入收尾（快速测试的
           # wait/清理阶段）。短暂轮询确认 result 是否出现，避免把
@@ -960,6 +968,7 @@ while IFS= read -r f; do
       if [ -f "$PDIR/running_$_j" ] && [ ! -f "$PDIR/result_$_j" ]; then
         _wt=$(cat "$PDIR/wt_$_j" 2>/dev/null || echo $TMOUT)
         _pid=$(cat "$PDIR/pid_$_j" 2>/dev/null || echo 0)
+        _pid=${_pid:-0}
         if [ "$_pid" -gt 0 ]; then
           _elapsed=$(ps -o etimes= -p "$_pid" 2>/dev/null || echo 0)
           _max=$((_wt * 2 + 60))    # 2x watchdog + 60s 余量
@@ -1002,6 +1011,7 @@ while true; do
     [ -f "$PDIR/result_$_idx" ] || continue
     [ -f "$PDIR/running_$_idx" ] || continue
     _pid=$(cat "$_pf" 2>/dev/null || echo 0)
+    _pid=${_pid:-0}
     kill -0 "$_pid" 2>/dev/null && continue   # PID 还活着 → 跳过
     # PID 死了但 running 还在 → 清理
     rm -f "$PDIR/running_$_idx" "$PDIR/pid_$_idx" "$PDIR/wt_$_idx" 2>/dev/null
@@ -1016,6 +1026,7 @@ while true; do
     [ -f "$PDIR/result_$_idx" ] && continue
     [ -f "$PDIR/running_$_idx" ] || continue
     _pid=$(cat "$_pf" 2>/dev/null || echo 0)
+    _pid=${_pid:-0}
     if [ "$_pid" -gt 0 ] 2>/dev/null && ! kill -0 "$_pid" 2>/dev/null; then
       _zombie_confirm=1
       for _zc in 1 2 3 4 5; do
