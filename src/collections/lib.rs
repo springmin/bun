@@ -9,7 +9,7 @@
     core_intrinsics
 )]
 #![cfg_attr(target_env = "ohos", feature(box_vec_non_null))]
-#![allow(incomplete_features, internal_features)]
+#![allow(incomplete_features, internal_features, unused_features)]
 #![warn(unused_must_use)]
 
 pub mod hive_array;
