@@ -315,22 +315,6 @@ impl DeferredSymlink {
 
 /// `is_symlink_target_safe` takes a symlink to be where its path says, so it is asked again about one that symlinks lead to.
 #[cfg(unix)]
-/// `bun_sys::symlinkat`, retried once on OHOS SELinux's intermittent EPERM/EACCES;
-/// parent dirs are pre-created by `create_deferred_symlinks`'s pre-pass, so no
-/// lazy `mkdir` is needed before the retry.
-fn symlinkat_ohos_retry(target: &ZStr, dirfd: Fd, dest: &ZStr) -> bun_sys::Maybe<()> {
-    let result = bun_sys::symlinkat(target, dirfd, dest);
-    if cfg!(target_env = "ohos") {
-        if let Err(e) = &result {
-            if e.get_errno() == bun_sys::E::EPERM || e.get_errno() == bun_sys::E::EACCES {
-                return bun_sys::symlinkat(target, dirfd, dest);
-            }
-        }
-    }
-    result
-}
-
-#[cfg(unix)]
 pub fn create_deferred_symlinks(dir_fd: Fd, symlinks: &[DeferredSymlink], log: bool) -> u32 {
     for symlink in symlinks {
         let dirname = bun_paths::dirname_simple(symlink.path.as_bytes());

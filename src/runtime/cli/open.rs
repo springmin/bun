@@ -121,8 +121,12 @@ impl Editor {
         buf: &'a mut PathBuffer,
         cwd: &[u8],
     ) -> Option<(Editor, &'a [u8])> {
+        // The OHOS nightly does not accept the Polonius-style reborrow: take a
+        // raw-ptr view so each iteration borrows the buffer only for its call.
+        let buf_ptr: *mut PathBuffer = buf;
         for &editor in &DEFAULT_PREFERENCE_LIST {
-            if let Some(path) = Self::find(env, editor, buf, cwd) {
+            // SAFETY: exclusive per-iteration reborrow; we return immediately on a hit.
+            if let Some(path) = Self::find(env, editor, unsafe { &mut *buf_ptr }, cwd) {
                 return Some((editor, path));
             }
         }

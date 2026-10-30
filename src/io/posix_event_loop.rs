@@ -1481,16 +1481,16 @@ mod epoll_rearm_watchdog {
                 due
             };
             for (watcher_fd, fd, events, userdata) in due {
-                let mut event = linux::epoll_event {
+                let event = linux::epoll_event {
                     events,
                     u64: userdata,
                 };
-                // SAFETY: redundant CTL_MOD from a second thread; epoll_ctl is
+                // Redundant CTL_MOD from a second thread; epoll_ctl is
                 // documented safe to call concurrently with epoll_wait/pwait
                 // on the same epfd from another thread. A failure here (most
                 // likely ENOENT: unregistered/closed between our snapshot and
                 // this call) is inert -- nothing to recover, the fd is gone.
-                let _ = unsafe { linux::epoll_ctl(watcher_fd, EPOLL::CTL_MOD, fd, &raw mut event) };
+                let _ = linux::epoll_ctl(watcher_fd, EPOLL::CTL_MOD, fd, Some(&event));
             }
 
             // ── force-drain pass ─────────────────────────────────────────

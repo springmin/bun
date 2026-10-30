@@ -3248,12 +3248,15 @@ impl RunCommand {
                     if first == b"-e" || first == b"--eval" {
                         ctx.passthrough.remove(0);
                         if !ctx.passthrough.is_empty() {
-                            ctx.runtime_options.eval.script = ctx.passthrough.remove(0);
+                            // The eval script is process-lifetime, like the CLI argv it came from.
+                            ctx.runtime_options.eval.script =
+                                Box::leak(ctx.passthrough.remove(0));
                         }
                     } else if first == b"-p" || first == b"--print" {
                         ctx.passthrough.remove(0);
                         if !ctx.passthrough.is_empty() {
-                            ctx.runtime_options.eval.script = ctx.passthrough.remove(0);
+                            ctx.runtime_options.eval.script =
+                                Box::leak(ctx.passthrough.remove(0));
                             ctx.runtime_options.eval.eval_and_print = true;
                         }
                     } else if first == b"--version" {

@@ -175,7 +175,11 @@ impl Snapshots {
 
         let name_hash: u64 = hash(&name_with_counter);
         if let Some(existing) = self.values.get(&name_hash) {
-            return Ok(Some(&**existing));
+            // SAFETY: the entry's Box<[u8]> lives as long as the map, and the
+            // returned borrow keeps `&mut self` borrowed, so no later insert
+            // (or map mutation) can run while the caller holds it.
+            let existing: *const [u8] = &**existing;
+            return Ok(Some(unsafe { &*existing }));
         }
 
         // doesn't exist. append to file bytes and add to hashmap.

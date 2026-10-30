@@ -1111,15 +1111,9 @@ impl Linux {
                                 revents: 0,
                             }];
                             if matches!(sys::posix::poll(&mut pfd, 2), Ok(rc) if rc > 0) {
-                                // SAFETY: `n < buf.0.len()`, so `buf.0[n..]` is a
-                                // non-empty writable tail of the boxed buffer.
-                                let rc2 = unsafe {
-                                    sys::linux::read(
-                                        fd.native(),
-                                        buf.0.as_mut_ptr().add(n),
-                                        buf.0.len() - n,
-                                    )
-                                };
+                                // `n < buf.0.len()`, so `buf.0[n..]` is a non-empty
+                                // writable tail of the boxed buffer.
+                                let rc2 = sys::linux::read(fd.native(), &mut buf.0[n..]);
                                 let got = match sys::get_errno(rc2) {
                                     E::SUCCESS => rc2 as usize,
                                     _ => 0,
