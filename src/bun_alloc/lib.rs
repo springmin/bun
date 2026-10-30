@@ -4,6 +4,9 @@
 #![allow(clippy::disallowed_types)]
 #![feature(arbitrary_self_types_pointers)]
 #![feature(allocator_api)]
+// The OHOS build pins nightly-2026-07-20, where `Box::into_non_null` is still
+// behind this gate; the upstream toolchain has it stabilized.
+#![cfg_attr(target_env = "ohos", feature(box_vec_non_null))]
 // `#[thread_local]` (vs the `thread_local!` macro) compiles to a bare
 // `__thread` slot — single `mov reg, fs:[OFFSET]` access, no `LocalKey`
 // `__getit()` wrapper, no lazy-init flag check, no dtor-registration probe.
