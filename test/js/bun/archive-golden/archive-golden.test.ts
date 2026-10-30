@@ -1,7 +1,7 @@
 // Archives of every shape the tar reader knows about, well formed and damaged, with what Bun.Archive
 // made of each one when it was recorded. See record.ts.
 import { describe, expect, test } from "bun:test";
-import { isLinux, isMacOS, isOhos, isPosix, isWindows, tempDir } from "harness";
+import { bunEnv, bunExe, isLinux, isMacOS, isPosix, isWindows, tempDir } from "harness";
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -38,9 +38,7 @@ describe("Bun.Archive reads archives the way it was recorded to", () => {
   });
 
   // The recorded trees have permission bits, links and names that Windows does not.
-  // OHOS: the recorded trees come from Linux; three malformed-name cases
-  // extract here where Linux refused (filesystem name validation differs).
-  test.skipIf(!isPosix || isOhos)("extract()", async () => {
+  test.skipIf(!isPosix)("extract()", async () => {
     using dir = tempDir("archive-golden", {});
     const umask = process.umask(0o022);
     try {
@@ -55,6 +53,26 @@ describe("Bun.Archive reads archives the way it was recorded to", () => {
     } finally {
       process.umask(umask);
     }
+  });
+
+  // Without openat2 or O_RESOLVE_BENEATH, other code has to come to the same results.
+  test.skipIf(!isPosix)("extract() when the kernel is not asked to resolve paths", async () => {
+    using dir = tempDir("archive-golden", {});
+    await using proc = Bun.spawn({
+      cmd: [bunExe(), join(import.meta.dir, "extract-fixture.ts"), String(dir)],
+      env: { ...bunEnv, BUN_FEATURE_FLAG_DISABLE_RESOLVE_BENEATH: "1" },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const [stdout, stderr, exitCode] = await Promise.all([proc.stdout.text(), proc.stderr.text(), proc.exited]);
+    expect({ stderr: exitCode ? stderr : "", exitCode }).toEqual({ stderr: "", exitCode: 0 });
+    const observed: string[] = JSON.parse(stdout);
+    const results = cases.map(c => ({
+      index: c.index,
+      expected: comparable(c.extract),
+      actual: comparable(observed[c.index]),
+    }));
+    expect(differences(results)).toBe("");
   });
 });
 

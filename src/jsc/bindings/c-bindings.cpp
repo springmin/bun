@@ -4,6 +4,7 @@
 #include <cstdlib>
 
 #if !OS(WINDOWS)
+#include <wtf/Threading.h>
 #include <wtf/WTFConfig.h>
 #include <sys/resource.h>
 #include <fcntl.h>
@@ -507,6 +508,7 @@ extern "C" void on_before_reload_process_posix([[maybe_unused]] bool closeInheri
 // after `threads_in_execve` and read before it.
 static std::atomic<int> threads_in_execve { 0 };
 static std::atomic<unsigned> execve_generation { 0 };
+#if defined(__OHOS__)
 // Two-phase (register-then-verify) mutual exclusion between clone() and the
 // execve(2) bookkeeping window: each side only proceeds when it has registered
 // itself and then re-observed the other side absent. A check followed directly
@@ -519,6 +521,7 @@ static std::atomic<int> threads_creating { 0 };
 // pipeline the creating counter across zero so tightly that the exec side
 // starves retrying its register-then-verify.
 static std::atomic<int> execve_want { 0 };
+#endif
 // The clone(CLONE_VM) child of posix_spawn_bun execs in this address space and never returns
 // to undo a count, so only the pid recorded in bun_initialize_process counts its execs.
 static pid_t execve_counting_pid = 0;
@@ -703,6 +706,7 @@ extern "C" int __wrap_execve(const char* path, char* const argv[], char* const e
 {
     if (getpid() != execve_counting_pid)
         return __real_execve(path, argv, envp);
+#if defined(__OHOS__)
     execve_want.fetch_add(1, std::memory_order_seq_cst);
     for (;;) {
         while (threads_creating.load(std::memory_order_seq_cst) != 0)
@@ -715,6 +719,11 @@ extern "C" int __wrap_execve(const char* path, char* const argv[], char* const e
         sched_yield();
     }
     execve_want.fetch_sub(1, std::memory_order_seq_cst);
+#else
+    // The suspension lock is held over execve.
+    WTF::ThreadSuspendLocker suspendLocker;
+    threads_in_execve.fetch_add(1, std::memory_order_seq_cst);
+#endif
     execve_generation.fetch_add(1, std::memory_order_seq_cst);
     int rc = __real_execve(path, argv, envp);
     // Only reached when execve failed and the old image keeps running.
@@ -725,6 +734,7 @@ extern "C" int __wrap_execve(const char* path, char* const argv[], char* const e
 // The attempt bound keeps a real limit, hit while an exec never completes, from looping forever.
 static int createThreadUnlessExecIsInFlight(pthread_t* thread, const pthread_attr_t* attr, void* (*start_routine)(void*), void* arg)
 {
+#if defined(__OHOS__)
     int rc;
     for (;;) {
         threads_creating.fetch_add(1, std::memory_order_seq_cst);
@@ -735,21 +745,37 @@ static int createThreadUnlessExecIsInFlight(pthread_t* thread, const pthread_att
         threads_creating.fetch_sub(1, std::memory_order_seq_cst);
         usleep(200);
     }
+#endif
     for (int attempt = 0;; attempt++) {
         unsigned generation = execve_generation.load(std::memory_order_seq_cst);
         bool execInFlight = threads_in_execve.load(std::memory_order_seq_cst) > 0;
+#if defined(__OHOS__)
         rc = __real_pthread_create(thread, attr, start_routine, arg);
-        if (rc != EAGAIN || attempt >= 1000)
+#else
+        int rc = __real_pthread_create(thread, attr, start_routine, arg);
+#endif
+        if (rc != EAGAIN || attempt >= 1000) {
+#if defined(__OHOS__)
             break;
+#else
+            return rc;
+#endif
+        }
         if (!execInFlight && threads_in_execve.load(std::memory_order_seq_cst) == 0
             && execve_generation.load(std::memory_order_seq_cst) == generation) {
             // No exec overlapped this attempt: a real limit.
+#if defined(__OHOS__)
             break;
+#else
+            return rc;
+#endif
         }
         usleep(1000);
     }
+#if defined(__OHOS__)
     threads_creating.fetch_sub(1, std::memory_order_seq_cst);
     return rc;
+#endif
 }
 
 extern "C" int __wrap_pthread_create(pthread_t* thread, const pthread_attr_t* attr, void* (*start_routine)(void*), void* arg)

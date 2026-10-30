@@ -195,10 +195,7 @@ impl FileCopier {
                 #[cfg(unix)]
                 let src_stat = {
                     let stat = bun_sys::fstat(src.handle())?;
-                    // SAFETY: fchmod is safe to call with any fd + mode; errors are ignored (`_ =`).
-                    unsafe {
-                        let _ = bun_sys::c::fchmod(dest.handle().native(), stat.st_mode);
-                    }
+                    let _ = bun_sys::c::fchmod(dest.handle().native(), stat.st_mode);
                     stat
                 };
 

@@ -10,6 +10,8 @@ use bun_core::{Output, slice_as_bytes};
 #[cfg(unix)]
 use bun_paths::PathBuffer;
 use bun_paths::{OSPathChar, SEP, SEP_STR};
+#[cfg(unix)]
+use bun_sys::beneath::{self, Symlinks};
 use bun_sys::{self, Fd, FdExt};
 use bun_wyhash::hash;
 
@@ -311,18 +313,7 @@ impl DeferredSymlink {
     }
 }
 
-#[cfg(unix)]
-fn open_dir_with_stat(dir_fd: Fd, sub_path: &[u8]) -> Option<(Fd, bun_sys::Stat)> {
-    let fd = bun_sys::open_dir_at(dir_fd, sub_path).ok()?;
-    match bun_sys::fstat(fd) {
-        Ok(st) => Some((fd, st)),
-        Err(_) => {
-            fd.close();
-            None
-        }
-    }
-}
-
+/// `is_symlink_target_safe` takes a symlink to be where its path says, so it is asked again about one that symlinks lead to.
 #[cfg(unix)]
 /// `bun_sys::symlinkat`, retried once on OHOS SELinux's intermittent EPERM/EACCES;
 /// parent dirs are pre-created by `create_deferred_symlinks`'s pre-pass, so no
@@ -341,50 +332,29 @@ fn symlinkat_ohos_retry(target: &ZStr, dirfd: Fd, dest: &ZStr) -> bun_sys::Maybe
 
 #[cfg(unix)]
 pub fn create_deferred_symlinks(dir_fd: Fd, symlinks: &[DeferredSymlink], log: bool) -> u32 {
-    let mut parents: Vec<Option<bun_sys::Stat>> = Vec::with_capacity(symlinks.len());
     for symlink in symlinks {
         let dirname = bun_paths::dirname_simple(symlink.path.as_bytes());
-        if dirname.is_empty() {
-            parents.push(None);
-            continue;
+        if !dirname.is_empty() {
+            let _ = beneath::make_path(dir_fd, dirname, Symlinks::FollowInside);
         }
-        let _ = dir_fd.make_path_u8(dirname);
-        parents.push(open_dir_with_stat(dir_fd, dirname).map(|(fd, st)| {
-            fd.close();
-            st
-        }));
     }
 
     let mut created: u32 = 0;
-    for (symlink, expected) in symlinks.iter().zip(parents) {
-        let dirname = bun_paths::dirname_simple(symlink.path.as_bytes());
-        let target = symlink.target.as_zstr();
-        let result = if dirname.is_empty() {
-            symlinkat_ohos_retry(target, dir_fd, symlink.path.as_zstr())
-        } else {
-            let name =
-                ZStr::from_slice_with_nul(&symlink.path.as_bytes_with_nul()[dirname.len() + 1..]);
-            match (open_dir_with_stat(dir_fd, dirname), expected) {
-                (Some((parent, st)), Some(expected))
-                    if st.st_dev == expected.st_dev && st.st_ino == expected.st_ino =>
-                {
-                    let result = symlinkat_ohos_retry(target, parent, name);
-                    parent.close();
-                    result
-                }
-                (parent, _) => {
-                    if let Some((parent, _)) = parent {
-                        parent.close();
-                    }
-                    if log {
-                        bun_core::warn!(
-                            "Skipping symlink whose parent directory changed during extraction: {}\n",
-                            bun_core::fmt::escape_control_chars(symlink.path.as_bytes()),
-                        );
-                    }
-                    continue;
-                }
+    let mut join_buf = None;
+    for symlink in symlinks {
+        let (target, path) = (symlink.target.as_zstr(), symlink.path.as_bytes());
+        let is_safe = |path: &[u8]| is_symlink_target_safe(path, target.as_bytes(), &mut join_buf);
+        let result = beneath::symlinkat_where_safe(target, dir_fd, path, is_safe);
+        // OHOS can refuse the first symlinkat with EPERM/EACCES while a lazy
+        // mkdir settles; one retry is enough (the parent now exists).
+        #[cfg(target_env = "ohos")]
+        let result = match result {
+            Err(e) if matches!(e.get_errno(), bun_sys::E::EPERM | bun_sys::E::EACCES) => {
+                let is_safe =
+                    |path: &[u8]| is_symlink_target_safe(path, target.as_bytes(), &mut join_buf);
+                beneath::symlinkat_where_safe(target, dir_fd, path, is_safe)
             }
+            other => other,
         };
         match result {
             Ok(()) => created += 1,
@@ -483,6 +453,8 @@ pub mod archiver {
         pub log: bool,
         pub npm: bool,
         pub skip_symlinks: bool,
+        /// Only this call writes to the destination, so it holds no symlink until the last entry is out.
+        pub new_destination: bool,
     }
 
     impl Default for ExtractOptions {
@@ -493,6 +465,7 @@ pub mod archiver {
                 log: false,
                 npm: false,
                 skip_symlinks: false,
+                new_destination: false,
             }
         }
     }
@@ -673,6 +646,13 @@ impl Archiver {
         #[cfg(unix)]
         let mut deferred_symlinks: Vec<DeferredSymlink> = Vec::new();
 
+        #[cfg(unix)]
+        let symlinks = if options.new_destination {
+            Symlinks::Follow
+        } else {
+            Symlinks::FollowInside
+        };
+
         let mut normalized_buf = bun_paths::os_path_buffer_pool::get();
         let mut write_strategy = WriteStrategy::default();
 
@@ -838,11 +818,7 @@ impl Archiver {
                     #[cfg(not(windows))]
                     {
                         let mode = directory_mode(entry.perm());
-                        // SAFETY: normalized_buf[path_slice.len()] == 0 (written above),
-                        // so path_slice is a NUL-terminated [:0]u8.
-                        let path_z: &ZStr =
-                            unsafe { ZStr::from_raw(path_slice.as_ptr(), path_slice.len()) };
-                        match bun_sys::mkdirat_z(dir_fd, path_z, mode) {
+                        match beneath::mkdirat(dir_fd, path_slice, mode, symlinks) {
                             Ok(()) => {}
                             Err(err) => {
                                 // It's possible for some tarballs to return a directory twice, with and
@@ -856,8 +832,8 @@ impl Archiver {
                                 if dirname.is_empty() {
                                     return Err(err.into());
                                 }
-                                let _ = dir.make_path_u8(dirname);
-                                let _ = bun_sys::mkdirat_z(dir_fd, path_z, 0o777);
+                                let _ = beneath::make_path(dir, dirname, symlinks);
+                                let _ = beneath::mkdirat(dir_fd, path_slice, 0o777, symlinks);
                             }
                         }
                     }
@@ -927,7 +903,7 @@ impl Archiver {
                         // SAFETY: normalized_buf[path_slice.len()] == 0 (written above).
                         let path_z: &ZStr =
                             unsafe { ZStr::from_raw(path_slice.as_ptr(), path_slice.len()) };
-                        match bun_sys::openat(dir_fd, path_z, flags, mode) {
+                        match beneath::openat(dir_fd, path_z, flags, mode, symlinks) {
                             Ok(fd) => fd,
                             Err(err) => match err.get_errno() {
                                 bun_sys::E::EACCES | bun_sys::E::EPERM | bun_sys::E::ENOENT => {
@@ -935,8 +911,8 @@ impl Archiver {
                                     if dirname.is_empty() {
                                         return Err(err.into());
                                     }
-                                    let _ = dir.make_path_u8(dirname);
-                                    bun_sys::openat(dir_fd, path_z, flags, mode)?
+                                    let _ = beneath::make_path(dir, dirname, symlinks);
+                                    beneath::openat(dir_fd, path_z, flags, mode, symlinks)?
                                 }
                                 _ => return Err(err.into()),
                             },
