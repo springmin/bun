@@ -507,8 +507,10 @@ export interface Dependency {
    * Files ending in `.patch` are applied with `git apply`. Other files are
    * OVERLAYS — copied into the source root as-is. Useful for injecting a
    * CMakeLists.txt into a project that lacks one (tinycc).
+   *
+   * Function form allows conditional patches: OHOS adds zstd's qsort_r fix.
    */
-  patches?: string[];
+  patches?: string[] | ((cfg: Config) => string[]);
 
   /**
    * Other deps whose headers this dep's sources include — e.g. a dep that
@@ -830,7 +832,7 @@ export function resolveDep(
 
   // Resolve conditional patches. Same list for the whole configure run —
   // we don't want patches changing between emitFetch and the hash check.
-  const patches = dep.patches ?? [];
+  const patches = dep.patches === undefined ? [] : typeof dep.patches === "function" ? dep.patches(cfg) : dep.patches;
 
   // Sources bun compiles directly (from Provides.sources). Resolved to
   // absolute paths for (a) the ResolvedDep return and (b) declaring as
