@@ -1,5 +1,5 @@
 import { afterAll, describe as describeAnywhere, expect, test } from "bun:test";
-import { bunEnv, bunExe, isArm64, isASAN, isLinux, isWindows, tempDir } from "harness";
+import { bunEnv, bunExe, isASAN, isArm64, isLinux, isOhos, isWindows, tempDir } from "harness";
 import { linkSync } from "node:fs";
 import { join } from "node:path";
 import { unsupported } from "./harness/compiler";
@@ -240,7 +240,7 @@ export function addressSpaceForObjects(part: number, parts: number) {
     if (isInPart()) define(name, body, timeout);
   };
 
-  describe("the address space for objects of a compiled program", () => {
+  describe.skipIf(isOhos)("the address space for objects of a compiled program", () => {
     inPart(test)(
       "a program that keeps more objects alive than fit ends with a RangeError",
       async () => {

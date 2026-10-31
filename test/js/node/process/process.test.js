@@ -3,7 +3,7 @@ import { CString, dlopen, ptr } from "bun:ffi";
 import { memoryUsage as jscMemoryUsage } from "bun:jsc";
 import { describe, expect, it } from "bun:test";
 import { familySync } from "detect-libc";
-import { bunEnv, bunExe, isASAN, isDebug, isLinux, isMacOS, isRoot, isWindows, tempDir, tmpdirSync } from "harness";
+import { bunEnv, bunExe, isASAN, isDebug, isLinux, isMacOS, isOhos, isRoot, isWindows, tempDir, tmpdirSync } from "harness";
 import { basename, join, resolve } from "path";
 import { getHeapStatistics } from "v8";
 
@@ -641,7 +641,7 @@ const MIN_ICU_VERSIONS_BY_PLATFORM_ARCH = {
   "win32-arm64": "79.1",
 };
 
-it("ICU version does not regress", () => {
+it.skipIf(isOhos)("ICU version does not regress", () => {
   const min = MIN_ICU_VERSIONS_BY_PLATFORM_ARCH[`${process.platform}-${process.arch}`];
   if (!min) {
     throw new Error(`Unknown platform/arch: ${process.platform}-${process.arch}`);

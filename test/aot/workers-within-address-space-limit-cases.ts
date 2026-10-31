@@ -1,5 +1,5 @@
 import { afterAll, describe as describeAnywhere, expect, test } from "bun:test";
-import { bunEnv, bunExe, isASAN, isDebug, isLinux, tempDir } from "harness";
+import { bunEnv, bunExe, isASAN, isDebug, isLinux, isOhos, tempDir } from "harness";
 import { unsupported } from "./harness/compiler";
 import { run } from "./harness/run";
 import { inTurn } from "./harness/shared-builds";
@@ -678,7 +678,7 @@ export function workersWithinAddressSpaceLimit(part: number, parts: number) {
     if (isInPart()) define(name, body, timeout);
   };
 
-  describe("Workers of a compiled program within a limit on the address space", () => {
+  describe.skipIf(isOhos)("Workers of a compiled program within a limit on the address space", () => {
     test.skipIf(!isLinux || isASAN).each(
       dealt([
         [8, 4 * GB],

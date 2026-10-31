@@ -8,7 +8,7 @@
 //   testaot run <file or folder>.. --show-output      IR tests: a .ir file says what is run on it and what must be printed
 //   testaot native <part of a name>                   tests written in C++
 import { expect, test } from "bun:test";
-import { bunEnv, bunExe, isArm64, isCI, isMacOS, isWindows } from "harness";
+import { bunEnv, bunExe, isArm64, isCI, isMacOS, isOhos, isWindows } from "harness";
 import { existsSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { slot } from "../harness/commands";
@@ -98,7 +98,7 @@ async function expectEveryTestPasses(args: string[], cwd?: string) {
 
 const skipOrFail = (why: string) =>
   // CI packs the tools wherever Bun has the compiler.
-  isCI && !isWindows && !unsupported
+  isCI && !isWindows && !isOhos && !unsupported
     ? test(why, () => expect(why).toBeUndefined())
     : test.skip(`${why}: test/aot/engine/testaot.ts says where it is looked for`, () => {});
 

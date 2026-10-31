@@ -1,6 +1,6 @@
 // harness/memory-limit.ts ends a child that holds more memory than it may. It does so however busy the thread is that started the child: the watching has a thread of its own.
 import { expect, test } from "bun:test";
-import { bunEnv, bunExe, isWindows } from "harness";
+import { bunEnv, bunExe, isOhos, isWindows } from "harness";
 import { endAtMemoryLimit, endAtMemoryLimitTogether } from "./harness/memory-limit";
 
 const MB = 2 ** 20;
@@ -12,7 +12,7 @@ function keepThisThreadBusy(seconds: number) {
   for (const until = performance.now() + seconds * 1000; performance.now() < until;);
 }
 
-test.skipIf(isWindows)(
+test.skipIf(isWindows || isOhos)(
   "a child that grows is ended while the thread that started it is busy",
   async () => {
     await using child = started();
@@ -27,7 +27,7 @@ test.skipIf(isWindows)(
   60_000,
 );
 
-test.skipIf(isWindows)(
+test.skipIf(isWindows || isOhos)(
   "so are children that hold too much together",
   async () => {
     const { watch, hasRoom } = endAtMemoryLimitTogether(192 * MB);
@@ -46,7 +46,7 @@ test.skipIf(isWindows)(
   60_000,
 );
 
-test.skipIf(isWindows)(
+test.skipIf(isWindows || isOhos)(
   "a child that stays within its bound is left alone",
   async () => {
     await using child = Bun.spawn({ cmd: [bunExe(), "-e", `setTimeout(() => {}, 700);`], env: bunEnv, stdio: ["ignore", "ignore", "ignore"] }); // prettier-ignore

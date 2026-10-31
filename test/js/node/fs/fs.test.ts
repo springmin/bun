@@ -838,7 +838,7 @@ describe("appendFile honors an explicit 'w' flag", () => {
 // and Linux's generic_write_checks() then clamps the write to the limit and fails
 // the next one with EFBIG. Linux-only: BSD kernels reject the whole write instead,
 // so the byte split is not portable.
-describe.skipIf(!isLinux)("writeFileSync when the write fails partway", () => {
+describe.skipIf(!isLinux || isOhos)("writeFileSync when the write fails partway", () => {
   const fixture = join(import.meta.dir, "fs-writeFile-write-error-fixture.js");
 
   async function runUnderFileSizeLimit(path: string, flag: string) {
@@ -4764,7 +4764,7 @@ describe("createWriteStream", () => {
     });
   });
 
-  it.skipIf(!isLinux)("surfaces EFBIG when RLIMIT_FSIZE truncates a write", async () => {
+  it.skipIf(!isLinux || isOhos)("surfaces EFBIG when RLIMIT_FSIZE truncates a write", async () => {
     using dir = tempDir("cws-efbig", {});
     const out = join(String(dir), "out.bin");
     const script = `

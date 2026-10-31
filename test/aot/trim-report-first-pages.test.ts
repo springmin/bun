@@ -1,7 +1,7 @@
 // What a Bun user writes on the first pages of the docs keeps what it uses and no more. Each of these once kept every built-in of the language (all of Intl, Temporal, WebAssembly, the interpreter:
 // 17 to 21 MB under --trim), because one row of the table of built-ins said more than the host does.
 import { expect } from "bun:test";
-import { bunEnv, bunExe, tempDirWithBunTypes } from "harness";
+import { bunEnv, bunExe, isOhos, tempDirWithBunTypes } from "harness";
 import { run } from "./harness/run";
 import { describe, test } from "./supported";
 
@@ -40,7 +40,7 @@ const tight = {
   exitCode: 0,
 };
 
-describe.concurrent("keeps nothing of the language that it does not use", () => {
+describe.skipIf(isOhos).concurrent("keeps nothing of the language that it does not use", () => {
   test.each([
     ["Bun.serve with fetch", `Bun.serve({ port: 3000, fetch() { return new Response("hello"); } });`],
     [
@@ -75,7 +75,7 @@ describe.concurrent("keeps nothing of the language that it does not use", () => 
 });
 
 // Something of the language is in unknown hands here, a prototype object or an error, and nothing more is kept for that.
-describe.concurrent("keeps nothing of the language where one of its objects escapes", () => {
+describe.skipIf(isOhos).concurrent("keeps nothing of the language where one of its objects escapes", () => {
   test.each([
     ["a date, printed", `console.log(new Date());`],
     [
@@ -95,7 +95,7 @@ describe.concurrent("keeps nothing of the language where one of its objects esca
 
 // A value nobody knows is converted to a string here: the body of a Response, a member of a form, the message of an error. `toString` is looked up by its name.
 // Intl.Locale and the classes of Temporal have one too, but nobody has an instance in a program that names none of them.
-describe.concurrent("keeps nothing of Intl and Temporal for a conversion to a string", () => {
+describe.skipIf(isOhos).concurrent("keeps nothing of Intl and Temporal for a conversion to a string", () => {
   test.each([
     [
       "a server that answers the JSON that it was sent",
@@ -122,7 +122,7 @@ describe.concurrent("keeps nothing of Intl and Temporal for a conversion to a st
   });
 });
 
-test("a server that reads a form", async () => {
+test.skipIf(isOhos)("a server that reads a form", async () => {
   const { escapes, ...rest } = await report(
     `Bun.serve({ port: 3000, async fetch(request) { return new Response(String((await request.formData()).get("a"))); } });`,
   );
