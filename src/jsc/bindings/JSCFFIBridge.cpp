@@ -199,6 +199,15 @@ extern "C" uint64_t Bun__FFI__jsValueToSlotSlow(JSC::JSGlobalObject* globalObjec
 
 #endif // defined(BUN_DISABLE_FFI)
 
+extern "C" void Bun__FFI__throwIfDisabled(JSC::JSGlobalObject* globalObject)
+{
+#if defined(BUN_DISABLE_FFI)
+    throwBuiltWithoutFFI(globalObject);
+#else
+    UNUSED_PARAM(globalObject);
+#endif
+}
+
 #else
 
 // Stubs: engine-native FFI not available in this WebKit build.
@@ -229,6 +238,11 @@ extern "C" JSC::EncodedJSValue Bun__CreateJSCFFICallback(
 
 extern "C" void Bun__JSCFFICallbackClose(JSC::EncodedJSValue callbackValue)
 {
+}
+
+extern "C" void Bun__FFI__throwIfDisabled(JSC::JSGlobalObject* globalObject)
+{
+    UNUSED_PARAM(globalObject);
 }
 
 #endif

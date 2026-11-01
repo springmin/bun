@@ -1,5 +1,10 @@
+<<<<<<< ours
+import { afterAll, expect } from "bun:test";
+import { bunEnv, bunExe, isASAN, isLinux, isMacOS, tempDir } from "harness";
+=======
 import { expect } from "bun:test";
 import { bunEnv, bunExe, isLinux, isMacOS, isOhos, tempDir } from "harness";
+>>>>>>> theirs
 import { join, resolve } from "node:path";
 import { run } from "./harness/run";
 import { test } from "./supported";
@@ -44,6 +49,53 @@ function emptySharedObject() {
   return file;
 }
 
+<<<<<<< ours
+// Lists the objects of the process from the last to the first. C libraries differ in the order: glibc and musl begin with the executable, bionic begins with the dynamic linker.
+const listedInReverse = `
+#define _GNU_SOURCE
+#include <dlfcn.h>
+#include <link.h>
+#include <stddef.h>
+
+typedef int (*visitor)(struct dl_phdr_info *, size_t, void *);
+struct list { struct dl_phdr_info objects[128]; size_t sizes[128]; int count; };
+
+static int collect(struct dl_phdr_info *object, size_t size, void *data) {
+  struct list *list = data;
+  if (list->count == 128) return 0;
+  list->objects[list->count] = *object;
+  list->sizes[list->count++] = size;
+  return 0;
+}
+
+int dl_iterate_phdr(visitor visit, void *data) {
+  struct list list = { .count = 0 };
+  ((int (*)(visitor, void *)) dlsym(RTLD_NEXT, "dl_iterate_phdr"))(collect, &list);
+  int result = 0;
+  while (!result && list.count--) result = visit(&list.objects[list.count], list.sizes[list.count], data);
+  return result;
+}
+`;
+
+const dir = tempDir("aot-inserted-library", {
+  "main.ts": `
+    import { readFileSync } from "node:fs";
+    console.log("hello");
+    if (process.platform === "linux") {
+      const mapped = new Set(readFileSync("/proc/self/maps", "utf8").match(/inserted-\\d\\.so/g));
+      for (const library of [...mapped].sort()) console.log(library);
+    }
+  `,
+  "inserted-1.so": emptySharedObject(),
+  "inserted-2.so": emptySharedObject(),
+  "listed-in-reverse.c": listedInReverse,
+});
+afterAll(() => dir[Symbol.dispose]());
+
+let built: Promise<void> | undefined;
+const buildOnce = () =>
+  (built ??= (async () => {
+=======
 // The fixture builds a bare ELF shared object; OHOS refuses to load one
 // without a `.codesign` section, so LD_PRELOAD never maps it.
 test.skipIf((!isMacOS && !isLinux) || isOhos)(
@@ -61,6 +113,7 @@ test.skipIf((!isMacOS && !isLinux) || isOhos)(
       "inserted-1.so": emptySharedObject(),
       "inserted-2.so": emptySharedObject(),
     });
+>>>>>>> theirs
     await using build = Bun.spawn({
       cmd: [bunExe(), "build", "--compile", "--aot", "./main.ts", "--outfile", "program"],
       cwd: String(dir),
@@ -72,6 +125,12 @@ test.skipIf((!isMacOS && !isLinux) || isOhos)(
       stderr: expect.any(String),
       exitCode: 0,
     });
+  })());
+
+test.skipIf(!isMacOS && !isLinux)(
+  "an executable runs its compiled code with libraries inserted by the loader",
+  async () => {
+    await buildOnce();
     const libraries = isMacOS
       ? ["/usr/lib/libz.1.dylib", "/usr/lib/libbz2.1.0.dylib"]
       : ["inserted-1.so", "inserted-2.so"];
@@ -91,6 +150,28 @@ test.skipIf((!isMacOS && !isLinux) || isOhos)(
         exitCode: 0,
       });
     }
+  },
+  120_000,
+);
+
+const cc = Bun.which("cc") || Bun.which("gcc") || Bun.which("clang");
+// The sanitizer's run time takes the first object listed for the executable.
+test.skipIf(!isLinux || isASAN || !cc)(
+  "an executable runs its compiled code wherever the process lists it among its objects",
+  async () => {
+    await buildOnce();
+    const library = join(String(dir), "listed-in-reverse.so");
+    expect(await run([cc!, "-shared", "-fPIC", "-o", library, "listed-in-reverse.c", "-ldl"], String(dir))).toEqual({
+      stdout: "",
+      stderr: "",
+      exitCode: 0,
+    });
+    const result = await run([join(String(dir), "program")], String(dir), {
+      ...bunEnv,
+      LD_PRELOAD: library,
+      BUN_JSC_crashIfInterpreterIsUsed: "1",
+    });
+    expect(result).toEqual({ stdout: "hello\n", stderr: "", exitCode: 0 });
   },
   120_000,
 );

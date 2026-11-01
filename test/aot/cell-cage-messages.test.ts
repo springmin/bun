@@ -1,10 +1,16 @@
+<<<<<<< ours
+import { afterAll, expect } from "bun:test";
+import { bunEnv, bunExe, isASAN, isDebug, isLinux, isWindows, tempDir } from "harness";
+=======
 import { afterAll, expect, setDefaultTimeout } from "bun:test";
 import { bunEnv, bunExe, isASAN, isDebug, isLinux, isOhos, isWindows, tempDir } from "harness";
+>>>>>>> theirs
 import { join } from "node:path";
 import { withoutCoreDump } from "./harness/commands";
+import { raiseDefaultTimeout } from "./harness/default-timeout";
 import { beforeAll, describe, test } from "./supported";
 
-setDefaultTimeout(120_000);
+raiseDefaultTimeout(120_000);
 
 // OHOS does not enforce RLIMIT_AS, so `ulimit -v` leaves the heap its full range.
 const canLimitAddressSpace = isLinux && !isASAN && !isDebug && !isOhos;

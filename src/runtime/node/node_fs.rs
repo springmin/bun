@@ -7429,7 +7429,7 @@ impl NodeFS {
         flavor: Flavor,
     ) -> Maybe<ret::Readdir> {
         let Some(list) = graph.readdir(path, recursive) else {
-            let code = if graph.contains_file(path) {
+            let code = if graph.contains_file(path) || graph.is_source_file(path) {
                 E::ENOTDIR
             } else {
                 E::ENOENT
