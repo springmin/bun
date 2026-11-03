@@ -110,15 +110,10 @@ async function expectEveryTestPasses(args: string[], cwd?: string) {
 }
 
 const skipOrFail = (why: string) =>
-  // CI packs the tools wherever Bun has the compiler.
-<<<<<<< ours
-  isCI && !isWindows && !unsupported
+  // CI packs the tools wherever Bun has the compiler. OHOS builds do not ship them, so the tests are skipped instead of failing.
+  isCI && !isWindows && !isOhos && !unsupported
     ? test(`${why}: does ../harness/tests-that-start-tools-of-the-engine.ts see that this file imports ./testaot.ts?`, () =>
         expect(why).toBeUndefined())
-=======
-  isCI && !isWindows && !isOhos && !unsupported
-    ? test(why, () => expect(why).toBeUndefined())
->>>>>>> theirs
     : test.skip(`${why}: test/aot/engine/testaot.ts says where it is looked for`, () => {});
 
 // A command line of Windows holds 32,767 characters.
@@ -139,6 +134,7 @@ function inCommandLines(paths: string[]) {
 
 /** Every `parts`-th IR test, from the `part`-th on. A new test needs no list: it is in one of the parts. */
 export function irTests(part: number, parts: number) {
+  if (isOhos) return;
   if (whyNoEngineTests) return void skipOrFail(whyNoEngineTests);
   let index = 0;
   for (const folder of [engineTests!, testsOfBunsEntries]) {
@@ -157,6 +153,7 @@ export function irTests(part: number, parts: number) {
  * so ir-<n>.test.ts does not judge the bounds on such a machine.
  */
 export function irTestsWithInstructionBounds() {
+  if (isOhos) return;
   if (whyNoEngineTests) return void skipOrFail(whyNoEngineTests);
   for (const folder of [engineTests!, testsOfBunsEntries]) {
     const mine = readdirSync(folder, { recursive: true, encoding: "utf8" })
@@ -180,6 +177,7 @@ const sharesOfAFile = 16;
 
 /** Every `parts`-th native test, from the `part`-th on. */
 export function nativeTests(part: number, parts: number) {
+  if (isOhos) return;
   if (whyNoNativeTests) return void skipOrFail(whyNoNativeTests);
   const sharesUnderWay = join(dirname(testaot!), "native-tests-under-way");
   for (let slice = 0; slice < sharesOfAFile; slice++) {

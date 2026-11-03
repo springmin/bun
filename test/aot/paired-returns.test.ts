@@ -3,13 +3,8 @@
 // mispredicted, and so is every return to a frame that was already live. This reads the machine code of every copy of the stubs in
 // an executable.
 import { expect } from "bun:test";
-<<<<<<< ours
 import { bunEnv, bunExe, isWindows, tempDir } from "harness";
 import { readFileSync } from "node:fs";
-=======
-import { bunEnv, bunExe, isOhos, isWindows, tempDir } from "harness";
-import { existsSync } from "node:fs";
->>>>>>> theirs
 import { join } from "node:path";
 import { built, slot, spawned } from "./harness/commands";
 import { test } from "./supported";
@@ -27,7 +22,6 @@ function findCode(data: Buffer) {
   throw new Error("the executable holds no image");
 }
 
-<<<<<<< ours
 const RET = 0xd65f03c0;
 const isAdrToLinkRegister = (word: number) => (word & 0x1f00001f) >>> 0 === 0x1000001e;
 const isB = (word: number) => (word & 0xfc000000) >>> 0 === 0x14000000;
@@ -92,11 +86,6 @@ function unpairedReturns(data: Buffer, map: string) {
 }
 
 test.skipIf(process.arch !== "arm64")(
-=======
-// The slice the script reads is the Linux AArch64 ABI; the OHOS build adds a
-// branch-protection stub the script calls unpaired.
-test.skipIf(!!whySkipped || isOhos)(
->>>>>>> theirs
   "no stub computes a return address or returns with an indirect jump",
   () =>
     slot(async () => {

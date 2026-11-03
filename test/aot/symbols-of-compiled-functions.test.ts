@@ -1,12 +1,7 @@
 // `bun build --compile --aot --aot-symbols` puts the functions of the program into the symbol table of a Linux executable, beside the symbols
 // that Bun has there itself, so that gdb and perf show them by name. The file is read here, with no tool.
-<<<<<<< ours
 import { expect } from "bun:test";
-import { bunEnv, bunExe, isLinux, tempDir } from "harness";
-=======
-import { expect, setDefaultTimeout } from "bun:test";
 import { bunEnv, bunExe, isLinux, isOhos, tempDir } from "harness";
->>>>>>> theirs
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { raiseDefaultTimeout } from "./harness/default-timeout";

@@ -13,7 +13,8 @@ const script = join(import.meta.dir, "tools", "where_in_image.py");
 if (!python) console.error("SKIPPED: test/aot/where-names-lie-in-executables.test.ts: python3 is not installed");
 // The script asks testaot for the layout of an image.
 const scriptEnv = { ...bunEnv, TESTAOT: testaot };
-const isSkipped = !python || !testaot || process.platform === "darwin";
+// The Python tool reads the image's name rows; the OHOS AOT image leaves those rows empty (the names are not emitted for this target).
+const isSkipped = !python || !testaot || process.platform === "darwin" || isOhos;
 
 const sources = {
   "libraryW1.ts": `
@@ -66,15 +67,7 @@ const rowsOfNames: [string, string][] = [
 ];
 
 // TODO: on macOS the tool finds no row in the executable.
-<<<<<<< ours
 describe.skipIf(isSkipped)("compile/aot/where names lie in an executable", () => {
-=======
-// The Python tool reads the image's name rows; the OHOS AOT image leaves those
-// rows empty (the names are not emitted for this target).
-describe.skipIf(!python || process.platform === "darwin" || isOhos)(
-  "compile/aot/where names lie in an executable",
-  () => {
->>>>>>> theirs
   const folder = String(tempDir("aot-where-names-lie", sources));
   const executable = join(folder, isWindows ? "program.exe" : "program");
   const rows = new Map<string, string[][]>();

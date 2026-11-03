@@ -1,10 +1,5 @@
-<<<<<<< ours
 import { afterAll, expect } from "bun:test";
-import { bunEnv, bunExe, isASAN, isWindows, tempDir } from "harness";
-=======
-import { expect } from "bun:test";
 import { bunEnv, bunExe, isASAN, isOhos, isWindows, tempDir } from "harness";
->>>>>>> theirs
 import {
   chmodSync,
   chownSync,

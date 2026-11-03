@@ -1,10 +1,5 @@
-<<<<<<< ours
 import { afterAll, expect } from "bun:test";
-import { bunEnv, bunExe, isASAN, isDebug, isLinux, isWindows, tempDir } from "harness";
-=======
-import { afterAll, expect, setDefaultTimeout } from "bun:test";
 import { bunEnv, bunExe, isASAN, isDebug, isLinux, isOhos, isWindows, tempDir } from "harness";
->>>>>>> theirs
 import { join } from "node:path";
 import { withoutCoreDump } from "./harness/commands";
 import { raiseDefaultTimeout } from "./harness/default-timeout";

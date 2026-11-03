@@ -1,10 +1,5 @@
-<<<<<<< ours
 import { afterAll, expect } from "bun:test";
-import { bunEnv, bunExe, isASAN, isLinux, isMacOS, tempDir } from "harness";
-=======
-import { expect } from "bun:test";
-import { bunEnv, bunExe, isLinux, isMacOS, isOhos, tempDir } from "harness";
->>>>>>> theirs
+import { bunEnv, bunExe, isASAN, isLinux, isMacOS, isOhos, tempDir } from "harness";
 import { join, resolve } from "node:path";
 import { run } from "./harness/run";
 import { test } from "./supported";
@@ -49,7 +44,6 @@ function emptySharedObject() {
   return file;
 }
 
-<<<<<<< ours
 // Lists the objects of the process from the last to the first. C libraries differ in the order: glibc and musl begin with the executable, bionic begins with the dynamic linker.
 const listedInReverse = `
 #define _GNU_SOURCE
@@ -95,25 +89,6 @@ afterAll(() => dir[Symbol.dispose]());
 let built: Promise<void> | undefined;
 const buildOnce = () =>
   (built ??= (async () => {
-=======
-// The fixture builds a bare ELF shared object; OHOS refuses to load one
-// without a `.codesign` section, so LD_PRELOAD never maps it.
-test.skipIf((!isMacOS && !isLinux) || isOhos)(
-  "an executable runs its compiled code with libraries inserted by the loader",
-  async () => {
-    using dir = tempDir("aot-inserted-library", {
-      "main.ts": `
-        import { readFileSync } from "node:fs";
-        console.log("hello");
-        if (process.platform === "linux") {
-          const mapped = new Set(readFileSync("/proc/self/maps", "utf8").match(/inserted-\\d\\.so/g));
-          for (const library of [...mapped].sort()) console.log(library);
-        }
-      `,
-      "inserted-1.so": emptySharedObject(),
-      "inserted-2.so": emptySharedObject(),
-    });
->>>>>>> theirs
     await using build = Bun.spawn({
       cmd: [bunExe(), "build", "--compile", "--aot", "./main.ts", "--outfile", "program"],
       cwd: String(dir),
@@ -127,7 +102,8 @@ test.skipIf((!isMacOS && !isLinux) || isOhos)(
     });
   })());
 
-test.skipIf(!isMacOS && !isLinux)(
+// OHOS refuses to load an unsigned `.so`, so LD_PRELOAD never maps the fixture.
+test.skipIf((!isMacOS && !isLinux) || isOhos)(
   "an executable runs its compiled code with libraries inserted by the loader",
   async () => {
     await buildOnce();
@@ -155,8 +131,8 @@ test.skipIf(!isMacOS && !isLinux)(
 );
 
 const cc = Bun.which("cc") || Bun.which("gcc") || Bun.which("clang");
-// The sanitizer's run time takes the first object listed for the executable.
-test.skipIf(!isLinux || isASAN || !cc)(
+// The sanitizer's run time takes the first object listed for the executable; OHOS's loader refuses the unsigned `.so` that this test preloads.
+test.skipIf(!isLinux || isASAN || !cc || isOhos)(
   "an executable runs its compiled code wherever the process lists it among its objects",
   async () => {
     await buildOnce();

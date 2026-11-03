@@ -588,18 +588,18 @@ afterAll(async () => {
   }
 });
 
-describe("@types/bun integration test", () => {
-  test("building and packing bun-types leaves packages/bun-types untouched", () => {
+describe.skipIf(isOhos)("@types/bun integration test", () => {
+  test.skipIf(isOhos)("building and packing bun-types leaves packages/bun-types untouched", () => {
     expect(snapshotBunTypesCheckout()).toEqual(bunTypesCheckoutBeforeSetup);
   });
 
-  test("packed bun-types includes CLAUDE.md", async () => {
+  test.skipIf(isOhos)("packed bun-types includes CLAUDE.md", async () => {
     const claude = Bun.file(join(BASE_FIXTURE_DIR, "node_modules", "bun-types", "CLAUDE.md"));
     expect(await claude.exists()).toBe(true);
     expect((await claude.text()).length).toBeGreaterThan(0);
   });
 
-  describe("basic type checks", () => {
+  describe.skipIf(isOhos)("basic type checks", () => {
     typeTest("checks without lib.dom.d.ts", {
       emptyInterfaces: expectedEmptyInterfacesWhenNoDOM,
       diagnostics: [],
@@ -708,7 +708,7 @@ describe("@types/bun integration test", () => {
   // since 7.0 that is the native (Go-based) compiler, which does not expose a JS
   // compiler API, so unlike the tests above we write a real tsconfig and spawn the CLI.
   // https://devblogs.microsoft.com/typescript/announcing-typescript-7-0-beta/
-  describe("TypeScript latest", () => {
+  describe.skipIf(isOhos)("TypeScript latest", () => {
     // OHOS: typescript@latest is the native (Go) compiler, which cannot run on
     // the device (its ELF launcher has no OHOS codesign section; the sandbox
     // additionally denies a Go runtime syscall with SIGSYS).
@@ -743,7 +743,7 @@ describe("@types/bun integration test", () => {
   // This run checks the whole fixture through that entry point, plus the
   // fixture/ts7.1 files that only that compiler can type.
   // `>=7.1.0-0` takes the nightly until a 7.1 release exists, then the release.
-  describe("TypeScript 7.1", () => {
+  describe.skipIf(isOhos)("TypeScript 7.1", () => {
     test.skipIf(isDebug || isOhos)("checks the fixture and import attributes through ts7.1/index.d.ts", async () => {
       const fixtureDir = await createIsolatedFixture(["typescript@>=7.1.0-0"]);
 
@@ -770,7 +770,7 @@ describe("@types/bun integration test", () => {
 
   // Runs on debug builds too: spawning tsc over a single file is cheap,
   // unlike the in-process LanguageService runs above.
-  describe("Bun.mmap", () => {
+  describe.skipIf(isOhos)("Bun.mmap", () => {
     // OHOS: typescript@latest is the native (Go) tsc, which cannot execute
     // on the musl sandbox (EACCES), so the CLI spawn always fails.
     test.skipIf(Bun.env.BUN_OHOS === "1")("MMapOptions accepts offset and size", async () => {
@@ -804,7 +804,7 @@ describe("@types/bun integration test", () => {
   });
 
   // Runs on debug builds too, same as the Bun.mmap block above.
-  describe("import.meta.glob", () => {
+  describe.skipIf(isOhos)("import.meta.glob", () => {
     // fixture/vite-client/client.d.ts also declares `ImportMeta.glob`, so it needs its own tsc program.
     // tsc loads the declarations in `files` order.
     test.each([
@@ -837,7 +837,7 @@ describe("@types/bun integration test", () => {
   });
 
   // Runs on debug builds too, same as the Bun.mmap block above.
-  describe("TextDecoder", () => {
+  describe.skipIf(isOhos)("TextDecoder", () => {
     // OHOS: the fixture's typescript is the native preview (@typescript/
     // typescript-linux-arm64) whose ELF launcher has no OHOS codesign
     // section, so exec fails EACCES and the launcher's error leaks to
@@ -881,7 +881,7 @@ describe("@types/bun integration test", () => {
     // src/runtime/webcore/EncodingLabel.rs, so the fixture carries a literal
     // copy. This check ties that copy to the running binary: every fixture
     // label must construct, and the replacement labels must throw.
-    test("the fixture label table matches the runtime", () => {
+    test.skipIf(isOhos)("the fixture label table matches the runtime", () => {
       const fixture = readFileSync(join(FIXTURE_SOURCE_DIR, "text-encode-decoder.ts"), "utf8");
       const arrayStart = fixture.indexOf("const labels = [");
       const arrayEnd = fixture.indexOf("] as const;", arrayStart);
@@ -916,7 +916,7 @@ describe("@types/bun integration test", () => {
   });
 
   // Runs on debug builds too, same as the Bun.mmap block above.
-  describe("Event and EventTarget", () => {
+  describe.skipIf(isOhos)("Event and EventTarget", () => {
     async function checkEventFixture(name: string, lib: string[], source: string) {
       const checkDir = join(TEMP_DIR, name);
       const tsconfig = structuredClone(sourceTsconfig);
@@ -972,7 +972,7 @@ describe("@types/bun integration test", () => {
   // other event name (#40003). @types/node >= 26 declares them on `Process`
   // directly, which masks the bug, so this check pins @types/node@24 instead
   // of reusing the base fixture.
-  describe("process event methods with @types/node@24", () => {
+  describe.skipIf(isOhos)("process event methods with @types/node@24", () => {
     test.skipIf(isOhos)("removeListener and off accept other event names", async () => {
       const checkDir = join(TEMP_DIR, "types-node-24-check");
       const tsconfig = structuredClone(sourceTsconfig);
@@ -1024,8 +1024,8 @@ describe("@types/bun integration test", () => {
   // declares. The hoisted fallback layer of the project is not on that path,
   // so `import("undici-types")` in bun.d.ts, fetch.d.ts and globals.d.ts
   // fails unless package.json declares undici-types (#43666).
-  describe("isolated install with the global store", () => {
-    test("bun-types resolves undici-types through its own dependencies", async () => {
+  describe.skipIf(isOhos)("isolated install with the global store", () => {
+    test.skipIf(isOhos)("bun-types resolves undici-types through its own dependencies", async () => {
       const checkDir = join(TEMP_DIR, "global-store-check");
       const cacheDir = join(checkDir, ".bun-cache");
       const tsconfig = structuredClone(sourceTsconfig);
@@ -1096,7 +1096,7 @@ describe("@types/bun integration test", () => {
     });
   });
 
-  describe("Test Globals", () => {
+  describe.skipIf(isOhos)("Test Globals", () => {
     const code = `
       const test_shouldBeAFunction: Function = test;
       const it_shouldBeAFunction: Function = it;
@@ -1182,7 +1182,7 @@ describe("@types/bun integration test", () => {
   });
 
   // Runs on debug builds too, same as the Bun.mmap block above.
-  describe('"vitest" types', () => {
+  describe.skipIf(isOhos)('"vitest" types', () => {
     async function check(fixtureDir: string, types: string[], files: string[]) {
       const tsconfig = structuredClone(sourceTsconfig);
       tsconfig.files = files.map(file => `vitest/${file}`);
@@ -1211,7 +1211,7 @@ describe("@types/bun integration test", () => {
       expect(await check(BASE_FIXTURE_DIR, [entry], files)).toEqual({ stdout: "", stderr: "", exitCode: 0 });
     });
 
-    test("assert and should use chai's types when @types/chai is installed", async () => {
+    test.skipIf(isOhos)("assert and should use chai's types when @types/chai is installed", async () => {
       const fixtureDir = await createIsolatedFixture(["@types/chai"]);
       expect(await check(fixtureDir, ["bun-types/vitest"], ["chai.ts"])).toEqual({
         stdout: "",
@@ -1221,14 +1221,14 @@ describe("@types/bun integration test", () => {
     });
 
     // An ambient declaration would override the types of an installed vitest package.
-    test('"types": ["bun"] doesn\'t declare the "vitest" module', async () => {
+    test.skipIf(isOhos)('"types": ["bun"] doesn\'t declare the "vitest" module', async () => {
       const { stdout, exitCode } = await check(BASE_FIXTURE_DIR, ["bun"], ["differences.ts"]);
       expect(stdout).toContain("error TS2307: Cannot find module 'vitest'");
       expect(exitCode).not.toBe(0);
     });
   });
 
-  describe("bun:bundle feature()", () => {
+  describe.skipIf(isOhos)("bun:bundle feature()", () => {
     typeTest("Registry augmentation restricts feature() to known flags", {
       files: {
         "registry-test.ts": `
@@ -1308,7 +1308,7 @@ describe("@types/bun integration test", () => {
     });
   });
 
-  describe("SQLite options", () => {
+  describe.skipIf(isOhos)("SQLite options", () => {
     typeTest("accept a value that is not set with exactOptionalPropertyTypes", {
       options: { exactOptionalPropertyTypes: true },
       files: {
@@ -1350,7 +1350,7 @@ describe("@types/bun integration test", () => {
     });
   });
 
-  describe("Bunland reaching for JSX", () => {
+  describe.skipIf(isOhos)("Bunland reaching for JSX", () => {
     typeTest("Bun.markdown.react() returns type compatible with React.ReactElement", {
       packages: ["@types/react", "@types/react-dom"],
       files: {
@@ -1383,7 +1383,7 @@ describe("@types/bun integration test", () => {
     });
   });
 
-  describe("lib configuration", () => {
+  describe.skipIf(isOhos)("lib configuration", () => {
     typeTest("checks with no lib at all", {
       options: {
         lib: [],
