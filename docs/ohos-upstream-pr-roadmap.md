@@ -24,6 +24,28 @@ this document is the review/landing order, not a second inventory.
 - Rebase on `main`; no merge commits, no drive-by refactors, no debug residue or `.only`.
 - Release/signing/SDK tooling stays in this fork unless maintainers explicitly want it.
 
+## Preparation pipeline
+
+The queue is machine-readable in [`docs/ohos-upstream-prs.json`](ohos-upstream-prs.json); the
+extracted patches are in [`patches/ohos-upstream/`](../patches/ohos-upstream/); the helper is
+`scripts/ohos/upstream-prs.ts`:
+
+```bash
+bun scripts/ohos/upstream-prs.ts status
+bun scripts/ohos/upstream-prs.ts check P1
+bun scripts/ohos/upstream-prs.ts prepare P1
+bun scripts/ohos/upstream-prs.ts open P1 --draft   # gated by dependsOn; P1 needs --force until the RFC is answered
+```
+
+`prepare` only creates a worktree and applies the patch; nothing is opened automatically. The
+integration branch `ohos-aarch64` stays the full implementation, and the queue is an extraction of
+it.
+
+Current queue status: P1/P2/P3 prepared (P3 has no focused test yet); P4 is the submitted
+`#47952`; P5/P7/P8 patches are WIP and must be split; P6 is design-needed (the fork currently
+hardcodes OHOS in the syscall layer instead of probing); P15/P16 are WebKit patches; P8–P14 and
+P17–P19 are deferred until their prerequisites land; P20 stays downstream.
+
 ## Phase 1 — independent / generic
 
 These do not require a new platform decision (P1 does; P3/P4/P6 are independent).
@@ -35,7 +57,7 @@ These do not require a new platform decision (P1 does; P3/P4/P6 are independent)
 | P3 | `spawn: fall back when exit_group is unavailable` | `src/jsc/bindings/bun-spawn.cpp` (`rawExit`) | — | needs a focused test or maintainer decision |
 | P4 | `node:os: parse /proc/cpuinfo without hardcoded prefixes` | `src/runtime/node/node_os.rs` | — | **submitted #47952** (6 unit tests) |
 | P5 | `resolver: ignore EACCES/EPERM from unreadable ancestors` | `src/resolver/{lib,resolver,fs,package_json}.rs` | P1 | resolver suite; OHOS-gated, not global |
-| P6 | `sys: probe epoll_pwait2/close_range/openat2/fchmodat2 at runtime` | `src/sys/linux_syscall.rs`, `src/platform/linux.rs` | — | syscall-failure tests |
+| P6 | `sys: probe epoll_pwait2/close_range/openat2/fchmodat2 at runtime` | `src/sys/linux_syscall.rs`, `src/platform/linux.rs` | — | design needed: the fork's openat2 hunk is OHOS-gated and belongs to P8; a real probe must try the syscall and fall back on ENOSYS/EPERM |
 | P7 | `crash_handler: give OHOS its own trace platform characters` | `src/crash_handler/lib.rs`, `src/bun_core/env.rs` | P1 | crash tests |
 
 P3/P4/P6 can land before the platform decision. P1 is the enabler for every

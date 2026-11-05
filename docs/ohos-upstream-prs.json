@@ -1,0 +1,233 @@
+{
+  "upstream": {
+    "repo": "oven-sh/bun",
+    "fork": "springmin",
+    "base": "main",
+    "baseRef": "oven/main",
+    "rfc": 47951,
+    "closedUmbrella": 30917
+  },
+  "prs": [
+    {
+      "id": "P1",
+      "title": "build: add aarch64-unknown-linux-ohos as a cross-compile target",
+      "branch": "ohos-pr/p1-build",
+      "dependsOn": ["RFC"],
+      "patch": "patches/ohos-upstream/P1-build.patch",
+      "body": "docs/ohos-pr-drafts/P1.md",
+      "status": "prepared",
+      "tests": ["scripts/build.ts --os=ohos --configure-only", "cross-build CI (P18)"],
+      "notes": "Build-only; no runtime change. 13 files, ~349 insertions. Split if reviewers ask; the patch is generated from ohos-aarch64 vs oven/main."
+    },
+    {
+      "id": "P2",
+      "title": "test: add isOhos and pin TMPDIR for the OHOS harness",
+      "branch": "ohos-pr/p2-harness",
+      "dependsOn": ["P1"],
+      "patch": "patches/ohos-upstream/P2-harness.patch",
+      "body": "docs/ohos-pr-drafts/P2.md",
+      "status": "prepared",
+      "tests": ["existing suites on Linux/macOS/Windows", "OHOS runner smoke"],
+      "notes": "test/harness.ts only. Includes isOHOS/isOhos, TMPDIR and --expose-internals for child bun; split the last two if reviewers prefer."
+    },
+    {
+      "id": "P3",
+      "title": "spawn: fall back when exit_group is unavailable",
+      "branch": "ohos-pr/p3-exitgroup",
+      "dependsOn": [],
+      "patch": "patches/ohos-upstream/P3-exitgroup.patch",
+      "body": "docs/ohos-pr-drafts/P3.md",
+      "status": "prepared-no-test",
+      "tests": ["existing spawn suite"],
+      "notes": "Generic hardening. No focused test yet: the fallback only runs where exit_group is absent/blocked; maintainers may prefer to fold it into P10. Do not open until the test question is settled."
+    },
+    {
+      "id": "P4",
+      "title": "node:os: parse /proc/cpuinfo without hardcoded prefixes",
+      "branch": "fix/linux-proc-cpuinfo",
+      "dependsOn": [],
+      "patch": "patches/ohos-upstream/P4-cpuinfo.patch",
+      "body": "docs/ohos-pr-drafts/P4.md",
+      "status": "submitted",
+      "pr": 47952,
+      "tests": ["6 Rust unit tests"],
+      "notes": "Submitted as oven-sh/bun#47952. Generic and independent of the platform decision."
+    },
+    {
+      "id": "P5",
+      "title": "resolver: treat EACCES/EPERM from unreadable ancestors as not-found",
+      "branch": "ohos-pr/p5-resolver",
+      "dependsOn": ["P1"],
+      "patch": "patches/ohos-upstream/P5-resolver-wip.patch",
+      "body": null,
+      "status": "wip",
+      "tests": ["resolver suite"],
+      "notes": "WIP: the file diff also contains the setrlimit soft-limit fix and the OHOS temp-dir change (P11). Split the EACCES/EPERM hunks from those before opening. Keep it OHOS-gated; the old generic #30914 is not the plan."
+    },
+    {
+      "id": "P6",
+      "title": "sys: probe epoll_pwait2/close_range/openat2/fchmodat2 at runtime",
+      "branch": "ohos-pr/p6-syscall-probes",
+      "dependsOn": ["P1", "P8"],
+      "patch": null,
+      "body": null,
+      "status": "design-needed",
+      "tests": ["syscall-failure tests"],
+      "notes": "Not implemented yet: the fork currently hardcodes OHOS behavior in the syscall layer (P8). A real generic probe must try the syscall and fall back on ENOSYS/EPERM; do not reuse the P8 openat2 patch as P6."
+    },
+    {
+      "id": "P7",
+      "title": "platform: add IS_OHOS and separate OHOS from musl",
+      "branch": "ohos-pr/p7-is-ohos",
+      "dependsOn": ["P1"],
+      "patch": "patches/ohos-upstream/P7-crash-wip.patch",
+      "body": null,
+      "status": "wip",
+      "tests": ["cargo check", "existing suites"],
+      "notes": "WIP: the file diff also contains the SIGSYS handler (P8) and crash trace chars. Split IS_OHOS/IS_MUSL (foundation) from the two OHOS features; P8 should land after the foundation."
+    },
+    {
+      "id": "P8",
+      "title": "sys: OHOS syscall layer (close_range, openat2, fchmodat2, memfd, pidfd, SIGSYS)",
+      "branch": "ohos-pr/p8-sys",
+      "dependsOn": ["P1", "P2", "P7"],
+      "patch": "patches/ohos-upstream/P8-openat2-wip.patch",
+      "body": null,
+      "status": "wip",
+      "tests": ["OHOS device + Linux"],
+      "notes": "WIP: openat2 is the only separated hunk so far; split the rest of the OHOS syscall changes by syscall. Do not open as one large PR."
+    },
+    {
+      "id": "P9",
+      "title": "event_loop: OHOS epoll rearm/EEXIST/one-shot",
+      "branch": "ohos-pr/p9-event-loop",
+      "dependsOn": ["P8"],
+      "patch": null,
+      "body": null,
+      "status": "deferred",
+      "tests": ["event-loop/pty tests"],
+      "notes": "Files: src/io/posix_event_loop.rs, PipeReader.rs, PipeWriter.rs. Extract after P8; the fork has the implementation."
+    },
+    {
+      "id": "P10",
+      "title": "spawn: OHOS waiter-thread eventfd and fork path",
+      "branch": "ohos-pr/p10-spawn",
+      "dependsOn": ["P8"],
+      "patch": null,
+      "body": null,
+      "status": "deferred",
+      "tests": ["spawn/pty tests"],
+      "notes": "Files: src/spawn/process.rs, src/runtime/bin_entry/mod.rs, bun-spawn.cpp OHOS hunks. Extract after P8; P3 is the generic rawExit piece."
+    },
+    {
+      "id": "P11",
+      "title": "fs: OHOS hmdfs/path watcher and temp dir",
+      "branch": "ohos-pr/p11-fs",
+      "dependsOn": ["P8"],
+      "patch": null,
+      "body": null,
+      "status": "deferred",
+      "tests": ["fs/path-watcher tests"],
+      "notes": "Files: src/runtime/node/node_fs.rs, path_watcher.rs, resolver temp-dir/setrlimit hunks. Split from P5."
+    },
+    {
+      "id": "P12",
+      "title": "install: OHOS hardlink→copy, temp dir and os mapping",
+      "branch": "ohos-pr/p12-install",
+      "dependsOn": ["P8"],
+      "patch": null,
+      "body": null,
+      "status": "deferred",
+      "tests": ["install suite"],
+      "notes": "Files: src/install/*, src/install_types/resolver_hooks.rs. Extract after P8."
+    },
+    {
+      "id": "P13",
+      "title": "terminal: OHOS epoll workaround",
+      "branch": "ohos-pr/p13-terminal",
+      "dependsOn": ["P9"],
+      "patch": null,
+      "body": null,
+      "status": "deferred",
+      "tests": ["terminal/pty tests"],
+      "notes": "Files: src/runtime/api/bun/Terminal.rs, relevant io hunks. Extract after P9."
+    },
+    {
+      "id": "P14",
+      "title": "node:os: OHOS userInfo sandbox",
+      "branch": "ohos-pr/p14-node-os",
+      "dependsOn": ["P1"],
+      "patch": null,
+      "body": null,
+      "status": "deferred",
+      "tests": ["node:os tests"],
+      "notes": "Files: src/runtime/api/bun/ohos_node_userinfo.rs, node_os.rs hook. The /proc/cpuinfo parser is P4/#47952."
+    },
+    {
+      "id": "P15",
+      "title": "WebKit: suspend-resume hardening",
+      "branch": "ohos-webkit/suspend-resume",
+      "dependsOn": [],
+      "patch": "patches/ohos-upstream/webkit/P15-suspend-resume.patch",
+      "body": "docs/ohos-pr-drafts/P15.md",
+      "status": "prepared-webkit",
+      "tests": ["WebKit tests", "OHOS stop/cont probe"],
+      "notes": "Submit to oven-sh/WebKit, not Bun. Bun PR P17 only bumps WEBKIT_VERSION."
+    },
+    {
+      "id": "P16",
+      "title": "WebKit: AOT anonymous code loading",
+      "branch": "ohos-webkit/aot-anonymous-code",
+      "dependsOn": [],
+      "patch": "patches/ohos-upstream/webkit/P16-aot-anonymous-code.patch",
+      "body": "docs/ohos-pr-drafts/P16.md",
+      "status": "prepared-webkit",
+      "tests": ["AOT image tests"],
+      "notes": "Submit to oven-sh/WebKit, not Bun. Bun PR P17 only bumps WEBKIT_VERSION."
+    },
+    {
+      "id": "P17",
+      "title": "build: bump WEBKIT_VERSION for OHOS",
+      "branch": "ohos-pr/p17-webkit-version",
+      "dependsOn": ["P15", "P16", "P1"],
+      "patch": null,
+      "body": null,
+      "status": "deferred",
+      "tests": ["build"],
+      "notes": "One-line version bump after both WebKit PRs land; do not include the OHOS WebKit cmake block here."
+    },
+    {
+      "id": "P18",
+      "title": "ci: OHOS cross-build lane",
+      "branch": "ohos-pr/p18-ci-cross",
+      "dependsOn": ["P1"],
+      "patch": null,
+      "body": null,
+      "status": "deferred",
+      "tests": ["CI"],
+      "notes": "GitHub Actions cross-build first (Ubuntu + OHOS SDK); Buildkite lane needs a maintainer. Keep the device lane separate (P19)."
+    },
+    {
+      "id": "P19",
+      "title": "ci: OHOS device test lane",
+      "branch": "ohos-pr/p19-ci-device",
+      "dependsOn": ["P2", "P8", "P9", "P10", "P11", "P12", "P13", "P14"],
+      "patch": null,
+      "body": null,
+      "status": "deferred",
+      "tests": ["full/gated suite"],
+      "notes": "Self-hosted OHOS runner; needs maintainer approval. The fork's runner is the reference."
+    },
+    {
+      "id": "P20",
+      "title": "release/signing: OHOS SDK and ELF signing",
+      "branch": "ohos-release",
+      "dependsOn": ["P19"],
+      "patch": null,
+      "body": null,
+      "status": "downstream",
+      "tests": ["release smoke"],
+      "notes": "Keep in the fork unless maintainers ask. Files: src/ohos_sign, src/sys/ohos_sign_io.rs, scripts/ohos/*, .github/workflows/ohos-*."
+    }
+  ]
+}
