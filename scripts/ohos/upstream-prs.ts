@@ -160,6 +160,10 @@ function open(candidate: any) {
     console.error(`${candidate.id}: status is ${candidate.status}; finish/split it first`);
     process.exit(2);
   }
+  if (candidate.status === "prepared-no-test" && !flags.has("--force")) {
+    console.error(`${candidate.id}: no focused test yet; add one, or use --force only after maintainers agree`);
+    process.exit(2);
+  }
   const dir = workDirOf(candidate);
   if (!existsSync(dir)) {
     console.error(`${candidate.id}: run \`prepare ${candidate.id}\` first`);
