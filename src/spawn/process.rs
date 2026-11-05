@@ -1495,13 +1495,13 @@ pub mod waiter_thread_posix {
     pub(crate) fn ensure_eventfd() -> Result<(), std::io::Error> {
         #[cfg(any(target_os = "linux", target_os = "android"))]
         {
-            if instance_ref().eventfd.is_valid() {
+            if INSTANCE.eventfd().is_valid() {
                 return Ok(());
             }
             let fd = bun_sys::eventfd(0, libc::EFD_NONBLOCK | libc::EFD_CLOEXEC)
                 .map_err(|e| std::io::Error::from_raw_os_error(e.errno as i32))?;
             // SAFETY: single-writer path (see the doc comment above).
-            unsafe { (*instance()).eventfd = fd };
+            INSTANCE.eventfd.store(fd.native(), Ordering::Relaxed);
         }
         Ok(())
     }
