@@ -11,7 +11,7 @@
  * that apply uniformly to bun's own C/C++ sources.
  */
 
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { bunExeName, linksWithLld, type Config } from "./config.ts";
 import { overridesDarwinAllocator, replacedOperatorNewSymbols } from "./deps/mimalloc.ts";
 import { quote, slash } from "./shell.ts";
@@ -360,12 +360,12 @@ export const globalFlags: Flag[] = [
   {
     // Nix LLVM doesn't support zstd — but we target standard distros.
     // Nix users can override via profile if needed.
-    flag: ["-g3", "-gz=zstd"],
+    flag: c => (c.ohos ? ["-g3"] : ["-g3", "-gz=zstd"]),
     when: c => c.unix && c.debug && c.debugInfo === "full",
     desc: "Full debug info, zstd-compressed",
   },
   {
-    flag: ["-g", "-gz=zstd"],
+    flag: c => (c.ohos ? ["-g"] : ["-g", "-gz=zstd"]),
     when: c => c.unix && c.release && c.debugInfo === "full",
     desc: "Full debug info (types and variables) where no LTO link has to carry it: local release, asan, the non-LTO CI lanes",
   },
@@ -704,6 +704,20 @@ export const globalFlags: Flag[] = [
     when: c => c.unix && c.ci,
     desc: "Remap source paths in debug info (reproducible builds)",
   },
+
+  // ─── OHOS (shared with deps) ───
+  {
+    flag: "-fno-emulated-tls",
+    when: c => c.ohos,
+    // clang's default for this target is emulated TLS (-femulated-tls), so
+    // every `__thread`/`thread_local` (mimalloc's per-thread heap pointer
+    // included) goes through a software lookup instead of a hardware TLS
+    // access. OHOS's musl supports native TLS; the default looks inherited
+    // from Android's historical NDK clang config. Must live in globalFlags
+    // (not bunOnlyFlags): the affected code is in deps' own DirectBuilds
+    // (e.g. mimalloc), which only inherit globalFlags.
+    desc: "OHOS: force native TLS — this target's emulated-tls default isn't a real platform limitation",
+  },
 ];
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -738,7 +752,7 @@ export const bunOnlyFlags: Flag[] = [
   // accepted syntax and predefined macros, not ABI).
   {
     flag: "-std=gnu++23",
-    when: c => c.linux || c.freebsd,
+    when: c => c.linux || c.freebsd || c.ohos,
     lang: "cxx",
     desc: "C++23 with GNU extensions",
   },
@@ -811,13 +825,18 @@ export const bunOnlyFlags: Flag[] = [
   },
   {
     flag: ["-fno-pic", "-fno-pie"],
-    when: c => c.unix && c.abi !== "android" && !c.hardened,
+    when: c => c.unix && c.abi !== "android" && !c.hardened && !c.ohos,
     desc: "No position-independent code (we're a final executable)",
   },
   {
+    // Android and OHOS link PIE and their loaders reject non-PIE. OHOS was
+    // built with -fno-pic, which made the linker emit R_AARCH64_COPY
+    // relocations for libc data (stdout/stderr/environ); OHOS musl does not
+    // populate them, leaving the symbols NULL (setvbuf(stdout, ...) then hits
+    // its "parameter is null" fatal abort). PIC references them via the GOT.
     flag: "-fPIC",
-    when: c => c.abi === "android",
-    desc: "Android requires PIE since API 21; bionic's loader rejects non-PIE",
+    when: c => c.abi === "android" || c.ohos,
+    desc: "Android/OHOS require PIE since their loaders reject non-PIE",
   },
 
   // ─── Warnings-as-errors (unix) ───
@@ -859,6 +878,16 @@ export const bunOnlyFlags: Flag[] = [
     ],
     when: c => c.windows,
     desc: "Suppress noisy warnings from system/dependency headers",
+  },
+  {
+    // The OHOS SDK's ICU utypes.h omits the default `#include <unicode/utf.h>`
+    // that WebKit's headers rely on for the U16_*/U_IS_BMP macros, and bun's
+    // C++ must compile against the same cross-built ICU WebKit links.
+    // C++ only: the `-include` would be parsed as assembly in the `.S` objects.
+    flag: c => [...(c.ohosIcuDir ? ["-isystem", join(c.ohosIcuDir, "include")] : []), "-include", "unicode/utf.h"],
+    when: c => c.ohos,
+    lang: "cxx",
+    desc: "OHOS: cross-built ICU headers + force unicode/utf.h (SDK utypes.h omits it)",
   },
 ];
 
@@ -958,6 +987,11 @@ export const defines: Flag[] = [
     flag: "_DARWIN_NON_CANCELABLE=1",
     when: c => c.darwin,
     desc: "Use non-cancelable POSIX calls on Darwin",
+  },
+  {
+    flag: "__MUSL__=1",
+    when: c => c.ohos,
+    desc: "OHOS uses musl libc — gate musl-specific code paths",
   },
   {
     flag: ["WIN32", "_WINDOWS", "WIN32_LEAN_AND_MEAN=1", "_CRT_SECURE_NO_WARNINGS", "BORINGSSL_NO_CXX=1"],
@@ -1419,7 +1453,7 @@ export const linkerFlags: Flag[] = [
     // for clone(CLONE_FS) during that window (the --watch reload). Behavioral,
     // not a version pin, so it applies to every Linux libc.
     flag: ["-Wl,--wrap=execve", "-Wl,--wrap=pthread_create"],
-    when: c => c.linux,
+    when: c => c.linux || c.ohos,
     desc: "Retry pthread_create EAGAIN caused by an in-flight execve",
   },
   {
@@ -1549,7 +1583,8 @@ export const linkerFlags: Flag[] = [
   },
   {
     flag: c => `-Wl,-Map=${linkerMapPath(c)}`,
-    when: c => (c.linux || c.freebsd) && writesLinkerMap(c),
+    // OHOS too: `--trimmable` reads the map to lay the link out by feature.
+    when: c => (c.linux || c.freebsd || c.ohos) && writesLinkerMap(c),
     desc: "Linker map",
   },
   {
@@ -1682,6 +1717,91 @@ export const linkerFlags: Flag[] = [
     when: c => c.freebsd && c.release,
     desc: "Garbage-collect unused sections",
   },
+
+  // ─── OHOS ───
+  {
+    flag: c => [`--target=aarch64-linux-ohos`, `--sysroot=${c.ohosSysroot!}`],
+    when: c => c.ohos,
+    desc: "OHOS target triple + sysroot at link time",
+  },
+  {
+    flag: "-Wl,--allow-multiple-definition",
+    when: c => c.ohos,
+    desc: "OHOS: allow iostream stub duplicate; mimalloc override disabled",
+  },
+  {
+    flag: c =>
+      [
+        `-L${c.ohosCrossLibs!}/libcxx/lib`,
+        `-L${c.ohosCrossLibs!}/libcxxabi/lib`,
+        `-L${c.ohosCrossLibs!}/libunwind/lib`,
+        c.ohosIcuDir ? `-L${c.ohosIcuDir}/lib` : "",
+        "-lc++",
+        "-lc++abi",
+        "-lunwind",
+        // OHOS: brew ICU (icu4c@78) is built against libc++'s `__n1` ABI
+        // namespace, which the static libc++_static.a (llvm@21, `__h`) does
+        // not provide. Resolve ICU's `__n1` undefined references from the
+        // SDK's libc++_shared.so at link time; the runtime loads it via
+        // DT_NEEDED alongside bun's statically-linked `__h` libc++ (the two
+        // namespaces are disjoint, so they coexist).
+        // The SDK root can be either `<root>/native/...` or `<root>/ohos/native/...`,
+        // so resolve the sibling `llvm/` dir from the sysroot itself.
+        ...(c.ohosSysroot ? [join(dirname(c.ohosSysroot), "llvm/lib/aarch64-linux-ohos/libc++_shared.so")] : []),
+        "-lc",
+      ].filter(f => f !== ""),
+    when: c => c.ohos,
+    desc: "OHOS: link the cross-compiled libc++ + libc++abi + libunwind + dynamic libc",
+  },
+  {
+    flag: [
+      "-Wl,--as-needed",
+      "-Wl,-z,stack-size=8192000",
+      "-Wl,-z,lazy",
+      "-Wl,-z,norelro",
+      "-Wl,-O2",
+      "-Wl,--sort-section=name",
+      "-Wl,--hash-style=both",
+      "-Wl,--build-id=sha1",
+    ],
+    when: c => c.ohos,
+    desc: "OHOS linker tuning: 8MB stack (debug compression skipped — host LLVM lacks zlib)",
+  },
+  {
+    // lld's aarch64-linux-ohos default gives RW/TLS a 64KiB p_align but
+    // leaves R/R-E at 4KiB, so a strict-p_align loader sees the segments
+    // overlap by a few KiB (bun's own standalone module-graph
+    // append/relocate logic checks p_align).
+    flag: ["-Wl,-z,common-page-size=0x10000", "-Wl,-z,max-page-size=0x10000"],
+    when: c => c.ohos,
+    desc: "OHOS: uniform 64 KiB segment alignment — mixed 4K/64K PT_LOAD align overlaps under strict p_align",
+  },
+  {
+    // Matches the linux/freebsd release links; the pre-merge release linked
+    // with it as well. Recovers a few MB of unreferenced sections.
+    flag: "-Wl,--gc-sections",
+    when: c => c.ohos && c.release,
+    desc: "OHOS release: garbage-collect unused sections",
+  },
+  {
+    flag: ["-pie", "-Wl,-dynamic-linker=/system/lib/ld-musl-aarch64.so.1"],
+    when: c => c.ohos,
+    desc: "OHOS PIE: dynamic linking (allows fork/clone through seccomp)",
+  },
+  {
+    flag: "-Wl,--noinhibit-exec",
+    when: c => c.ohos,
+    desc: "OHOS: LLD alignment warnings → ignore (SCTLR_EL1.A is 0 on aarch64)",
+  },
+  {
+    flag: c => [
+      "-Wl,-Bsymbolic-functions",
+      `-Wl,--export-dynamic-symbol-list=${exportListPath(c)}`,
+      `-Wl,--version-script=${versionScriptPath(c)}`,
+    ],
+    when: c => c.ohos,
+    desc: "OHOS: export list + version script (mirror linux block; exposes napi_/node_api_ for .node dlopen)",
+  },
 ];
 
 /**
@@ -1766,10 +1886,10 @@ export function orderFilePath(cfg: Pick<Config, "buildDir">): string {
  * step cannot work without them (see the `/lldmap` entry).
  */
 export function writesLinkerMap(
-  cfg: Pick<Config, "linux" | "darwin" | "windows" | "freebsd" | "release" | "asan" | "valgrind" | "linkerMap">,
+  cfg: Pick<Config, "linux" | "darwin" | "windows" | "freebsd" | "ohos" | "release" | "asan" | "valgrind" | "linkerMap">,
 ): boolean {
   if (!cfg.release || !cfg.linkerMap) return false;
-  if (cfg.linux || cfg.freebsd) return !cfg.asan && !cfg.valgrind;
+  if (cfg.linux || cfg.freebsd || cfg.ohos) return !cfg.asan && !cfg.valgrind;
   return cfg.darwin || cfg.windows;
 }
 

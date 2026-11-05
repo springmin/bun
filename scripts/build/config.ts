@@ -18,7 +18,7 @@ import { resolveMacosSdkPath } from "./macos-sdk.ts";
 import { clangTargetArch, toolchainOverride } from "./tools.ts";
 import { cyan, dim, green } from "./tty.ts";
 
-export type OS = "linux" | "darwin" | "windows" | "freebsd";
+export type OS = "linux" | "darwin" | "windows" | "freebsd" | "ohos";
 export type Arch = "x64" | "aarch64";
 export type Abi = "gnu" | "musl" | "android";
 export type BuildType = "Debug" | "Release" | "RelWithDebInfo" | "MinSizeRel";
@@ -89,7 +89,8 @@ export interface Config {
   darwin: boolean;
   windows: boolean;
   freebsd: boolean;
-  /** linux || darwin || freebsd */
+  ohos: boolean;
+  /** linux || darwin || freebsd || ohos */
   unix: boolean;
   x64: boolean;
   arm64: boolean;
@@ -438,6 +439,11 @@ export interface Config {
   winsysroot: string | undefined;
   /** NDK compiler-rt/libunwind dir: `<ndk>/toolchains/llvm/prebuilt/<host>/lib/clang/<ver>/lib/linux`. */
   androidNdkRuntimeDir: string | undefined;
+  /** OHOS cross-compilation paths (set when os === "ohos"). */
+  ohosSdkRoot: string | undefined;
+  ohosSysroot: string | undefined;
+  ohosCrossLibs: string | undefined;
+  ohosIcuDir: string | undefined;
 
   // ─── Versioning ───
   /** Bun's own version (from package.json). */
@@ -538,6 +544,12 @@ export interface PartialConfig {
   osxDeploymentTarget?: string;
   /** Windows sysroot (xwin splat, VS layout). Only used when cross-compiling for os=windows. */
   winsysroot?: string;
+  /** OHOS cross-compilation paths (required when os=ohos). */
+  ohosSdkRoot?: string;
+  ohosSysroot?: string;
+  ohosCrossLibs?: string;
+  ohosIcuDir?: string;
+  crossTarget?: string;
   // Version pins (defaults in versions.ts).
   nodejsVersion?: string;
   nodejsAbiVersion?: string;
@@ -630,7 +642,7 @@ export interface Toolchain extends JsToolchain {
 export function detectHost(): Host {
   const plat = hostPlatform();
   const os: OS =
-    plat === "linux"
+    plat === "linux" || plat === "openharmony"
       ? "linux"
       : plat === "darwin"
         ? "darwin"
@@ -880,12 +892,13 @@ export function sharedCacheDir(cwd: string): string {
  * and what build_options.rs is generated from. resolveConfig() and resolveCodegenConfig() both start from it.
  */
 function resolveBase(partial: PartialConfig, host: Host, os: OS, arch: Arch, js: JsToolchain) {
-  const abi: Abi | undefined = os === "linux" ? (partial.abi ?? detectLinuxAbi()) : undefined;
+  const abi: Abi | undefined = os === "linux" ? (partial.abi ?? detectLinuxAbi()) : os === "ohos" ? "musl" : undefined;
 
   const linux = os === "linux";
   const darwin = os === "darwin";
   const windows = os === "windows";
   const freebsd = os === "freebsd";
+  const ohos = os === "ohos";
   const arm64 = arch === "aarch64";
   // Darwin target on a non-darwin host (Linux CI box building macOS
   // binaries). Same host-clang + --target/-isysroot model as Android/FreeBSD,
@@ -997,6 +1010,7 @@ function resolveBase(partial: PartialConfig, host: Host, os: OS, arch: Arch, js:
     darwin,
     windows,
     freebsd,
+    ohos,
     darwinCross,
     buildType,
     debug,
@@ -1073,6 +1087,7 @@ export function resolveConfig(partial: PartialConfig, toolchain: Toolchain): Con
     darwin,
     windows,
     freebsd,
+    ohos,
     darwinCross,
     buildType,
     debug,
@@ -1100,7 +1115,7 @@ export function resolveConfig(partial: PartialConfig, toolchain: Toolchain): Con
     esbuild,
   } = resolveBase(partial, host, os, arch, toolchain);
 
-  const unix = linux || darwin || freebsd;
+  const unix = linux || darwin || freebsd || ohos;
   const x64 = arch === "x64";
   const arm64 = arch === "aarch64";
   // Windows target on a non-Windows host (clang-cl + lld-link + xwin
@@ -1160,7 +1175,17 @@ export function resolveConfig(partial: PartialConfig, toolchain: Toolchain): Con
   // emitRust() reports that.
   const clangMajor = majorOf(toolchain.clangVersion);
   const rustLlvmMajor = majorOf(toolchain.rustLlvmVersion);
-  if (clangMajor !== undefined && rustLlvmMajor !== undefined && clangMajor !== rustLlvmMajor) {
+  // OHOS: the port's pinned rustc answers LLVM 22 while the OHOS SDK ships clang
+  // 23, and the nightly cannot be moved in this environment. The link reads only
+  // rustc's *older* bitcode, which a newer lld reads fine (LLVM bitcode is
+  // forward-compatible), and the OHOS build passes `--lto=off`.
+  const llvmMajorsMayDiffer = ohos;
+  if (
+    !llvmMajorsMayDiffer &&
+    clangMajor !== undefined &&
+    rustLlvmMajor !== undefined &&
+    clangMajor !== rustLlvmMajor
+  ) {
     throw new BuildError(
       `clang is LLVM ${toolchain.clangVersion} and rustc's LLVM is ${toolchain.rustLlvmVersion}; they have to be the same major version`,
       {
@@ -1352,6 +1377,34 @@ export function resolveConfig(partial: PartialConfig, toolchain: Toolchain): Con
     }
   }
 
+  // ─── Cross-compilation (OHOS) ───
+  let ohosSdkRoot: string | undefined;
+  let ohosSysroot: string | undefined;
+  let ohosCrossLibs: string | undefined;
+  let ohosIcuDir: string | undefined;
+  if (ohos) {
+    ohosSdkRoot = partial.ohosSdkRoot ? resolve(cwd, partial.ohosSdkRoot) : findOhosSdkRoot();
+    if (!ohosSdkRoot) {
+      throw new BuildError("OHOS build requires --ohos-sdk-root=<path> or setup-ohos-sdk in home", {
+        hint: "Install OHOS SDK from https://gitee.com/openharmony and point --ohos-sdk-root to the SDK root.",
+      });
+    }
+    ohosSysroot = partial.ohosSysroot
+      ? resolve(cwd, partial.ohosSysroot)
+      : resolve(ohosSdkRoot, "ohos/native/sysroot");
+    if (!existsSync(ohosSysroot)) {
+      throw new BuildError(`OHOS sysroot not found at ${ohosSysroot}`);
+    }
+    ohosCrossLibs = partial.ohosCrossLibs
+      ? resolve(cwd, partial.ohosCrossLibs)
+      : resolve(cwd, "build", "ohos-cross-libs");
+    ohosIcuDir = partial.ohosIcuDir
+      ? resolve(cwd, partial.ohosIcuDir)
+      : resolve(cwd, "build", "ohos-icu", "target");
+    sysroot = ohosSysroot;
+    crossTarget = partial.crossTarget ?? "aarch64-linux-ohos";
+  }
+
   // ─── Linux-gnu/musl sysroot + target ───
   // Every CI linux-gnu build (native AND cross-arch) uses the ubuntu:20.04 +
   // gcc-13 sysroot so the glibc verneed matches what the --wrap list covers
@@ -1498,6 +1551,7 @@ export function resolveConfig(partial: PartialConfig, toolchain: Toolchain): Con
     darwin,
     windows,
     freebsd,
+    ohos,
     unix,
     x64,
     arm64,
@@ -1622,6 +1676,10 @@ export function resolveConfig(partial: PartialConfig, toolchain: Toolchain): Con
     sysroot,
     winsysroot,
     androidNdkRuntimeDir,
+    ohosSdkRoot,
+    ohosSysroot,
+    ohosCrossLibs,
+    ohosIcuDir,
     version,
     revision,
     nodejsVersion,
@@ -1990,4 +2048,17 @@ export function formatConfig(cfg: Config, exe: string): string {
  */
 export function formatConfigUnchanged(exe: string, elapsed: number): string {
   return `[configured] ${c.green(exe)} in ${elapsed}ms ${c.dim("(unchanged)")}`;
+}
+
+function findOhosSdkRoot(): string | undefined {
+  // Environment variable takes priority (standard for cross-compilation toolchains).
+  const envRoot = process.env.OHOS_SDK_ROOT;
+  if (envRoot && existsSync(resolve(envRoot, "ohos/native/sysroot"))) {
+    return envRoot;
+  }
+  const candidates = [resolve(homedir(), "setup-ohos-sdk"), resolve(homedir(), "ohos-sdk"), "/opt/ohos-sdk"];
+  for (const dir of candidates) {
+    if (existsSync(resolve(dir, "ohos/native/sysroot"))) return dir;
+  }
+  return undefined;
 }

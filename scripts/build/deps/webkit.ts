@@ -859,6 +859,7 @@ function icuIncludes(wk: WebKitBuild): string[] {
   if (cfg.darwin) return [join(wk.WTF, "icu")];
   if (cfg.windows) return [join(windowsIcuDir(wk), "include")];
   if (cfg.abi === "android") return [join(androidIcuRoot(), "include")];
+  if (cfg.ohos) return cfg.ohosIcuDir === undefined ? [] : [join(cfg.ohosIcuDir, "include")];
   const root = linuxIcuRoot(cfg);
   return root === undefined ? [] : [join(root, "include")];
 }
@@ -869,6 +870,9 @@ function icuBuild(wk: WebKitBuild): { libs: string[]; outputs: string[] } {
   if (cfg.abi === "android") {
     return { libs: staticIcuLibs(androidIcuRoot()), outputs: [] };
   }
+  // OHOS links the cross-built ICU from bun.ts (static .a paths); WebKit only
+  // needs the headers, supplied by icuIncludes().
+  if (cfg.ohos) return { libs: [], outputs: [] };
   const root = linuxIcuRoot(cfg);
   if (cfg.hardened) {
     if (root === undefined) {
@@ -1021,7 +1025,15 @@ function webkitFlags(wk: WebKitBuild): WebKitFlags {
   // header — OptionsJSCOnly.cmake), so no TU drags std::ios_base::Init in.
   const bannedIncludes = cfg.debug ? [] : [`-I${q(join(WTF, "wtf", "bun", "BannedIncludes"))}`];
   // -Wno-noexcept-type: WebKitCompilerFlags.cmake, C++ only.
-  const cxx = [...bannedIncludes, cfg.windows ? "/clang:-std=c++23" : "-std=c++23", "-Wno-noexcept-type"];
+  const cxx = [
+    ...bannedIncludes,
+    cfg.windows ? "/clang:-std=c++23" : "-std=c++23",
+    "-Wno-noexcept-type",
+    // OHOS SDK ICU utypes.h omits `#include <unicode/utf.h>`, so U16_LENGTH /
+    // U_IS_BMP / ... are not pulled in; force-include it for C++ (the .S
+    // objects would parse it as assembly).
+    ...(cfg.ohos ? ["-include", "unicode/utf.h"] : []),
+  ];
   const icuFlags = [
     ...(cfg.darwin ? ["-DU_DISABLE_RENAMING=1"] : cfg.windows ? ["-DU_STATIC_IMPLEMENTATION=1"] : []),
     ...icuIncludes(wk).map(i => `-I${q(i)}`),
