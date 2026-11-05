@@ -117,11 +117,10 @@ typedef struct bun_spawn_request_t {
 // as _exit() may try to acquire locks held by threads that don't exist in the child.
 static inline void rawExit(int status)
 {
-#if OS(LINUX)
-    syscall(__NR_exit_group, status);
-#else
-    _exit(status);
+#if defined(__NR_exit_group)
+    (void)syscall(__NR_exit_group, status);
 #endif
+    _exit(status);
 }
 
 #if OS(LINUX)
