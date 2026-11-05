@@ -1064,9 +1064,10 @@ impl Linux {
                     // event, i.e. at the first lookahead candidate.
                     if ev.mask & IN::ATTRIB != 0 && !name.is_empty() {
                         let attrib_wd = ev.watch_descriptor;
+                        let buf_bytes = bun_core::bytes_of_mut(&mut *buf);
                         let mut shadowed =
-                            attrib_shadowed_by_create(&buf.0[..n], i, attrib_wd, name);
-                        if !shadowed && n < buf.0.len() {
+                            attrib_shadowed_by_create(&buf_bytes[..n], i, attrib_wd, name);
+                        if !shadowed && n < buf_bytes.len() {
                             // The labeling CRE is queued by the same syscall as the
                             // ATTRIB, but on a quiet queue the reader wakes on the
                             // ATTRIB before the syscall reaches the create hook, so
@@ -1076,7 +1077,7 @@ impl Linux {
                             // re-check across the read boundary. Newly read events
                             // extend this batch (`n` grows), so ordering is intact.
                             // `ev`/`name` are raw-pointer-derived and the re-read
-                            // only writes the disjoint tail `buf.0[n..]`, so both
+                            // only writes the disjoint tail `buf[n..]`, so both
                             // stay valid across it.
                             let mut pfd = [sys::posix::PollFd {
                                 fd: fd.native(),
@@ -1084,9 +1085,9 @@ impl Linux {
                                 revents: 0,
                             }];
                             if matches!(sys::posix::poll(&mut pfd, 2), Ok(rc) if rc > 0) {
-                                // `n < buf.0.len()`, so `buf.0[n..]` is a non-empty
+                                // `n < buf.len()`, so `buf[n..]` is a non-empty
                                 // writable tail of the boxed buffer.
-                                let rc2 = sys::linux::read(fd.native(), &mut buf.0[n..]);
+                                let rc2 = sys::linux::read(fd.native(), &mut buf_bytes[n..]);
                                 let got = match sys::get_errno(rc2) {
                                     E::SUCCESS => rc2 as usize,
                                     _ => 0,
@@ -1094,7 +1095,7 @@ impl Linux {
                                 if got > 0 {
                                     n += got;
                                     shadowed =
-                                        attrib_shadowed_by_create(&buf.0[..n], i, attrib_wd, name);
+                                        attrib_shadowed_by_create(&buf_bytes[..n], i, attrib_wd, name);
                                 }
                             }
                         }
