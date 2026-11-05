@@ -50,8 +50,8 @@
       "body": "docs/ohos-pr-drafts/P4.md",
       "status": "submitted",
       "pr": 47952,
-      "tests": ["6 Rust unit tests"],
-      "notes": "Submitted as oven-sh/bun#47952. Generic and independent of the platform decision."
+      "tests": ["8 Rust unit tests", "source-lint byte-search"],
+      "notes": "Submitted as oven-sh/bun#47952. Generic and independent of the platform decision. Review fixes: bun_core::strings and models keyed by /proc/stat CPU ID."
     },
     {
       "id": "P5",
