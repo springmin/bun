@@ -80,7 +80,6 @@ const classesWithConstructor = [
   "%Blob%",
   "%BlockList%",
   "%BuildMessage%",
-  "%CellSegmenter%",
   "%Crypto%",
   "%ELDHistogram%",
   "%Expect%",
