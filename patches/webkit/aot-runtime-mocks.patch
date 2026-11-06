@@ -1,16 +1,15 @@
 diff --git a/Source/JavaScriptCore/aot/ir/AOTIRProgram.cpp b/Source/JavaScriptCore/aot/ir/AOTIRProgram.cpp
-index 281f6f501cdd..92684cb47f9e 100644
+index 281f6f501cdd..e604cb7dc715 100644
 --- a/Source/JavaScriptCore/aot/ir/AOTIRProgram.cpp
 +++ b/Source/JavaScriptCore/aot/ir/AOTIRProgram.cpp
-@@ -755,8 +755,9 @@ bool importMayAnswerWithMock(const Module& module)
+@@ -755,8 +755,8 @@ bool importMayAnswerWithMock(const Module& module)
  
  bool requireMayAnswerWithMock(const Program& program, const Module& module)
  {
 -    std::span<const uint8_t> name = program.string(module.path);
 -    return importMayAnswerWithMock(module) && !spanHasPrefix(name, byteCast<uint8_t>("node:"_span)) && !equalSpans(name, byteCast<uint8_t>("bun"_span));
-+    // `bun run` takes a `node:` name to the registry and `bun` to the global object, where no mock stands. Under `bun test` a mock stands over either, and the build marks it MayBeMocked.
-+    UNUSED_PARAM(program);
-+    return importMayAnswerWithMock(module);
++    // `bun run` takes a `node:` name to the registry, where no mock stands. Under `bun test` a mock stands there too, and the build marks the module MayBeMocked. `require("bun")` is the global `Bun` however it is mocked.
++    return importMayAnswerWithMock(module) && !equalSpans(program.string(module.path), byteCast<uint8_t>("bun"_span));
  }
  
  bool requireReadsModuleValue(const Program& program, const Module& module)
@@ -28,10 +27,19 @@ index c53504a33f1b..e834ce42a691 100644
  bool requireReadsModuleValue(const Program&, const Module&);
  // overridableRequire() in CommonJS.ts.
 diff --git a/Source/JavaScriptCore/aot/runtime/AOTModuleEvaluation.cpp b/Source/JavaScriptCore/aot/runtime/AOTModuleEvaluation.cpp
-index 26e5dfce5b50..ab2c17bcb08c 100644
+index 26e5dfce5b50..8a2310044982 100644
 --- a/Source/JavaScriptCore/aot/runtime/AOTModuleEvaluation.cpp
 +++ b/Source/JavaScriptCore/aot/runtime/AOTModuleEvaluation.cpp
-@@ -3091,14 +3091,17 @@ JSValue Modules::answerRequireWithMock(ModuleID target, ModuleID referrer)
+@@ -3076,7 +3076,7 @@ JSValue Modules::requireThroughCache(ModuleID target, ModuleID referrer)
+         JSValue stored = loaded.objectMadeByRequire ? loaded.objectMadeByRequire->getDirect(*m_instance.vm, m_instance.vm->propertyNames->exports) : JSValue();
+         return stored ? stored : kept;
+     }
+-    bool isMocked = m_libraryModulesWithMock.get(target.index()) && host().replacesNativeModule && host().replacesNativeModule(m_instance.globalObject, m_table.pathText(target));
++    bool isMocked = host().replacesNativeModule && host().replacesNativeModule(m_instance.globalObject, m_table.pathText(target));
+     JSValue answered = isMocked ? answerRequireWithMock(target, referrer) : answerRequire(target);
+     RETURN_IF_EXCEPTION(scope, { });
+     addToRequireCache(target, answered);
+@@ -3091,14 +3091,18 @@ JSValue Modules::answerRequireWithMock(ModuleID target, ModuleID referrer)
      VM& vm = *m_instance.vm;
      JSGlobalObject* realm = m_instance.globalObject;
      auto scope = DECLARE_THROW_SCOPE(vm);
@@ -42,7 +50,9 @@ index 26e5dfce5b50..ab2c17bcb08c 100644
          RELEASE_AND_RETURN(scope, requireSpecifier(pathString(target), referrer, true));
      JSValue defaultExport = defaultExportOfMockMarkedAsESModule(target);
      RETURN_IF_EXCEPTION(scope, { });
-     if (defaultExport)
+-    if (defaultExport)
++    // A require() before the mock made the entry that answers the later ones: it holds the factory's object, not its `default`.
++    if (defaultExport && !isInRequireCache(target))
          return defaultExport;
 -    // An import had loaded the module when it was mocked. There the loader holds it as an ES module, so require() gets the namespace object, with the mock in it.
 +    // An import had loaded the module when it was mocked. The loader put the mock's exports into the entry that require() reads, also for a name that no cache keeps.
@@ -52,7 +62,7 @@ index 26e5dfce5b50..ab2c17bcb08c 100644
      RELEASE_AND_RETURN(scope, moduleNamespace(target, ModulePhase::Evaluation));
  }
  
-@@ -3137,9 +3140,11 @@ JSValue Modules::answerRequire(ModuleID target, ModuleID referrer, RequiredBy re
+@@ -3137,9 +3141,15 @@ JSValue Modules::answerRequire(ModuleID target, ModuleID referrer, RequiredBy re
      if (isLeftToHost(target)) [[unlikely]]
          RELEASE_AND_RETURN(scope, loadEvictedFile(fileOf(target)));
      const ModuleData& targetData = data(target);
@@ -60,12 +70,30 @@ index 26e5dfce5b50..ab2c17bcb08c 100644
      bool isRequiredByProgram = requiredBy == RequiredBy::Program || (referrer && !data(referrer).isOfLibrary());
 -    if (targetData.isOfLibrary() && isRequiredByProgram && isKeptInRequireCache(target)) [[unlikely]]
 +    // A mock stands in the loader, not in the image. A require() of a name that starts with `node:` asks no cache, and one behind a mock asks the loader.
-+    if (isRequiredByProgram && host().replacesNativeModule && host().replacesNativeModule(m_instance.globalObject, m_table.pathText(target))) [[unlikely]]
++    if (isRequiredByProgram && host().replacesNativeModule && host().replacesNativeModule(m_instance.globalObject, m_table.pathText(target))) [[unlikely]] {
++        // A later require() answers the entry that the first one made, which the mock keeps up to date.
++        if (isKeptInRequireCache(target))
++            RELEASE_AND_RETURN(scope, requireThroughCache(target, referrer));
 +        RELEASE_AND_RETURN(scope, answerRequireWithMock(target, referrer));
++    }
 +    if ((targetData.isOfLibrary() || !m_table.hasFilePath(target)) && isRequiredByProgram && isKeptInRequireCache(target)) [[unlikely]]
          RELEASE_AND_RETURN(scope, requireThroughCache(target, referrer));
      if (m_state.statics->fillsVariablesWithFiles() && (status(target) == ModuleStatus::Linking || status(target) == ModuleStatus::Evaluating))
          m_state.statics->fillVariablesOfAllFiles();
+diff --git a/Source/JavaScriptCore/aot/runtime/AOTModuleLinking.cpp b/Source/JavaScriptCore/aot/runtime/AOTModuleLinking.cpp
+index afb20cc21114..7f4ac236fa26 100644
+--- a/Source/JavaScriptCore/aot/runtime/AOTModuleLinking.cpp
++++ b/Source/JavaScriptCore/aot/runtime/AOTModuleLinking.cpp
+@@ -138,7 +138,8 @@ void Modules::checkRequiredNames(std::span<const ModuleID> modules)
+                 RELEASE_AND_RETURN(scope, throwExportAmbiguous(requiredName));
+             case StarExportResolution::Type::NotFound:
+             case StarExportResolution::Type::Error:
+-                if (requiredName.mayBeAbsent && data(exporter).exportRule != SyntheticExportRule::RuntimeModule)
++                // A mock stands for the whole module: a name that it leaves out is undefined, as in plain Bun, also over a runtime module.
++                if (requiredName.mayBeAbsent && (data(exporter).exportRule != SyntheticExportRule::RuntimeModule || ensureLoaded(exporter).exportsWhatMockNamesAlone))
+                     continue;
+                 // A CommonJS file has `default` from the start, and loses it with its other names.
+                 if (isCommonJSFileOrFace(exporter) && identifier(requiredName.name) == m_instance.vm->propertyNames->defaultKeyword && !ensureLoaded(exporter).didDropError && !ensureLoaded(fileOf(exporter)).didDropError && !ensureLoaded(exporter).exportsWhatMockNamesAlone)
 diff --git a/Source/JavaScriptCore/aot/runtime/AOTModules.cpp b/Source/JavaScriptCore/aot/runtime/AOTModules.cpp
 index 957017e2679a..66b153d7ffaf 100644
 --- a/Source/JavaScriptCore/aot/runtime/AOTModules.cpp

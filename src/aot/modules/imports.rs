@@ -674,8 +674,10 @@ impl<'a, 's> FileBinder<'a, 's> {
             return None;
         }
         let is_listed = context.known_members.has(context.modules, module, name);
+        // A mock stands for the whole module. A name that the build has not listed is the run's to find, and a mock that lacks it leaves the import undefined, as plain Bun does.
+        let may_be_absent = is_listed || context.mocked.contains(module);
         (!is_listed || context.mocked.contains(module)).then(|| RequiredName {
-            is_found_unless_mocked: is_listed,
+            is_found_unless_mocked: may_be_absent,
             ..RequiredName::new(module, name)
         })
     }

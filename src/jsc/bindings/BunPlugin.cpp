@@ -506,6 +506,11 @@ public:
     bool readUninitializedVariable { false };
     // The mock waited for the first load by compiled code, and a require() behind it had left a module object in require.cache by then.
     bool keepsModuleObject { false };
+    // An earlier mock already stands over this module: the objects that require() answered keep their names, and this factory's values replace theirs.
+    bool patchesEarlierMock { false };
+    // The mock before this one, and the object that this mock made the module answer with.
+    WriteBarrier<JSObject> earlierMock;
+    WriteBarrier<JSObject> commonJSExportsOfMock;
 
     static JSModuleMock* create(JSC::VM& vm, JSC::Structure* structure, JSC::JSValue factory, JSC::JSString* specifier, JSC::JSString* writtenSpecifier, ModuleMockFunction);
     static Structure* createStructure(JSC::VM& vm, JSC::JSGlobalObject* globalObject, JSC::JSValue prototype);
@@ -2165,8 +2170,39 @@ __attribute__((minsize)) static void overrideLoadedModuleExports(Zig::GlobalObje
             moduleExports = commonJSExports->exportsObject();
             RETURN_IF_EXCEPTION(scope, );
         }
+        // A later mock replaces the values of the names that the objects earlier requires answered have. It adds none: a name that the factory leaves out keeps its value.
+        if (mock->patchesEarlierMock && moduleExports.isObject()) {
+            JSObject* source = moduleExports.getObject();
+            JSObject* currentExports = moduleObject->exportsObject().getObject();
+            bool isClosest = true;
+            for (JSObject* earlier = mock->earlierMock.get(); earlier;) {
+                auto* earlierMock = dynamicDowncast<JSModuleMock>(earlier);
+                if (!earlierMock)
+                    break;
+                // The mock that made the object now in the module is the first behind this one, and may not have seen the module yet.
+                if (!earlierMock->commonJSExportsOfMock.get() && isClosest && currentExports)
+                    earlierMock->commonJSExportsOfMock.set(vm, earlierMock, currentExports);
+                isClosest = false;
+                if (JSObject* target = earlierMock->commonJSExportsOfMock.get(); target && target != source) {
+                    JSC::PropertyNameArrayBuilder properties(vm, PropertyNameMode::Strings, PrivateSymbolMode::Exclude);
+                    source->methodTable()->getOwnPropertyNames(source, globalObject, properties, DontEnumPropertiesMode::Exclude);
+                    RETURN_IF_EXCEPTION(scope, );
+                    for (auto& name : properties) {
+                        if (!target->hasOwnProperty(globalObject, name))
+                            continue;
+                        JSValue value = source->get(globalObject, name);
+                        RETURN_IF_EXCEPTION(scope, );
+                        target->putDirectMayBeIndex(globalObject, name, value);
+                        RETURN_IF_EXCEPTION(scope, );
+                    }
+                }
+                earlier = earlierMock->earlierMock.get();
+            }
+        }
         moduleObject->putDirect(vm, Bun::builtinNames(vm).exportsPublicName(), moduleExports, 0);
         moduleObject->hasEvaluated = true;
+        if (moduleExports.isObject())
+            mock->commonJSExportsOfMock.set(vm, mock, moduleExports.getObject());
     }
 }
 
@@ -3119,6 +3155,8 @@ __attribute__((minsize)) static JSC::EncodedJSValue mockModule(JSC::JSGlobalObje
 
     // With an earlier mock in place, what's loaded isn't the original any more, so inherit what that mock saved.
     if (previous && !leavesLoadedModuleAlone) {
+        mock->patchesEarlierMock = true;
+        mock->earlierMock.setMayBeNull(vm, mock, previous);
         mock->originalExports.setMayBeNull(vm, mock, previous->originalExports.get());
         mock->originalNamespace.setMayBeNull(vm, mock, previous->originalNamespace.get());
         mock->patchedNamespace.setMayBeNull(vm, mock, previous->patchedNamespace.get());
@@ -4018,6 +4056,8 @@ void JSModuleMock::visitChildrenImpl(JSCell* cell, Visitor& visitor)
     visitor.append(mock->originalNamespace);
     visitor.append(mock->patchedNamespace);
     visitor.append(mock->originalExportsOfEvictedModule);
+    visitor.append(mock->earlierMock);
+    visitor.append(mock->commonJSExportsOfMock);
 }
 
 DEFINE_VISIT_CHILDREN(JSModuleMock);
