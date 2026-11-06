@@ -811,7 +811,14 @@ static JSValue requireNativeModule(JSGlobalObject* realm, JSString* specifier)
     String text = specifier->value(realm);
     RETURN_IF_EXCEPTION(scope, {});
     BunString name = Bun::toString(text);
-    JSValue exports = resolveAndFetchBuiltinModule(uncheckedDowncast<Zig::GlobalObject>(realm), &name);
+    auto* globalObject = uncheckedDowncast<Zig::GlobalObject>(realm);
+    // As require() of a built-in does under `bun run`: a mock of one answers before the registry's own module.
+    ErrorableResolvedSource res;
+    auto builtin = fetchBuiltinModuleWithoutResolution(globalObject, &name, &res);
+    RETURN_IF_EXCEPTION(scope, {});
+    if (builtin.kind == BuiltinModule::Kind::Exports)
+        return builtin.exports;
+    JSValue exports = resolveAndFetchBuiltinModule(globalObject, &name);
     RETURN_IF_EXCEPTION(scope, {});
     if (exports)
         return exports;

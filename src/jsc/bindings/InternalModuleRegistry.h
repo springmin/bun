@@ -11,6 +11,9 @@ using namespace JSC;
 
 enum class ErrorCode : uint16_t;
 
+// The name that a built-in module answers to, or "" for one without a public name.
+const char* publicModuleName(uint32_t id);
+
 // Internal module registry is an array of lazily initialized "modules". Module
 // IDs are generated pre-build by `bundle-modules.ts` and inlined into JS code
 // and the C++ enum (InternalModuleRegistry::Field) This allows modules

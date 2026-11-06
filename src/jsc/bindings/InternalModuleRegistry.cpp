@@ -256,8 +256,10 @@ static NEVER_INLINE JSC::JSValue generateInternalModuleFromText(JSC::JSGlobalObj
     return result;
 }
 
-static const char* publicModuleName(uint32_t id)
+const char* publicModuleName(uint32_t id)
 {
+    if (id >= InternalModuleRegistryConstants::moduleCount)
+        return "";
     const char* name = InternalModuleRegistryConstants::publicModuleNames;
     for (uint32_t before = id; before--;)
         name += strlen(name) + 1;
