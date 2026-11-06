@@ -131,3 +131,39 @@ deliberately downstream: the OHOS SDK and signing policy are not Bun runtime con
 2. Who sponsors the series and the CI lane (Buildkite cross-build first, device later)?
 3. Are the two WebKit patches acceptable in `oven-sh/WebKit`, or should Bun pin a fork?
 4. Should signing/release tooling stay downstream (current assumption)?
+
+## AOT mocks (Layer 2)
+
+The compiled-test mock bridge is fixed in the fork:
+
+- `aot/lower/module/loads.rs`: a module that may be mocked takes the runtime
+  `require()` path instead of the planned, in-place evaluation.
+- `AOTIRProgram::requireMayAnswerWithMock()`: `node:` names may be mocked when
+  the build marked the module `MayBeMocked`; `require("bun")` stays the global.
+- `AOTModuleEvaluation`: a runtime mock answers before the registry/cache;
+  a kept library module answers through the require-cache entry that the first
+  require made; a mock's missing export is `undefined`.
+- `BunCompiledModules`/`ZigGlobalObject`: `requireNativeModule()` and
+  `requireBuiltinModule()` ask the loader's mock registry first.
+- `BunPlugin`: a later mock of a CommonJS file updates the objects that earlier
+  `require()` calls answered and gives the next `require()` the factory's new
+  object.
+
+Verified on OHOS:
+
+- `a-mock-of-a-built-in-module-that-import-alone-reaches-is-what-runs`: 54/54.
+- `a-mock-of-a-built-in-module-that-was-required-first-is-what-require-answers`: 6/6.
+- `a-mock-of-a-built-in-module-keeps-the-real-module-from-running`: 14/14.
+- `a-mock-in-a-file-that-a-preload-imports`: 2/2.
+
+Upstream status (2026-11-07):
+
+- `oven-sh/WebKit#982` and `#983` contain the engine half; the Bun half is in
+  the open `oven-sh/bun#47605`, pinned to WebKit preview builds
+  (`autobuild-preview-pr-982-*`). `oven-sh/bun` main still pins
+  `4d45755fed4aeef19e95beb90d3d0c884a2812bd`, so there is no merged Bun-side
+  fix to rebase onto yet.
+- The remaining known failures in this area are the layered `jest.mock` of a
+  package and the AOT side of a second mock of a required CommonJS file. Both
+  are cases that `#47605`/WebKit `#982` rewrite; they stay visible rather than
+  being gated.
