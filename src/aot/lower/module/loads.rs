@@ -1136,10 +1136,6 @@ impl FunctionLowering<'_, '_, '_, '_, '_> {
     // So it does for a module of the library, which the first `require` puts into `require.cache`. `require` takes a name that starts with `node:` to the registry.
     fn may_load_again(&self, module: ModuleRef) -> bool {
         let modules = self.file.inputs.modules;
-        // A mock stands in the loader, not in the image: what require() answers changes at any call, also for a runtime module.
-        if modules.may_be_mocked(module) {
-            return true;
-        }
         if let ModuleRef::Runtime(of_library) = module {
             return modules.is_code_of_program(self.current_module())
                 && !table::specifier_of(of_library).starts_with(b"node:")

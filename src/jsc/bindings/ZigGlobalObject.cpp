@@ -1425,20 +1425,6 @@ void unsafeEvalNoop(JSGlobalObject*, const WTF::String&) {}
 static JSValue requireBuiltinModule(JSGlobalObject* globalObject, uint32_t id)
 {
     ASSERT(id < BUN_INTERNAL_MODULE_COUNT);
-    // A mock stands in the loader's registry, not in the image. A test's require("node:...") is bound to
-    // this operation, so it has to ask the registry before it answers with the module that the image holds.
-    if (isBunTest && uncheckedDowncast<GlobalObject>(globalObject)->onLoadPlugins.hasVirtualModules()) {
-        const char* name = Bun::publicModuleName(id);
-        if (*name) {
-            auto scope = DECLARE_THROW_SCOPE(JSC::getVM(globalObject));
-            BunString specifier = Bun::toString(WTF::String::fromUTF8(name));
-            ErrorableResolvedSource res;
-            auto builtin = Bun::fetchBuiltinModuleWithoutResolution(uncheckedDowncast<GlobalObject>(globalObject), &specifier, &res);
-            RETURN_IF_EXCEPTION(scope, {});
-            if (builtin.kind == Bun::BuiltinModule::Kind::Exports)
-                RELEASE_AND_RETURN(scope, builtin.exports);
-        }
-    }
     return DeclaredModuleLoad::requireNamedAtRunTime(uncheckedDowncast<GlobalObject>(globalObject), static_cast<InternalModuleRegistry::Field>(id), ErrorCode::ERR_MODULE_NOT_FOUND);
 }
 
