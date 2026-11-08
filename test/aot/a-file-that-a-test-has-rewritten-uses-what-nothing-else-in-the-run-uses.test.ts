@@ -15,64 +15,85 @@ const rewritten = `
   ].join(" | ");
 `;
 const answer = "0 | function | { a: Map(1) { 1 => 2 } } | zipped";
-const loadsTwice = (write: string) => `
+const loadsTwice = (write: string) => (says: string) => `
   import { test } from "bun:test";
   import fs from "node:fs";
   import { put } from "./helper.mjs";
   const NEW = ${JSON.stringify(rewritten)};
   test("t", async () => {
     const path = require.resolve("./m.cjs");
-    console.error("OUT", require("./m.cjs").a);
+    console.error("${says}", require("./m.cjs").a);
     ${write}
     delete require.cache[path];
-    console.error("OUT", require("./m.cjs").a);
+    console.error("${says}", require("./m.cjs").a);
   });`;
-const ways: Record<string, Record<string, string>> = {
+const ways: Record<string, Record<string, (says: string) => string>> = {
   "written in the test": { "a.test.mjs": loadsTwice(`fs.writeFileSync(path, NEW);`) },
   "written by a promise": { "a.test.mjs": loadsTwice(`await fs.promises.writeFile(path, NEW);`) },
   "copied over": { "a.test.mjs": loadsTwice(`fs.copyFileSync(import.meta.dir + "/new.txt", path);`) },
   "moved over": { "a.test.mjs": loadsTwice(`fs.renameSync(import.meta.dir + "/new.txt", path);`) },
   "written by a function of another file": { "a.test.mjs": loadsTwice(`put(NEW);`) },
   "written by one test file and imported by a statement of the next": {
-    "a.test.mjs": `
+    "a.test.mjs": says => `
       import { test } from "bun:test";
       import fs from "node:fs";
       test("t", () => {
-        console.error("OUT first");
+        console.error("${says} first");
         fs.writeFileSync(import.meta.dir + "/m.cjs", ${JSON.stringify(rewritten)});
       });`,
-    "b.test.mjs": `
+    "b.test.mjs": says => `
       import { test } from "bun:test";
       import m from "./m.cjs";
-      test("t", () => console.error("OUT", m.a));`,
+      test("t", () => console.error("${says}", m.a));`,
   },
 };
 
-async function linesOf(files: Record<string, string>, flags: string[], words?: string) {
-  using dir = tempDir("aot-rewritten-file-and-the-library", {
-    "m.cjs": `exports.a = "first";\n`,
-    "new.txt": rewritten,
-    "helper.mjs": `import fs from "node:fs";\nexport const put = text => fs.writeFileSync(import.meta.dir + "/m.cjs", text);\n`,
-    ...files,
-  });
-  const env = words ? { ...bunEnv, BUN_DEBUG_TEST_AOT_WORDS: words } : bunEnv;
+// Each way in a folder of its own, all of them one project: what a run costs is the library that it holds for the new text, once.
+async function linesOf(flags: string[]) {
+  const files: Record<string, string> = {};
+  for (const [index, testFiles] of Object.values(ways).entries()) {
+    files[`w${index}/m.cjs`] = `exports.a = "first";\n`;
+    files[`w${index}/new.txt`] = rewritten;
+    files[`w${index}/helper.mjs`] =
+      `import fs from "node:fs";\nexport const put = text => fs.writeFileSync(import.meta.dir + "/m.cjs", text);\n`;
+    for (const [name, text] of Object.entries(testFiles)) files[`w${index}/${name}`] = text(`OUT${index}`);
+  }
+  using dir = tempDir("aot-rewritten-file-and-the-library", files);
   await using run = Bun.spawn({
-    cmd: [bunExe(), "test", ...flags, "--isolate"],
+    // `bun test` runs the files of a folder as the file system lists them, and shared memory lists the newest first. The last way needs its two in the order of their names.
+    cmd: [
+      bunExe(),
+      "test",
+      ...flags,
+      "--isolate",
+      ...Object.keys(files)
+        .filter(name => name.includes(".test."))
+        .sort()
+        .map(name => "./" + name),
+    ],
     cwd: String(dir),
-    env,
+    env: bunEnv,
     stdio: ["ignore", "pipe", "pipe"],
   });
   const [stderr, exitCode] = await Promise.all([run.stderr.text(), run.exited]);
   return { lines: stderr.split("\n").filter(line => /^(OUT|error)/.test(line)), exitCode };
 }
 
-test.concurrent.each(Object.entries(ways))(
+let runs: Promise<Awaited<ReturnType<typeof linesOf>>[]> | undefined;
+test.concurrent.each(Object.keys(ways))(
   "%s",
-  async (_, files) => {
-    const plain = await linesOf(files, []);
+  async name => {
+    const says = `OUT${Object.keys(ways).indexOf(name)} `;
+    const [plain, compiled] = (await (runs ??= Promise.all([linesOf([]), linesOf(["--aot"])]))).map(
+      ({ lines, exitCode }) => ({
+        lines: lines
+          .filter(line => line.startsWith(says) || line.startsWith("error"))
+          .map(line => line.replace(says, "OUT ")),
+        exitCode,
+      }),
+    );
     expect(plain).toEqual({ lines: ["OUT first", "OUT " + answer], exitCode: 0 });
-    expect(await linesOf(files, ["--aot"])).toEqual(plain);
-    expect(await linesOf(files, ["--aot"], "TestRunLayers:2")).toEqual(plain);
+    expect(compiled).toEqual(plain);
   },
   240_000,
 );

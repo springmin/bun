@@ -161,10 +161,7 @@ describe.skipIf(!systemCC || !!unsupported)("an object that a native addon kept 
     return { stdout: stdout.split("\n").filter(line => line.startsWith("SEEN")), exitCode };
   }
 
-  for (const [way, words] of [
-    ["as one program", "TestRunLayers:0"],
-    ["over two layers, both files in one process", "TestRunLayers:2,TestRunPartFiles:3"],
-  ]) {
+  for (const [way, words] of [["as one program", "TestRunLayers:0"]]) {
     test(`is an instance of no class of this realm, ${way}`, async () => {
       const plain = await runTests(undefined);
       expect(plain).toEqual({

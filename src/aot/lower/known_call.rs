@@ -25,7 +25,6 @@ use crate::known_helpers::{
     resolve_callee, resolve_loaded_reference, resolve_private_field_call, resolve_reference,
 };
 use crate::load::sources::parsed_source;
-use crate::statistics::StatisticId;
 
 #[derive(Copy, Clone)]
 pub(in crate::lower) struct PrivateStateAccess {
@@ -41,7 +40,6 @@ struct LoweredCall {
     slow_path: BlockId,
 }
 
-// An expression of a helper's text and the built-in that it names.
 pub(in crate::lower) type BuiltinPathExpr = (ExprId, BuiltinId);
 
 struct ExportStarPlan {
@@ -52,6 +50,15 @@ struct ExportStarPlan {
     has_own_property: BuiltinPathExpr,
     call_name: Atom,
     create_binding_builtins: SmallVec<[BuiltinPathExpr; 2]>,
+}
+
+struct WrittenDescriptor {
+    properties: hir::Span<hir::PropId>,
+    key: hir::PropId,
+    names_value: bool,
+    names_getter: bool,
+    names_setter: bool,
+    names_enumerable: bool,
 }
 
 struct CreateClassPlan {
@@ -128,7 +135,7 @@ impl FunctionLowering<'_, '_, '_, '_, '_> {
         let (Some(source), Some(target)) = (source, target) else {
             return;
         };
-        let slow_path = self.create_unlikely_block();
+        let slow_path = self.create_block();
         let source = self.get_binding(Binding::Symbol(source.0), source.1);
         let target = self.get_binding(Binding::Symbol(target.0), target.1);
         self.emit_export_star(&plan, target, source, slow_path);
@@ -146,12 +153,12 @@ impl FunctionLowering<'_, '_, '_, '_, '_> {
             call,
             callee,
             arguments,
-            slow_path: self.create_unlikely_block(),
+            slow_path: self.create_block(),
         }
     }
 
     fn finish_with_slow_path(&mut self, lowered: LoweredCall, fast_result: ValueId) -> ValueId {
-        self.file.count(StatisticId::KnownHelperCalls, 1);
+        self.file.known_helpers_lowered.calls += 1;
         let result = self.builder.create_variable(None);
         let done = self.create_block();
         self.builder.write_variable(result, fast_result);
@@ -186,7 +193,6 @@ impl FunctionLowering<'_, '_, '_, '_, '_> {
         self.emit_guard(is_unchanged, slow_path);
     }
 
-    // A fast path stands in for calls of built-ins, and the program may have put other functions in their places.
     pub(in crate::lower) fn guard_builtin_path(
         &mut self,
         (path, builtin): BuiltinPathExpr,
@@ -217,7 +223,6 @@ impl FunctionLowering<'_, '_, '_, '_, '_> {
         false
     }
 
-    // The source text at this point may not mention the symbol, so capture analysis may not have made it available here.
     fn is_readable(&self, symbol: SymbolId) -> bool {
         let file = &*self.file;
         let binding = BindingRef::Symbol(symbol);
@@ -300,7 +305,6 @@ impl FunctionLowering<'_, '_, '_, '_, '_> {
         Some(self.finish_with_slow_path(lowered, undefined))
     }
 
-    // `_createClass(V, [{ key: "get", value: function () { .. } }], null)` does what the helpers' text does, one written descriptor after another: flow sees each key beside its class, whichever other classes the helpers serve.
     fn lower_create_class(
         &mut self,
         call: ExprId,
@@ -314,7 +318,6 @@ impl FunctionLowering<'_, '_, '_, '_, '_> {
         let is_in_this_file = home == self.file.file;
         let hir = self.file.hir;
         let constructor = self.file.skip_type_syntax(hir.id_at(site.args, 0));
-        // `_createClass(function A() { .. })`, as Babel writes a class without methods: the function is made once, ahead of every test.
         let is_made_here = matches!(hir[constructor].kind, ExprKind::Fn(_));
         if !is_made_here && !matches!(hir[constructor].kind, ExprKind::Ident(_)) {
             return None;
@@ -330,7 +333,6 @@ impl FunctionLowering<'_, '_, '_, '_, '_> {
         let mut candidates = callee.functions.iter();
         let (held, plan) = candidates
             .find_map(|&held| Some((held, self.file.plan_create_class(home, held.definition)?)))?;
-        // No variable and no text of another file is read here: what the helper names there has to be certain.
         if !is_in_this_file && (plan.define_properties.needs_guard || !plan.builtins_are_locked) {
             return None;
         }
@@ -341,8 +343,6 @@ impl FunctionLowering<'_, '_, '_, '_, '_> {
         if plan.converts_keys && literals.any(|&literal| self.file.is_keyed_by_function(literal)) {
             return None;
         }
-        // Where nothing can stand in the helpers' places there is no other way. A call of the helpers in the program would tell flow that every class has what any of them defines.
-        // A `const` that is still empty throws where it is read, and this way reads no callee.
         let is_certain = !callee.needs_guard()
             && callee.holds_from_the_start
             && !plan.define_properties.needs_guard
@@ -357,7 +357,7 @@ impl FunctionLowering<'_, '_, '_, '_, '_> {
             let lowered_callee = self.lower_callee(site.callee, None, None);
             made = is_made_here.then(|| self.lower_expression(constructor));
             self.set_position(hir[call].pos);
-            let slow_path = self.create_unlikely_block();
+            let slow_path = self.create_block();
             if is_in_this_file {
                 if callee.needs_guard() {
                     self.guard_closure(lowered_callee.function, home, held.closure, slow_path);
@@ -381,7 +381,6 @@ impl FunctionLowering<'_, '_, '_, '_, '_> {
                 }
                 define
             } else {
-                // One test alone leads to the other way, so what is called there is anything but the helper: where flow sees the helper alone arrive, nothing is called.
                 let other_callee = Callee {
                     function: self.builder.add_edge_result(slow_path),
                     key: None,
@@ -400,7 +399,6 @@ impl FunctionLowering<'_, '_, '_, '_, '_> {
 
         let object = made.unwrap_or_else(|| self.lower_expression(constructor));
         for (index, side) in sides.iter().enumerate() {
-            // The helper asks whether it was given a list, and an empty one is a list: `Constructor.prototype` is read for it.
             let is_empty_list_of_prototype = index == 0
                 && site.args.len() > 1
                 && matches!(
@@ -427,7 +425,7 @@ impl FunctionLowering<'_, '_, '_, '_, '_> {
             let holder = self.emit_builtin_itself(BuiltinId::Object);
             super::call::emit_call(self, define, Some(holder), &[object, name, descriptor]);
         }
-        self.file.count(StatisticId::KnownHelperCalls, 1);
+        self.file.known_helpers_lowered.calls += 1;
 
         let Some((lowered_callee, slow_path)) = other_way else {
             return Some(object);
@@ -453,91 +451,6 @@ impl FunctionLowering<'_, '_, '_, '_, '_> {
         Some(self.builder.read_variable(result))
     }
 
-    // `value && value.__esModule ? value : { default: value }`, written out. One function called for every module would hand flow one object that shows what any of them exports.
-    fn lower_import_default(
-        &mut self,
-        call: ExprId,
-        site: Call,
-        callee: &KnownCallee,
-    ) -> Option<ValueId> {
-        let hir = self.file.hir;
-        let &[held] = &callee.functions[..] else {
-            return None;
-        };
-        if site.args.len() != 1 {
-            return None;
-        }
-        // The operand loads a module, so it is evaluated once, in front of the test of the callee.
-        let is_certain = !callee.needs_guard() && callee.holds_from_the_start;
-        let lowered_callee = (!is_certain).then(|| self.lower_callee(site.callee, None, None));
-        let Arguments::Values(arguments) = self.lower_arguments(site.args) else {
-            unreachable!("a call with a spread argument is not a known call");
-        };
-        let value = arguments[0];
-        self.set_position(hir[call].pos);
-        let other_way = lowered_callee.map(|lowered_callee| {
-            let slow_path = self.create_unlikely_block();
-            let other_callee = Callee {
-                function: self.builder.add_edge_result(slow_path),
-                key: None,
-                ..lowered_callee
-            };
-            let helper = reference_function(self.file, callee.file, held.closure);
-            let is_helper = self.builder.is_closure_of(helper, lowered_callee.function);
-            let passed = self.create_block();
-            let differs = Edge::with_proofs(slow_path, &[0]);
-            self.builder.branch(is_helper, Edge::to(passed), differs);
-            self.continue_in(passed);
-            (other_callee, slow_path)
-        });
-        let result = self.builder.create_variable(None);
-        let (asked, marked, wrapped, done) = (
-            self.create_block(),
-            self.create_block(),
-            self.create_block(),
-            self.create_block(),
-        );
-        let is_something = self.builder.to_boolean(value);
-        self.builder
-            .branch(is_something, Edge::to(asked), Edge::to(wrapped));
-        self.continue_in(asked);
-        let text = self.file.intern_bytes(b"__esModule");
-        let marker = self.file.text_key(text);
-        let marker = self.emit_get(value, PropertyName::Constant(marker));
-        let is_marked = self.builder.to_boolean(marker);
-        self.builder
-            .branch(is_marked, Edge::to(marked), Edge::to(wrapped));
-        self.continue_in(marked);
-        self.builder.write_variable(result, value);
-        self.jump(done);
-        self.continue_in(wrapped);
-        let default_name = self.file.name_key(known::default);
-        // A layout of its own: the type of a field is one for all objects of a layout.
-        let members = [(default_name, ObjectMemberKind::Field)];
-        let layout = self.file.layout_of_names(call, &members);
-        let mut wrapper = self.begin_object(layout);
-        self.add_property(
-            &mut wrapper,
-            PropertyName::Constant(default_name),
-            value,
-            None,
-        );
-        let wrapper = super::object::finish_object(self, wrapper);
-        self.builder.write_variable(result, wrapper);
-        self.jump(done);
-        self.file.count(StatisticId::KnownHelperCalls, 1);
-        if let Some((other_callee, slow_path)) = other_way {
-            self.continue_in(slow_path);
-            let arguments = Arguments::Values(arguments);
-            let returned = self.emit_call_expression(call, other_callee, arguments, Tail::No);
-            self.builder.write_variable(result, returned);
-            self.jump(done);
-        }
-        self.continue_in(done);
-        Some(self.builder.read_variable(result))
-    }
-
-    // `"prototype", { writable: false }`, as every published text has it.
     fn emit_lock_of_prototype(&mut self, plan: &CreateClassPlan) -> (ValueId, ValueId) {
         let text = self.file.intern_bytes(b"prototype");
         let name = self.builder.string(text);
@@ -557,6 +470,61 @@ impl FunctionLowering<'_, '_, '_, '_, '_> {
         target: ValueId,
         literal: ExprId,
     ) {
+        if let Some(written) = self.file.find_what_descriptor_writes(literal) {
+            let mut members: SmallVec<[(PropertyKeyId, ObjectMemberKind); 6]> = SmallVec::new();
+            for (is_named, name) in [
+                (written.names_value, &b"value"[..]),
+                (written.names_getter, &b"get"[..]),
+                (written.names_setter, &b"set"[..]),
+            ] {
+                if is_named {
+                    let text = self.file.intern_bytes(name);
+                    members.push((self.file.text_key(text), ObjectMemberKind::Field));
+                }
+            }
+            members.push((plan.enumerable_name, ObjectMemberKind::Field));
+            members.push((plan.configurable_name, ObjectMemberKind::Field));
+            if written.names_value {
+                members.push((plan.writable_name, ObjectMemberKind::Field));
+            }
+            let layout = self.file.untyped_layout(&members);
+            let mut descriptor = self.begin_object(layout);
+            for property in written.properties.iter() {
+                if property != written.key {
+                    self.lower_property_of_written_literal(&mut descriptor, property);
+                }
+            }
+            if !written.names_enumerable {
+                let no = self.builder.boolean(false);
+                self.add_property(
+                    &mut descriptor,
+                    PropertyName::Constant(plan.enumerable_name),
+                    no,
+                    None,
+                );
+            }
+            let yes = self.builder.boolean(true);
+            self.add_property(
+                &mut descriptor,
+                PropertyName::Constant(plan.configurable_name),
+                yes,
+                None,
+            );
+            if written.names_value {
+                let yes = self.builder.boolean(true);
+                self.add_property(
+                    &mut descriptor,
+                    PropertyName::Constant(plan.writable_name),
+                    yes,
+                    None,
+                );
+            }
+            let descriptor = super::object::finish_object(self, descriptor);
+            let key = self.lower_expression(self.file.hir[written.key].value);
+            let object = self.emit_builtin_itself(BuiltinId::Object);
+            super::call::emit_call(self, define, Some(object), &[target, key, descriptor]);
+            return;
+        }
         let descriptor = self.lower_expression(literal);
         let enumerable_name = PropertyName::Constant(plan.enumerable_name);
         let enumerable = self.emit_get(descriptor, enumerable_name);
@@ -597,6 +565,87 @@ impl FunctionLowering<'_, '_, '_, '_, '_> {
         let key = self.emit_get(descriptor, key_name);
         let object = self.emit_builtin_itself(BuiltinId::Object);
         super::call::emit_call(self, define, Some(object), &[target, key, descriptor]);
+    }
+
+    fn lower_import_default(
+        &mut self,
+        call: ExprId,
+        site: Call,
+        callee: &KnownCallee,
+    ) -> Option<ValueId> {
+        let hir = self.file.hir;
+        let &[held] = &callee.functions[..] else {
+            return None;
+        };
+        if site.args.len() != 1 {
+            return None;
+        }
+        let is_certain = !callee.needs_guard() && callee.holds_from_the_start;
+        let lowered_callee = (!is_certain).then(|| self.lower_callee(site.callee, None, None));
+        let Arguments::Values(arguments) = self.lower_arguments(site.args) else {
+            unreachable!("a call with a spread argument is not a known call");
+        };
+        let value = arguments[0];
+        self.set_position(hir[call].pos);
+        let other_way = lowered_callee.map(|lowered_callee| {
+            let slow_path = self.create_block();
+            let other_callee = Callee {
+                function: self.builder.add_edge_result(slow_path),
+                key: None,
+                ..lowered_callee
+            };
+            let helper = reference_function(self.file, callee.file, held.closure);
+            let is_helper = self.builder.is_closure_of(helper, lowered_callee.function);
+            let passed = self.create_block();
+            let differs = Edge::with_proofs(slow_path, &[0]);
+            self.builder.branch(is_helper, Edge::to(passed), differs);
+            self.continue_in(passed);
+            (other_callee, slow_path)
+        });
+        let result = self.builder.create_variable(None);
+        let (asked, marked, wrapped, done) = (
+            self.create_block(),
+            self.create_block(),
+            self.create_block(),
+            self.create_block(),
+        );
+        let is_something = self.builder.to_boolean(value);
+        self.builder
+            .branch(is_something, Edge::to(asked), Edge::to(wrapped));
+        self.continue_in(asked);
+        let text = self.file.intern_bytes(b"__esModule");
+        let marker = self.file.text_key(text);
+        let marker = self.emit_get(value, PropertyName::Constant(marker));
+        let is_marked = self.builder.to_boolean(marker);
+        self.builder
+            .branch(is_marked, Edge::to(marked), Edge::to(wrapped));
+        self.continue_in(marked);
+        self.builder.write_variable(result, value);
+        self.jump(done);
+        self.continue_in(wrapped);
+        let default_name = self.file.name_key(known::default);
+        let members = [(default_name, ObjectMemberKind::Field)];
+        let layout = self.file.layout_of_names_made_at(call, &members);
+        let mut wrapper = self.begin_object(layout);
+        self.add_property(
+            &mut wrapper,
+            PropertyName::Constant(default_name),
+            value,
+            None,
+        );
+        let wrapper = super::object::finish_object(self, wrapper);
+        self.builder.write_variable(result, wrapper);
+        self.jump(done);
+        self.file.known_helpers_lowered.calls += 1;
+        if let Some((other_callee, slow_path)) = other_way {
+            self.continue_in(slow_path);
+            let arguments = Arguments::Values(arguments);
+            let returned = self.emit_call_expression(call, other_callee, arguments, Tail::No);
+            self.builder.write_variable(result, returned);
+            self.jump(done);
+        }
+        self.continue_in(done);
+        Some(self.builder.read_variable(result))
     }
 
     fn lower_private_state_definition(
@@ -651,7 +700,6 @@ impl FunctionLowering<'_, '_, '_, '_, '_> {
         Some(self.finish_with_slow_path(lowered, collection))
     }
 
-    // Returning None here would pass the helper a collection that is missing the entries stored in fields.
     fn lower_private_field_access(
         &mut self,
         call: ExprId,
@@ -757,7 +805,6 @@ impl FileLowering<'_, '_, '_, '_> {
         Some((bound.declared_symbol(Decl::Param(pattern)).some()?, name))
     }
 
-    // for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(o, p)) __createBinding(o, m, p);
     fn find_has_own_property(&self, export_star: FnId) -> Option<(BuiltinPathExpr, Atom)> {
         let hir = self.hir;
         let [for_in] = find_statements(self.hir, export_star)[..] else {
@@ -796,7 +843,6 @@ impl FileLowering<'_, '_, '_, '_> {
         is_resolved.then_some((has_own_property, call_name))
     }
 
-    // The built-ins that `__createBinding` calls, and the call that defines the property.
     pub(in crate::lower) fn find_create_binding_builtins(
         &self,
         create_binding: FnId,
@@ -823,7 +869,6 @@ impl FileLowering<'_, '_, '_, '_> {
         is_resolved.then_some((builtins, define))
     }
 
-    // An array literal of object literals whose members evaluate to nothing that the program can see, or `null`: nothing that the helpers' calls could come between.
     fn find_written_descriptors(&self, list: ExprId) -> Option<SmallVec<[ExprId; 4]>> {
         let (hir, list) = (self.hir, self.skip_type_syntax(list));
         let mut descriptors = SmallVec::new();
@@ -858,13 +903,12 @@ impl FileLowering<'_, '_, '_, '_> {
         Some(descriptors)
     }
 
-    // `_toPrimitive` hands a primitive back before it names a global that a program may replace.
     fn calls_only_published_helpers(&self, home: FileId, function: FnId) -> bool {
         let Some(known) = self.inputs.known_helpers.function(home, function) else {
             return false;
         };
-        let relies_on_facts =
-            known.shape != Shape::TypeofAnswersSymbolForSymbols || known.relies_on_facts;
+        let relies_on_facts = known.shape != Shape::TypeofAnswersSymbolForSymbols
+            || (known.relies_on_facts && known.is_named_only_to_be_called);
         let input = resolve_input(self);
         relies_on_facts
             && known.references.iter().all(|&reference| match reference {
@@ -879,15 +923,56 @@ impl FileLowering<'_, '_, '_, '_> {
             })
     }
 
+    fn find_what_descriptor_writes(&self, descriptor: ExprId) -> Option<WrittenDescriptor> {
+        let hir = self.hir;
+        let ExprKind::Object(properties) = hir[self.skip_type_syntax(descriptor)].kind else {
+            return None;
+        };
+        let atoms = &self.queries.files().atoms;
+        let mut key = None;
+        let mut is_named = [false; 4];
+        for id in properties.iter() {
+            let property = hir[id];
+            let (PropKey::Name(name), PropKind::Init) = (property.key, property.kind) else {
+                return None;
+            };
+            let held = hir[self.skip_type_syntax(property.value)].kind;
+            if Some(name) == atoms.lookup(b"key") {
+                if key.is_some() || !matches!(held, ExprKind::String(_)) {
+                    return None;
+                }
+                key = Some(id);
+                continue;
+            }
+            let texts: [&[u8]; 4] = [b"value", b"get", b"set", b"enumerable"];
+            let place = texts
+                .iter()
+                .position(|text| Some(name) == atoms.lookup(text))?;
+            if is_named[place] || (place == 3 && !matches!(held, ExprKind::True | ExprKind::False))
+            {
+                return None;
+            }
+            is_named[place] = true;
+        }
+        Some(WrittenDescriptor {
+            properties,
+            key: key?,
+            names_value: is_named[0],
+            names_getter: is_named[1],
+            names_setter: is_named[2],
+            names_enumerable: is_named[3],
+        })
+    }
+
     fn is_keyed_by_function(&self, descriptor: ExprId) -> bool {
         let hir = self.hir;
         let ExprKind::Object(properties) = hir[descriptor].kind else {
             return true;
         };
-        let atoms = &self.queries.files().atoms;
+        let key = self.queries.files().atoms.lookup(b"key");
         (0..properties.len()).any(|index| {
             let property = hir[properties.at(index)];
-            matches!(property.key, PropKey::Name(name) if atoms.bytes(name) == b"key")
+            matches!(property.key, PropKey::Name(name) if Some(name) == key)
                 && matches!(
                     hir[self.skip_type_syntax(property.value)].kind,
                     ExprKind::Fn(_)
@@ -916,7 +1001,6 @@ impl FileLowering<'_, '_, '_, '_> {
                 )
             })?;
         let definition = define_properties.function.definition;
-        // A text or a number is the key that the conversion makes of it, so the conversion is left out. It must be the published one whenever the call runs.
         let defines = helpers.function(home, definition)?;
         let converts_keys = defines.shape == Shape::DefinePropertiesOfDescriptorsUnderConvertedKeys;
         if converts_keys && !self.calls_only_published_helpers(home, definition) {
@@ -1006,6 +1090,41 @@ impl FileLowering<'_, '_, '_, '_> {
         })
     }
 
+    pub(in crate::lower) fn find_operand_of_typeof_helper(&self, call: ExprId) -> Option<ExprId> {
+        let (hir, helpers) = (self.hir, self.inputs.known_helpers);
+        if !helpers.has_bindings() {
+            return None;
+        }
+        let ExprKind::Call(id) = hir[call].kind else {
+            return None;
+        };
+        let site = hir[id];
+        if !is_plain_call(self, site) || site.args.len() != 1 {
+            return None;
+        }
+        let callee = resolve_callee(&resolve_input(self), self.file, site.callee)?;
+        let [held] = callee.functions[..] else {
+            return None;
+        };
+        let known = helpers.function(callee.file, held.definition)?;
+        let is_helper = callee.file == self.file
+            && !callee.needs_guard()
+            && known.shape == Shape::TypeofAnswersSymbolForSymbols
+            && known.relies_on_facts
+            && known.is_named_only_to_be_called;
+        let operand = hir.ids(site.args).next()?;
+        let target = self.skip_type_syntax(operand);
+        let is_declared = !matches!(self.bound.binding(target), Binding::Free)
+            && self
+                .bound
+                .dynamic_lookup_scope(NodeData::Expr(target))
+                .is_none();
+        let is_read_alike = !matches!(hir[target].kind, ExprKind::Ident(_))
+            || is_declared
+            || self.is_always_resolvable(target);
+        (is_helper && is_read_alike).then_some(operand)
+    }
+
     fn plan_export_star(&self, export_star: FnId) -> Option<ExportStarPlan> {
         let helpers = self.inputs.known_helpers;
         let known = helpers.function(self.file, export_star)?;
@@ -1070,46 +1189,6 @@ impl FileLowering<'_, '_, '_, '_> {
     }
 }
 
-impl FileLowering<'_, '_, '_, '_> {
-    /// `_typeof(value)`, where the name holds Babel's helper: `value`. With symbols built in, the helper and the function that it puts in its own place at
-    /// its first call both answer `typeof value`.
-    pub(in crate::lower) fn find_operand_of_typeof_helper(&self, call: ExprId) -> Option<ExprId> {
-        let (hir, helpers) = (self.hir, self.inputs.known_helpers);
-        if !helpers.has_bindings() {
-            return None;
-        }
-        let ExprKind::Call(id) = hir[call].kind else {
-            return None;
-        };
-        let site = hir[id];
-        if !is_plain_call(self, site) || site.args.len() != 1 {
-            return None;
-        }
-        let callee = resolve_callee(&resolve_input(self), self.file, site.callee)?;
-        let [held] = callee.functions[..] else {
-            return None;
-        };
-        let known = helpers.function(callee.file, held.definition)?;
-        let is_helper = callee.file == self.file
-            && !callee.needs_guard()
-            && known.shape == Shape::TypeofAnswersSymbolForSymbols
-            && known.relies_on_facts
-            && known.is_named_only_to_be_called;
-        let operand = hir.ids(site.args).next()?;
-        // `typeof` of a name that nothing declares answers. A call with it throws.
-        let target = self.skip_type_syntax(operand);
-        let is_declared = !matches!(self.bound.binding(target), Binding::Free)
-            && self
-                .bound
-                .dynamic_lookup_scope(NodeData::Expr(target))
-                .is_none();
-        let is_read_alike = !matches!(hir[target].kind, ExprKind::Ident(_))
-            || is_declared
-            || self.is_always_resolvable(target);
-        (is_helper && is_read_alike).then_some(operand)
-    }
-}
-
 fn is_lowered(file: &FileLowering<'_, '_, '_, '_>, home: FileId) -> bool {
     file.inputs.files[home.idx()].is_some()
 }
@@ -1150,7 +1229,6 @@ fn find_first_initializer(
     file.hir[declaration].init.some()
 }
 
-/// `a, b, c`: c with none skipped, b with one. An expression without a comma is its own last.
 fn find_last_of_sequence(hir: &hir::File<'_>, sequence: ExprId, skipped: usize) -> Option<ExprId> {
     let mut sequence = hir.skip_type_assertions(sequence);
     for _ in 0..skipped {
@@ -1203,8 +1281,11 @@ fn is_key_first_capture(
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use crate::compile::testing::lower_program;
-    use crate::ir::Opcode;
+    use crate::ir::generated::{Function, visit_value_fields};
+    use crate::ir::{FieldWord, Opcode, ValueId, ValueView};
     use crate::load::host_platform;
     use crate::lower::LoweringOptions;
 
@@ -1225,16 +1306,14 @@ var __exportStar = (this && this.__exportStar) || function(m, exports) {
 };
 "#;
 
-    fn count_in_module_bodies(files: &[(&str, &str)], opcode: Opcode) -> usize {
+    fn lower_module_bodies(files: &[(&str, &str)]) -> Vec<Arc<Function>> {
         let options = LoweringOptions {
             platform: host_platform(),
             embeds_function_text: false,
-            reports_type_mismatches: false,
             removable: Default::default(),
             minifies_identifiers: false,
             obfuscates: false,
             counts_executions: false,
-            imports_are_untyped: false,
             runs_tests: false,
         };
         let lowered = lower_program(files, options);
@@ -1244,11 +1323,63 @@ var __exportStar = (this && this.__exportStar) || function(m, exports) {
             let mut functions = fragment.functions.iter();
             functions
                 .find(|(id, _)| *id == body)
-                .map(|(_, function)| function)
+                .map(|(_, function)| Arc::clone(function))
         });
-        let blocks = bodies.flat_map(|function| function.body.blocks());
-        let values = blocks.flat_map(|block| block.values());
+        bodies.collect()
+    }
+
+    fn values_of(function: &Function) -> impl Iterator<Item = ValueView<'_>> {
+        function.body.blocks().flat_map(|block| block.values())
+    }
+
+    fn count_in_module_bodies(files: &[(&str, &str)], opcode: Opcode) -> usize {
+        let bodies = lower_module_bodies(files);
+        let values = bodies.iter().flat_map(|body| values_of(body));
         values.filter(|value| value.opcode == opcode).count()
+    }
+
+    fn first_operand(value: ValueView<'_>) -> Option<ValueId> {
+        let mut first = None;
+        visit_value_fields(
+            value.opcode,
+            value.fields,
+            0,
+            &mut |field, at| match field {
+                FieldWord::Operand => {
+                    first.get_or_insert(ValueId::from_word(value.fields[at]));
+                }
+                FieldWord::Reference(_) => {}
+            },
+        );
+        first
+    }
+
+    fn find_opcode_behind_conversions(function: &Function, mut value: ValueId) -> Option<Opcode> {
+        loop {
+            let definition = values_of(function).find(|candidate| candidate.id == value)?;
+            if definition.opcode != Opcode::Convert {
+                return Some(definition.opcode);
+            }
+            value = first_operand(definition)?;
+        }
+    }
+
+    #[test]
+    fn export_star_takes_no_stand_in_for_the_exports() {
+        let star = format!("{HELPERS}__exportStar(require(\"./a.cjs\"), exports);");
+        let files = [
+            ("main.cjs", "require(\"./star.cjs\").a;"),
+            ("star.cjs", star.as_str()),
+            ("a.cjs", "exports.a = 1;"),
+        ];
+        let mut targets = Vec::new();
+        for body in lower_module_bodies(&files) {
+            let stars = values_of(&body).filter(|value| value.opcode == Opcode::TryReExportFields);
+            let operands = stars.filter_map(first_operand);
+            targets.extend(operands.map(|target| find_opcode_behind_conversions(&body, target)));
+        }
+        assert_eq!(targets.len(), 1);
+        assert!(targets[0] != Some(Opcode::Boolean));
     }
 
     #[test]

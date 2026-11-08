@@ -22,6 +22,7 @@ extern "C" BunString Bun__JSFunction__sourceFromParameters(JSC::EncodedJSValue e
     return Bun::toStringRef(source->view().toString());
 }
 
+// A function that `bun test --aot` compiled has no executable. Its text is the whole function, as toString() gives it.
 extern "C" BunString Bun__JSFunction__compiledSource(JSC::EncodedJSValue encodedValue, bool* isTextLeftOut)
 {
 #if ENABLE(AOT)
@@ -29,7 +30,7 @@ extern "C" BunString Bun__JSFunction__compiledSource(JSC::EncodedJSValue encoded
     if (auto* frame = dynamicDowncast<AsyncContextFrame>(value))
         value = frame->callback.get();
     JSC::JSObject* callee = value.getObject();
-    if (!callee || !callee->vm().hasCompiledCode() || !JSC::AOT::CompiledCallee::isCompiledCallee(callee) || JSC::AOT::CompiledCallee::isBoundFunction(callee))
+    if (!callee || !callee->vm().hasCompiledCode() || !JSC::AOT::CompiledCallee::isCompiledCallee(callee))
         return { BunStringTag::Dead };
     auto kind = JSC::AOT::CompiledCallee::kind(callee);
     if (kind == JSC::AOT::CompiledCallee::FunctionKind::Class || kind == JSC::AOT::CompiledCallee::FunctionKind::Builtin)
@@ -42,6 +43,7 @@ extern "C" BunString Bun__JSFunction__compiledSource(JSC::EncodedJSValue encoded
         (void)scope.tryClearException();
         return { BunStringTag::Dead };
     }
+    // Without the text it shows "[native code]".
     JSC::JSString* text = JSC::AOT::CompiledCallee::sourceStringIfCreated(vm, callee);
     if (!text || text != shown.asCell()) {
         *isTextLeftOut = true;

@@ -4,7 +4,7 @@ use crate::builtins::table::{self, HostReadContext, HostReadUse};
 use crate::ir::StringTable;
 use crate::ir::generated::{Entry, HostRead};
 use crate::load::{EntryPointKind, ProgramFile, ProjectId};
-use crate::modules::ModuleExport;
+use crate::modules::{ModuleExport, ModuleRef};
 use bun_sema::util::SharedSort;
 
 pub(super) fn host_reads_of(
@@ -25,10 +25,14 @@ fn build_host_read(read: &table::HostRead, strings: &mut StringTable) -> HostRea
         HostReadUse::PassedTo { builtin, argument } => (Some(builtin), u32::from(argument)),
         HostReadUse::Inspected | HostReadUse::Called => (None, 0),
     };
+    let names = read.names_looked_for.iter();
     HostRead {
         export_name: strings.intern(table::text_of_name(read.export_name)),
         builtin,
         parameter,
+        names_looked_for: names
+            .map(|&name| strings.intern(table::text_of_name(name)))
+            .collect(),
     }
 }
 
@@ -40,6 +44,10 @@ pub(super) fn build_entries(input: &RecordInput<'_, '_>, strings: &mut StringTab
             | EntryPointKind::Additional
             | EntryPointKind::LoadedByTestRunner => {}
             _ => continue,
+        }
+        let graph = &input.projects.application.graph;
+        if graph.is_left_out(ModuleRef::File(entry_point.file)) {
+            continue;
         }
         let file = ProgramFile {
             project: ProjectId::Application,
@@ -56,14 +64,13 @@ pub(super) fn build_entries(input: &RecordInput<'_, '_>, strings: &mut StringTab
             host_reads.extend(read_everything(input, exports, strings));
         }
         entries.push(Entry {
-            module: module.expect("the mark evaluates every entry point"),
+            module: module.expect("every entry point has a record"),
             host_reads,
         });
     }
     entries
 }
 
-// What a CommonJS file exports is what its importers find under `default`.
 fn read_everything(
     input: &RecordInput<'_, '_>,
     exports: &[ModuleExport],
@@ -78,6 +85,7 @@ fn read_everything(
         export_name: strings.intern(name),
         builtin: None,
         parameter: 0,
+        names_looked_for: Vec::new(),
     };
     names.into_iter().map(read).collect()
 }

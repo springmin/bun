@@ -22,13 +22,7 @@ it("lays a hook inside a test", () => { layHookInsideTest(log); });
 afterAll(() => { console.log("SEEN " + JSON.stringify(log)); });
 `;
 
-const forms: [string, string, string[]][] = [
-  ["as the run is built by itself", "", []],
-  ["one program", "TestRunLayers:0", []],
-  ["three layers", "TestRunLayers:3", ["--isolate"]],
-];
-
-async function seen(runner: string, words: string, flags: string[]) {
+async function seen(runner: string, flags: string[]) {
   using dir = tempDir("helper-flavor", {
     "package.json": `{ "name": "helper-flavor", "type": "module" }`,
     "helper.ts": helper,
@@ -36,7 +30,7 @@ async function seen(runner: string, words: string, flags: string[]) {
   });
   await using run = Bun.spawn({
     cmd: [bunExe(), "test", ...flags],
-    env: { ...bunEnv, BUN_DEBUG_TEST_AOT_WORDS: words },
+    env: bunEnv,
     cwd: String(dir),
     stdout: "pipe",
     stderr: "pipe",
@@ -47,11 +41,9 @@ async function seen(runner: string, words: string, flags: string[]) {
 }
 
 for (const runner of ["vitest", "bun:test"]) {
-  for (const [form, words, flags] of forms) {
-    test.concurrent(`below a test file that imports "${runner}", ${form}`, async () => {
-      const [plain, compiled] = await Promise.all([seen(runner, "", []), seen(runner, words, ["--aot", ...flags])]);
-      expect(plain.seen).toBeDefined();
-      expect(compiled).toEqual(plain);
-    });
-  }
+  test.concurrent(`below a test file that imports "${runner}"`, async () => {
+    const [plain, compiled] = await Promise.all([seen(runner, []), seen(runner, ["--aot"])]);
+    expect(plain.seen).toBeDefined();
+    expect(compiled).toEqual(plain);
+  });
 }

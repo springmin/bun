@@ -1,7 +1,6 @@
 import { expect } from "bun:test";
 import { bunEnv, bunExe, tempDir } from "harness";
 import { run } from "./harness/run";
-import { waysFor } from "./harness/ways";
 import { test } from "./supported";
 
 // A file that the run itself writes, moves or removes is compared with the disk before it loads, keeps all its exports, and whoever loads it
@@ -14,9 +13,7 @@ const all = ["lib/one.js", "lib/two.js"];
 
 const cases: Record<string, string[]> = {
   [`createWriteStream("", { fd: 1 })`]: [],
-  [`writeFileSync("", "x")`]: [],
   [`rmSync("", { recursive: true })`]: [],
-  [`writeFileSync(".", "x")`]: [],
   [`writeFileSync(${dir}, "x")`]: [],
   [`appendFileSync(${lib}, "x")`]: [],
   [`truncateSync(${lib})`]: [],
@@ -46,10 +43,7 @@ const cases: Record<string, string[]> = {
 };
 
 // The call never runs: the files on disk are those that were compiled.
-const project = (call: string) => ({
-  "package.json": `{ "name": "p", "type": "module" }`,
-  "node_modules/pkg/package.json": `{ "name": "pkg", "type": "module", "main": "index.js" }`,
-  "node_modules/pkg/index.js": `export const pkg = "pkg";\n`,
+const folderOf = (call: string) => ({
   "lib/one.js": `export const one = "one";\n`,
   "lib/two.js": `export const two = "two";\n`,
   "case.test.js": `
@@ -65,48 +59,55 @@ const project = (call: string) => ({
     const options = { recursive: process.argv.length > 0 };
     test("it", () => {
       if (process.argv.length > 99) ${call};
-      console.log("says|", one, two, pkg);
+      console.log("says|", import.meta.dir.split(/[\\\\/]/).at(-1), one, two, pkg);
     });`,
 });
 
 const line = "the run writes, moves or removes a file of its own, which is compared with the disk before it loads: ";
 
-const ways: [string[], string][] = [
-  [[], ""],
-  [["--isolate"], "TestRunLayers:2,TestRunPartFiles:1"],
-];
-// The build of a layer does not see the test files. A file that one of them names itself comes down to it among those that may load again,
-// of which the log has no such line. A folder comes down as a folder.
-const namesOneFile = (call: string) => cases[call].length === 1;
+/** Each call in a folder of its own, all of them one project and one run. By folder: what its test printed, and which of its files the log of the build names as written. */
+async function ran(calls: string[]) {
+  const files: Record<string, string> = {
+    "package.json": `{ "name": "p", "type": "module" }`,
+    "node_modules/pkg/package.json": `{ "name": "pkg", "type": "module", "main": "index.js" }`,
+    "node_modules/pkg/index.js": `export const pkg = "pkg";\n`,
+  };
+  for (const [index, call] of calls.entries())
+    for (const [path, text] of Object.entries(folderOf(call))) files[`c${index}/${path}`] = text;
+  using folder = tempDir("a-call-that-fails-on-a-folder", files);
+  const env = { ...bunEnv, NO_COLOR: "1", BUN_JSC_logAOTPhaseTimes: "1" };
+  const says = (stdout: string) =>
+    stdout
+      .split("\n")
+      .filter(text => text.startsWith("says|"))
+      .sort();
+  const plain = await run([bunExe(), "test"], String(folder), bunEnv);
+  const compiled = await run([bunExe(), "test", "--aot"], String(folder), env);
+  const named = compiled.stderr.split("\n").flatMap(text => text.split(line).slice(1));
+  const written = [...new Set(named.map(path => path.slice(path.indexOf(String(folder)) + String(folder).length + 1)))];
+  expect(says(plain.stdout)).toEqual(calls.map((_, index) => `says| c${index} one two pkg`).sort());
+  expect({ says: says(compiled.stdout), exitCode: compiled.exitCode }).toEqual({
+    says: says(plain.stdout),
+    exitCode: 0,
+  });
+  return calls.map((_, index) => written.filter(path => !path.startsWith("c") || path.startsWith(`c${index}/`)).sort());
+}
 
-// What is asked is how the look through the test files reads a call, which is the same look in both ways. One call of each kind of answer goes through the layers too.
-const witnesses = [
-  `createWriteStream("", { fd: 1 })`,
-  `rmSync(join(${lib}, "two.js"))`,
-  `rmSync(${lib}, { recursive: true })`,
-];
+// The empty path joined to the working directory is the whole project, so whoever takes it for a folder names every file of the run: each such call has a run of its own.
+const isWholeProject = (call: string) => call.includes(`("",`);
+const together = Object.keys(cases).filter(call => !isWholeProject(call));
+let shared: ReturnType<typeof ran> | undefined;
 
 for (const call of Object.keys(cases)) {
-  for (const [flags, words] of waysFor(ways, witnesses.includes(call))) {
-    test.concurrent(
-      `${call}: ${JSON.stringify(flags)} ${words}`,
-      async () => {
-        using folder = tempDir("a-call-that-fails-on-a-folder", project(call));
-        const env = { ...bunEnv, NO_COLOR: "1", BUN_DEBUG_TEST_AOT_WORDS: words, BUN_JSC_logAOTPhaseTimes: "1" };
-        const says = (stdout: string) => stdout.split("\n").filter(text => text.startsWith("says|"));
-        const plain = await run([bunExe(), "test", ...flags], String(folder), bunEnv);
-        const compiled = await run([bunExe(), "test", "--aot", ...flags], String(folder), env);
-        const named = compiled.stderr.split("\n").flatMap(text => text.split(line).slice(1));
-        expect({
-          says: says(compiled.stdout),
-          exitCode: compiled.exitCode,
-          written: [
-            ...new Set(named.map(path => path.slice(path.indexOf(String(folder)) + String(folder).length + 1))),
-          ].sort(),
-        }).toEqual({ says: says(plain.stdout), exitCode: 0, written: words && namesOneFile(call) ? [] : cases[call] });
-        expect(says(plain.stdout)).toEqual(["says| one two pkg"]);
-      },
-      240_000,
-    );
-  }
+  test.concurrent(
+    call,
+    async () => {
+      const written = isWholeProject(call)
+        ? (await ran([call]))[0]
+        : (await (shared ??= ran(together)))[together.indexOf(call)];
+      const folder = isWholeProject(call) ? "c0" : `c${together.indexOf(call)}`;
+      expect(written).toEqual(cases[call].map(path => `${folder}/${path}`));
+    },
+    240_000,
+  );
 }

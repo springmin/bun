@@ -6,7 +6,7 @@ use crate::bind::{Binding, BindingInitializer, Bound, CommonJsVariable, SymbolId
 use crate::hir::{BinOp, Branches, Call, Chain, ExprId, ExprKind, File, IdList, MemberKey};
 use crate::import_sites::{
     ENCODERS, ImportSiteKind, ImportSpecifier, call_site_arguments, call_site_kind,
-    find_imported_export, names_own_file, settled_symbol,
+    find_imported_export, is_process, names_own_file, settled_symbol,
 };
 use crate::util::{FxHashMap, FxHashSet};
 use bun_core::strings;
@@ -76,6 +76,68 @@ impl<'s> Folder<'_, 's> {
             .starts_at_own_directory
     }
 
+    pub(super) fn note_path_written_from_own_directory(&mut self, e: ExprId, end: Atom) {
+        if !ends_in_name_with_extension(self.atoms.bytes(end)) {
+            return;
+        }
+        let path = self.collect_prefix(e, Nesting::Outermost);
+        if path.is_whole_value && path.starts_at_own_directory {
+            let path = self.atoms.intern(&path.text);
+            self.paths_written_from_own_directory.push((e, path));
+        }
+    }
+
+    pub(super) fn starts_with_whole_path_made_by_call(&self, argument: ExprId) -> bool {
+        let hir = self.hir;
+        let mut start = argument;
+        let mut is_joined = false;
+        loop {
+            start = hir.skip_type_assertions(start);
+            let first_part = match hir[start].kind {
+                ExprKind::Ident(_) | ExprKind::Dot { .. } if self.names_own_directory(start) => {
+                    return is_joined;
+                }
+                ExprKind::Template { exprs } => {
+                    let first_text = hir.ids(hir.template_texts(exprs)).next();
+                    let is_first = first_text.is_none_or(|text| self.atoms.bytes(text).is_empty());
+                    hir.ids(exprs).next().filter(|_| is_first)
+                }
+                ExprKind::Binary { op: BinOp::Add, .. } => {
+                    self.collect_addends(start).first().copied()
+                }
+                ExprKind::Ident(_) => self.find_const_initializer(start),
+                ExprKind::Call(call)
+                    if self.is_dirname_of_own_file(hir[call])
+                        || self.asks_for_working_directory(hir[call]) =>
+                {
+                    return true;
+                }
+                ExprKind::Call(call) => match self.find_path_joining_call(hir[call]) {
+                    Some(function) if function == known::resolve => return true,
+                    Some(_) => {
+                        is_joined = true;
+                        hir.ids(hir[call].args).next()
+                    }
+                    None => None,
+                },
+                _ => None,
+            };
+            let Some(first_part) = first_part else {
+                return false;
+            };
+            start = first_part;
+        }
+    }
+
+    fn asks_for_working_directory(&self, call: Call) -> bool {
+        let (hir, bound) = (self.hir, self.bound);
+        matches!(call.chain, Chain::No)
+            && call.args.len() == 0
+            && matches!(hir.member_key(hir.skip_type_assertions(call.callee)), Some((object, MemberKey::Name(name)))
+                if self.atoms.bytes(name) == b"cwd"
+                    && is_process(hir, bound, object, &[known::globalThis, known::global]))
+    }
+
     fn expand(&self, e: ExprId) -> Expansion {
         let hir = self.hir;
         let e = hir.skip_type_assertions(e);
@@ -129,7 +191,6 @@ impl<'s> Folder<'_, 's> {
         }
     }
 
-    // `dirname(fileURLToPath(import.meta.url))`, as an ES module makes itself a `__dirname`.
     fn is_dirname_of_own_file(&self, call: Call) -> bool {
         let (hir, bound) = (self.hir, self.bound);
         let function =
@@ -196,7 +257,6 @@ impl<'s> Folder<'_, 's> {
         Expansion::Parts(parts)
     }
 
-    /// `encodeURIComponent(text)` and `btoa(text)` of a text that is known whole.
     fn expand_encoded_text(&self, call: Call) -> Option<Expansion> {
         let hir = self.hir;
         let callee = hir.skip_type_assertions(call.callee);
@@ -214,6 +274,7 @@ impl<'s> Folder<'_, 's> {
             return None;
         }
         let encoded = Constant::String(self.atoms.intern(&encode(&text.text)?));
+        self.has_followed_path_call.set(true);
         Some(Expansion::Known(Primitive::Constant(encoded)))
     }
 
@@ -536,7 +597,11 @@ impl<'s> Folder<'_, 's> {
     }
 }
 
-/// What `path.join` or `path.resolve` makes of the texts that follow the folder of the file.
+pub fn ends_in_name_with_extension(text: &[u8]) -> bool {
+    let name = text.rsplit(|&byte| byte == b'/').next().unwrap_or(text);
+    matches!(strings::last_index_of_char(name, b'.'), Some(dot) if dot != 0 && dot + 1 != name.len())
+}
+
 #[derive(Default)]
 pub(crate) struct PathBelowFolder {
     segments: Vec<Vec<u8>>,
@@ -544,7 +609,6 @@ pub(crate) struct PathBelowFolder {
 }
 
 impl PathBelowFolder {
-    /// `None`: the text leads somewhere else.
     pub(crate) fn push(&mut self, text: &[u8], is_join: bool) -> Option<()> {
         if !is_join && text.starts_with(b"/") || strings::contains_char(text, b'\\') {
             return None;
@@ -568,7 +632,6 @@ impl PathBelowFolder {
         self.segments.first().is_some_and(|first| first == b"..")
     }
 
-    /// `/lib/a.js`
     pub(crate) fn write(&self, is_join: bool, is_followed: bool) -> Vec<u8> {
         let mut written = Vec::new();
         for segment in &self.segments {
@@ -582,7 +645,6 @@ impl PathBelowFolder {
     }
 }
 
-/// `join` or `resolve`, where `callee` is that function of `node:path`. `find_constant` answers with what folding makes of an expression.
 fn find_path_joining_function(
     hir: &File<'_>,
     bound: &Bound<'_>,
@@ -593,7 +655,18 @@ fn find_path_joining_function(
     find_export_of_module(hir, bound, callee, find_constant, &is_path_specifier).filter(joins_paths)
 }
 
-/// The name of the export that `callee` is, of a module whose name `is_module` accepts.
+pub fn find_export_of_path_module(
+    hir: &File<'_>,
+    bound: &Bound<'_>,
+    named: ExprId,
+) -> Option<Atom> {
+    let find_written_text = |text: ExprId| match hir[hir.skip_type_assertions(text)].kind {
+        ExprKind::String(text) => Some(Constant::String(text)),
+        _ => None,
+    };
+    find_export_of_module(hir, bound, named, &find_written_text, &is_path_specifier)
+}
+
 pub(crate) fn find_export_of_module(
     hir: &File<'_>,
     bound: &Bound<'_>,
@@ -622,7 +695,6 @@ pub(crate) fn find_export_of_module_with(
 #[derive(Default)]
 pub(crate) struct MembersBehindNames(RefCell<FxHashMap<SymbolId, Option<SmallVec<[Atom; 4]>>>>);
 
-/// `fs.promises.writeFile`: the names that lead from the module to `callee`, the last one first.
 pub(crate) fn find_members_below_module(
     hir: &File<'_>,
     bound: &Bound<'_>,

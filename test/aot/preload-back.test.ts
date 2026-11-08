@@ -2,6 +2,7 @@ import { expect } from "bun:test";
 import { bunEnv, bunExe, tempDir } from "harness";
 import { raiseDefaultTimeout } from "./harness/default-timeout";
 import { run } from "./harness/run";
+import { waysFor } from "./harness/ways";
 import { test } from "./supported";
 
 raiseDefaultTimeout(120_000);
@@ -276,11 +277,9 @@ const projects: Record<string, Record<string, string>> = {
   },
 };
 
-const ways: [string, Record<string, string>][] = [
-  ["as one program", { BUN_DEBUG_TEST_AOT_WORDS: "TestRunLayers:0" }],
-  ["in layers", { BUN_DEBUG_TEST_AOT_WORDS: "TestRunLayers:2,TestRunPartFiles:8" }],
-  ["with the test files from disk", { BUN_AOT_TEST_FILES_FROM_DISK: "1", BUN_AOT_TESTS_NAME_WHAT_THEY_USE: "1" }],
-];
+const ways: [string, Record<string, string>][] = [["as one program", { BUN_DEBUG_TEST_AOT_WORDS: "TestRunLayers:0" }]];
+// In front of the cure whatever failed in layers failed as one program too, 17 of 17. This one did.
+const witness = "a mock, then a reset";
 
 async function runTests(directory: string, env: Record<string, string>, ...flags: string[]) {
   const { stdout, stderr, exitCode } = await run([bunExe(), "test", "--preload", "./preload.js", ...flags], directory, {
@@ -292,7 +291,7 @@ async function runTests(directory: string, env: Record<string, string>, ...flags
 }
 
 for (const [name, files] of Object.entries(projects)) {
-  for (const [way, env] of ways) {
+  for (const [way, env] of waysFor(ways, name === witness)) {
     test.concurrent(`${name}, ${way}`, async () => {
       using dir = tempDir("preload-back", { "package.json": `{}`, ...files });
       const plain = await runTests(String(dir), {});

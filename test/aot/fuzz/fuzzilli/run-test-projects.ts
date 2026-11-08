@@ -10,13 +10,12 @@
 //   --test-ends-within 30000           milliseconds for one test, a long limit that no test is meant to meet. A project in which a test of plain `bun test` meets it is dropped: it says nothing about the compiler
 //   --reduce <folder of a find> [--must "EvalError"]   makes the project of a find smaller, into <folder>/reduced: whole files go first, then lines by halves, as long as the two runs differ
 //                                      in the same way in a test of the same kind or, with --must, as long as the compiled run alone says those words
-//   --words TestRunLayers:2,TestRunPartFiles:2   BUN_DEBUG_TEST_AOT_WORDS for the compiled runs: how the run is built (layers and pieces); a project has few test files, so say how many a piece holds
-//                                      TestRunPartFiles:drawn: 1, 2, 3 or 16, drawn for each project (not with --reduce or --project: the report of a find says the number)
+//   --words erase-types,check=Validate   BUN_DEBUG_TEST_AOT_WORDS for the compiled runs: words for the compiler
 //   --project <folder>                 runs the project in that folder both ways, once, and says in what they differ
 //   --known "require.cache,a Worker"   tests of these kinds are left out of the comparison: a fault that is known would else be the first difference of every project that holds it
 //
 // Each test writes down what it sees, and its file stores that in a folder of the run, so a wrong value shows where no `expect` asks for it.
-// Plain `bun test` runs twice: a project that answers itself otherwise is dropped. Half of the projects that agree run compiled once more, with BUN_JSC_validateAOTRuntime=1.
+// Plain `bun test` runs twice: a project that answers itself otherwise is dropped.
 // The name of a test begins with its kind, and a find is filed under the kind of the first test that differs: five projects to a kind are kept.
 import { createHash } from "node:crypto";
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -2073,8 +2072,6 @@ type Ended = {
   seen: Map<string, string>;
 };
 
-if ((options.reduce || options.project) && options.words.includes(":drawn"))
-  throw new Error("--words: say the number that the report of the find says");
 const wordsOfTheRun: Record<string, string> = options.words ? { BUN_DEBUG_TEST_AOT_WORDS: options.words } : {};
 
 function runTests(
@@ -2163,7 +2160,7 @@ function difference(plain: Ended, other: Ended): [string, string, string] | unde
   if (other.timedOut && !plain.timedOut)
     return ["never ends", "", `the run was ended behind ${options["ends-within"]} s`];
   const crash =
-    /^.*(panic|Segmentation fault|ASSERTION FAILED|Illegal instruction|AOT validation|AOT: |which the compiler assumed).*$/m.exec(
+    /^.*(panic|Segmentation fault|ASSERTION FAILED|Illegal instruction|AOT: |which the compiler assumed).*$/m.exec(
       other.stderr,
     )?.[0];
   if ((other.signal && !plain.signal) || (crash && !plain.stderr.includes(crash)))
@@ -2353,37 +2350,11 @@ for (let number = 0; Date.now() < until && (options.projects === "0" || number <
     add("a test of plain bun test met the long limit");
     continue;
   }
-  // A compiled run answers as plain does whatever the order in which flow's rules run: a layer once lost a function's body by that order alone. A word that does not begin with TestRun goes to the engine; the number of a schedule is a byte.
-  const schedule = project.chance(30)
-    ? project.pick([
-        "testing=DelayFlowRules",
-        "testing=DelayOtherFlowRules",
-        `testing=DelayFlowRules:${1 + project.below(255)}`,
-        `testing=DelayFlowRules:${1 + project.below(20)}`,
-      ])
-    : "";
-  // How many test files share a piece decides what one build sees together: an export behind a computed name lost its body in every run where two test files or more stood in one piece, and in some runs with pieces of one.
-  const form = options.words.replace("TestRunPartFiles:drawn", `TestRunPartFiles:${project.pick([1, 2, 3, 16])}`);
-  const wordsOfTheRun: Record<string, string> =
-    form || schedule ? { BUN_DEBUG_TEST_AOT_WORDS: [form, schedule].filter(Boolean).join(",") } : {};
   const compiled = runTests(options.bun, root, ["--aot", ...flags], "compiled", wordsOfTheRun);
   let found = difference(plain, compiled);
-  // Once more with the checks of the run time on: they end a worker where something that the compiler relies on does not hold, also where the answer is right.
-  if (!found && project.chance(50)) {
-    const checked = runTests(options.bun, root, ["--aot", ...flags], "checked", {
-      ...wordsOfTheRun,
-      BUN_JSC_validateAOTRuntime: "1",
-    });
-    const reported = difference(plain, checked);
-    if (reported) {
-      found = ["under the checks of the run time " + reported[0], reported[1], reported[2]];
-      compiled.stderr = checked.stderr;
-    }
-  }
   // Plain was asked twice; so is the compiled run where it differs. A difference that does not come again is kept apart: a busy machine makes them, and so may a race that only compiled code has.
   if (
     found &&
-    !found[0].startsWith("under the checks") &&
     compiled.signal === null &&
     !/panic|Segmentation|SIGSEGV|SIGILL|SIGABRT|SIGTRAP/.test(compiled.stderr)
   ) {

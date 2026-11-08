@@ -35,8 +35,8 @@ export function functionsOfProgram(mapPath: string): Set<string> {
 const forInstances = new Set(["BelongsToInstance", "BeginModuleEvaluation", "FinishModuleEvaluation"]);
 
 /**
- * `file position name form` of each such function, with a number where several are alike: its bytes, and the operations that its machine code
- * was made of, each with how many values of it there are. A run in layers has a map for each of its programs.
+ * `file position name form` of each such function, with a number where several are alike: how many bytes it has, and the operations that its
+ * machine code was made of, each with how many values of it there are. A run leaves a map for each of its processes and for each image.
  */
 export function operationsOfProgram(mapPaths: string[]): Map<string, { bytes: string; operations: string }> {
   const functions = new Map<string, { bytes: string; operations: string }>();
@@ -56,15 +56,13 @@ export function operationsOfProgram(mapPaths: string[]): Map<string, { bytes: st
         if (functions.has(`${key} #${count}`)) continue;
         current = { bytes: columns[3], operations: "" };
         functions.set(`${key} #${count}`, current);
-      } else if (columns[0] === "S" && current) {
-        // Five columns a piece of machine code, from the first on: its operation, its value, and three more. A value may have several pieces.
-        const values = new Set<string>();
-        for (let at = 1; at + 4 < columns.length; at += 5)
-          values.add(`${columns[at].replace(/[+*]+$/, "")} ${columns[at + 1]}`);
+      } else if (columns[0] === "FO" && current) {
+        // Behind the row `F` of its function. Three columns an entry, from the first on: an operation, whether its code is open, closed or generic,
+        // and how many values of it are so.
         const counts = new Map<string, number>();
-        for (const value of values) {
-          const operation = value.slice(0, value.indexOf(" "));
-          if (!forInstances.has(operation)) counts.set(operation, (counts.get(operation) ?? 0) + 1);
+        for (let at = 1; at + 2 < columns.length; at += 3) {
+          const [operation, , values] = columns.slice(at, at + 3);
+          if (!forInstances.has(operation)) counts.set(operation, (counts.get(operation) ?? 0) + Number(values));
         }
         current.operations = [...counts]
           .map(([operation, count]) => `${operation} ${count}`)
@@ -73,5 +71,8 @@ export function operationsOfProgram(mapPaths: string[]): Map<string, { bytes: st
       }
     }
   }
+  // Functions whose operations the build did not note would all count as made of the same ones.
+  if (functions.size && ![...functions.values()].some(it => it.operations))
+    throw new Error(`No row FO names an operation in ${mapPaths.join(", ")}`);
   return functions;
 }

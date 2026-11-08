@@ -25,7 +25,6 @@ function runsAsPlain(title: string, expected: string, body: string) {
   test(title, async () => {
     const plain = (await project.ran()).get(name);
     expect(plain?.printed).toBe(expected + "\n");
-    expect((await project.ran(["--debug-aot"], "TestRunLayers:2")).get(name)).toEqual(plain);
     expect((await project.ran(["--debug-aot"], "TestRunLayers:0")).get(name)).toEqual(plain);
   });
 }

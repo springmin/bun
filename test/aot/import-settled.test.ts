@@ -138,12 +138,7 @@ test("vi.dynamicImportSettled() waits for compiled code", async () => {
       exitCode,
     };
   };
-  const [plain, oneProgram, twoLayers, threeLayers] = await Promise.all([
-    seenWith("TestRunLayers:0"),
-    seenWith("TestRunLayers:0", "--aot"),
-    seenWith("TestRunLayers:2,TestRunPartFiles:1", "--aot"),
-    seenWith("TestRunLayers:3,TestRunPartFiles:1", "--aot"),
-  ]);
+  const [plain, oneProgram] = await Promise.all([seenWith("TestRunLayers:0"), seenWith("TestRunLayers:0", "--aot")]);
   expect(plain.lines).toEqual(
     [
       "seen: then.js runs",
@@ -177,6 +172,4 @@ test("vi.dynamicImportSettled() waits for compiled code", async () => {
   expect(plain.failed).toContain("error: thrown by throws-alone.js");
   expect(plain.exitCode).toBe(1);
   expect(oneProgram).toEqual(plain);
-  expect(twoLayers).toEqual(plain);
-  expect(threeLayers).toEqual(plain);
 }, 180_000);

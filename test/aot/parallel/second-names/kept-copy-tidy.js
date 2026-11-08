@@ -1,4 +1,3 @@
-// Alone: which kind of array a reader asks for goes by every array that the executable holds
 // A copy of a list is kept under a second name, read and written in one loop: the copy is kept in a field, and what is stored is computed.
 function tidy(list) {
   const copy = [...list];

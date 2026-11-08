@@ -178,12 +178,12 @@ async function makeInstances(): Promise<() => void> {
   by("Buffer", () => Buffer.from("text"));
   by("CryptoHasher", () => new Bun.CryptoHasher("sha256"));
   by("Glob", () => new Bun.Glob("*"));
-  by("Cookie", () => new Bun.Cookie("a", "b"));
+  by("BunCookie", () => new Bun.Cookie("a", "b"));
   by(
-    "Cookie",
+    "BunCookie",
     () => new Bun.Cookie("a", "b", { expires: new Date(5), maxAge: 5, domain: "x.y", path: "/p", sameSite: "strict" }),
   );
-  by("CookieMap", () => new Bun.CookieMap("a=b"));
+  by("BunCookieMap", () => new Bun.CookieMap("a=b"));
   by("RegExp", () => /x/dgimsuy);
   by("RegExp", () => /x/v);
   by("Error", () => new Error("x", { cause: 1 }));
@@ -244,6 +244,8 @@ function isInstanceOf(value: object, token: string, isOfClassItself: boolean): A
   const prototype = find(entryOf.get(classOf.get(token)?.prototype ?? ""));
   if (!isObject(prototype)) return notKnown;
   if (isOfClassItself) return Object.getPrototypeOf(value) === prototype;
+  // An object without a prototype is an ordinary object, as differential/types.ts has it: the class is known by the cell, not by what it stands below.
+  if (token === "Object" && typeof value === "object" && Object.getPrototypeOf(value) === null) return true;
   for (let at = Object.getPrototypeOf(value); at; at = Object.getPrototypeOf(at)) if (at === prototype) return true;
   return false;
 }
@@ -405,6 +407,8 @@ for (const entry of entries) {
       const descriptor = attempt(() => Object.getOwnPropertyDescriptor(instance, key));
       if (!descriptor || !("value" in descriptor)) continue;
       counts.readsOfInstances++;
+      // A type that is declared only says what native code lays there by itself, and these instances were handed operands.
+      if (entry.overloads.some(({ mode, resultIsDeclaredOnly }) => mode === "Get" && resultIsDeclaredOnly)) continue;
       holdValue(entry, descriptor.value, "an instance holds");
     }
     continue;

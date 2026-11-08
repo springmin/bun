@@ -21,32 +21,26 @@ test("the helper replaces a built-in", () => { expect(patched()).toBe(true); });
 test("the helper loads a file that it wrote", () => { expect(loadWritten()).toBe(42); });
 `;
 
-const runs: [string, string, string[]][] = [
+// Over layers the fault had words of its own: a TypeError when the file ran, where one program refused the file at the build.
+const runs: [string, string, string[], string?][] = [
   ["named on the command line", "latest.ts", ["./checks/latest.ts"]],
   ["found by the scan in another case", "Foo.Test.ts", []],
   ["named as usual", "foo.test.ts", []],
 ];
-const forms: [string, string, string[]][] = [
-  ["as the run is built by itself", "", []],
-  ["one program", "TestRunLayers:0", []],
-  ["three layers", "TestRunLayers:3", ["--isolate"]],
-];
 
-for (const [how, name, files] of runs) {
-  for (const [form, words, flags] of forms) {
-    test.concurrent(`a test file ${how}, ${form}`, async () => {
-      using dir = tempDir("test-file-names", { [`checks/${name}`]: testFile, "checks/helper.ts": helper });
-      await using run = Bun.spawn({
-        cmd: [bunExe(), "test", "--aot", ...flags, ...files],
-        env: { ...bunEnv, BUN_DEBUG_TEST_AOT_WORDS: words },
-        cwd: String(dir),
-        stdout: "ignore",
-        stderr: "pipe",
-      });
-      const [stderr, exitCode] = await Promise.all([run.stderr.text(), run.exited]);
-      expect(stderr.split("\n").filter(line => /^(error|TypeError)\b/.test(line))).toEqual([]);
-      expect(stderr).toContain(" 2 pass");
-      expect(exitCode).toBe(0);
+for (const [how, name, files, words] of runs) {
+  test.concurrent(`a test file ${how}`, async () => {
+    using dir = tempDir("test-file-names", { [`checks/${name}`]: testFile, "checks/helper.ts": helper });
+    await using run = Bun.spawn({
+      cmd: [bunExe(), "test", "--aot", ...files],
+      env: words ? { ...bunEnv, BUN_DEBUG_TEST_AOT_WORDS: words } : bunEnv,
+      cwd: String(dir),
+      stdout: "ignore",
+      stderr: "pipe",
     });
-  }
+    const [stderr, exitCode] = await Promise.all([run.stderr.text(), run.exited]);
+    expect(stderr.split("\n").filter(line => /^(error|TypeError)\b/.test(line))).toEqual([]);
+    expect(stderr).toContain(" 2 pass");
+    expect(exitCode).toBe(0);
+  });
 }

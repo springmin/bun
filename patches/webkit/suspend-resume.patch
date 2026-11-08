@@ -1,5 +1,5 @@
 diff --git a/Source/WTF/wtf/posix/ThreadingPOSIX.cpp b/Source/WTF/wtf/posix/ThreadingPOSIX.cpp
-index 8146af32e594..160c49867f2c 100644
+index aee58fb821bc..2611499e2490 100644
 --- a/Source/WTF/wtf/posix/ThreadingPOSIX.cpp
 +++ b/Source/WTF/wtf/posix/ThreadingPOSIX.cpp
 @@ -121,6 +121,26 @@ public:
@@ -29,7 +29,7 @@ index 8146af32e594..160c49867f2c 100644
      void post()
      {
          sem_post(&m_platformSemaphore);
-@@ -225,6 +245,18 @@ void Thread::signalHandlerSuspendResume(int, siginfo_t*, void* ucontext)
+@@ -272,6 +292,18 @@ void Thread::signalHandlerSuspendResume(int, siginfo_t*, void* ucontext)
      // http://pubs.opengroup.org/onlinepubs/9699919799/basedefs/V1_chap04.html#tag_04_11
      globalSemaphoreForSuspendResume->post();
  
@@ -48,7 +48,7 @@ index 8146af32e594..160c49867f2c 100644
      // Reaching here, sigThreadSuspendResume is blocked in this handler (this is configured by sigaction's sa_mask).
      // So before calling sigsuspend, sigThreadSuspendResume to this thread is deferred. This ensures that the handler is not executed recursively.
      sigset_t blockedSignalSet;
-@@ -234,6 +266,7 @@ void Thread::signalHandlerSuspendResume(int, siginfo_t*, void* ucontext)
+@@ -281,6 +313,7 @@ void Thread::signalHandlerSuspendResume(int, siginfo_t*, void* ucontext)
      // sigThreadSuspendResume stays blocked between the check and sigsuspend(), so the request cannot be missed.
      while (pendingSuspendResumeRequestForCurrentThread() != SuspendResumeRequest::Resume)
          sigsuspend(&blockedSignalSet);
@@ -56,7 +56,7 @@ index 8146af32e594..160c49867f2c 100644
      clearSuspendResumeRequest();
  
      thread->m_platformRegisters = nullptr;
-@@ -663,7 +696,13 @@ auto Thread::suspend(const ThreadSuspendLocker&) -> std::expected<void, Platform
+@@ -716,7 +749,13 @@ auto Thread::suspend(const ThreadSuspendLocker&) -> std::expected<void, Platform
                  clearSuspendResumeRequest();
                  return makeUnexpected(result);
              }

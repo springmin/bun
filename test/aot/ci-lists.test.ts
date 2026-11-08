@@ -3,15 +3,14 @@
 //   ../parallel-allowlist.json    every file of a folder in `dirs` that is not in `excludeFiles` runs in one process with the others of its shard, which is
 //                                 ended after ten minutes. What was under way then runs again. The list's own rule: at most 15 s on the slowest lane.
 // 290 files of this folder that take half a minute and more were in neither, four of them were dealt into one window and passed their limits, and with a
-// sanitizer 329 ran twice. So every test file of this folder that CI runs (harness/every-build.ts) is in the first list, and one that is long there is in
-// `excludeFiles` of the second. A file that CI leaves out takes no time there: it needs no entry, and one that it has says half a second.
+// sanitizer 329 ran twice. So every test file of this folder is in the first list, and one that is long there is in `excludeFiles` of the second.
 //
 //   AOT_CI_LISTS_UPDATE=1 bun test test/aot/ci-lists.test.ts                            enters what is missing: a file that nobody has timed counts as long
-//   AOT_CI_LISTS_UPDATE="mock-ends.test.ts=12 perf/stay-calls-1.test.ts=90" bun test ..  with the seconds that a file took in your gate. With a sanitizer: four times that.
+//   AOT_CI_LISTS_UPDATE="mock-ends.test.ts=12 perf/threads-of-a-build.test.ts=30" bun test ..  with the seconds that a file took in your gate. With a sanitizer: four times that.
+//                                                                                 They also replace what the first command entered for a file.
 import { expect, test } from "bun:test";
 import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { everyBuild } from "./harness/every-build";
 
 const folderOfTests = join(import.meta.dir, "..");
 const durationsPath = join(folderOfTests, "expected-durations.json");
@@ -28,12 +27,15 @@ const testFiles = readdirSync(import.meta.dir, { recursive: true, encoding: "utf
   .map(path => path.replaceAll("\\", "/"))
   .filter(isOurs)
   .map(path => `aot/${path}`)
-  .filter(path => everyBuild.has(path))
   .sort();
 
 type Durations = Record<string, Record<string, number>>;
 const slowest = (entry: Record<string, number>) =>
   Math.max(...Object.values(entry).filter(it => typeof it === "number"));
+const isPlaceholder = (entry: Record<string, number>) =>
+  Object.keys(entry).length === 2 &&
+  entry.default === ofAFileNobodyTimed * 1000 &&
+  entry.asan === ofAFileNobodyTimed * 1000 * timesAsLongWithASanitizer;
 
 function read() {
   const durations: Durations = JSON.parse(readFileSync(durationsPath, "utf8"));
@@ -41,27 +43,37 @@ function read() {
     readFileSync(allowlistPath, "utf8"),
   );
   const notTimed = testFiles.filter(file => !(file in durations));
+  const placeholders = testFiles.filter(file => file in durations && isPlaceholder(durations[file]));
   const isInBucket = (file: string) =>
     dirs.includes(file.slice(0, file.lastIndexOf("/"))) && !excludeFiles.includes(file);
   const tooLongForTheBucket = testFiles.filter(
     file => file in durations && slowest(durations[file]) > longestInTheBucket && isInBucket(file),
   );
-  return { notTimed, tooLongForTheBucket };
+  return { notTimed, placeholders, tooLongForTheBucket };
 }
 
 // Both files are kept as they are written: an entry goes in front of the first of this folder, a name behind the last of its list.
+// The seconds of a file that has a placeholder are written where the placeholder stands.
 function update(given: string) {
   const seconds = new Map(
     given.split(/\s+/).flatMap(word => (word.includes("=") ? [word.split("=") as [string, string]] : [])),
   );
-  const { notTimed } = read();
-  if (notTimed.length) {
-    const text = readFileSync(durationsPath, "utf8");
+  const secondsOf = (file: string) => seconds.get(file.slice("aot/".length));
+  const entryOf = (file: string) => {
+    const took = Math.round(Number(secondsOf(file) ?? ofAFileNobodyTimed) * 10) * 100;
+    return `  ${JSON.stringify(file)}: {\n    "default": ${took},\n    "asan": ${took * timesAsLongWithASanitizer}\n  }`;
+  };
+  const { notTimed, placeholders } = read();
+  const timedNow = placeholders.filter(file => secondsOf(file) !== undefined);
+  if (notTimed.length || timedNow.length) {
+    let text = readFileSync(durationsPath, "utf8");
+    for (const file of timedNow) {
+      const start = text.indexOf(`  ${JSON.stringify(file)}: {`);
+      const end = text.indexOf("\n  }", start) + "\n  }".length;
+      text = text.slice(0, start) + entryOf(file) + text.slice(end);
+    }
     const at = text.indexOf('  "aot/');
-    const entries = notTimed.map(file => {
-      const took = Math.round(Number(seconds.get(file.slice("aot/".length)) ?? ofAFileNobodyTimed) * 10) * 100;
-      return `  ${JSON.stringify(file)}: {\n    "default": ${took},\n    "asan": ${took * timesAsLongWithASanitizer}\n  },\n`;
-    });
+    const entries = notTimed.map(file => `${entryOf(file)},\n`);
     writeFileSync(durationsPath, text.slice(0, at) + entries.join("") + text.slice(at));
   }
   const { tooLongForTheBucket } = read();
@@ -75,7 +87,7 @@ function update(given: string) {
   }
 }
 
-test("CI's runner knows how long every test file of this folder that it runs takes, and runs no long one in the bucket", () => {
+test("CI's runner knows how long every test file of this folder takes, and runs no long one in the bucket", () => {
   if (process.env.AOT_CI_LISTS_UPDATE) update(process.env.AOT_CI_LISTS_UPDATE);
   const command = `AOT_CI_LISTS_UPDATE="<file below test/aot>=<the seconds it took> .." bun test test/aot/ci-lists.test.ts`;
   const notTimed = `not in test/expected-durations.json, so CI takes it for a fast file. This enters it, to land with the test: ${command}`;

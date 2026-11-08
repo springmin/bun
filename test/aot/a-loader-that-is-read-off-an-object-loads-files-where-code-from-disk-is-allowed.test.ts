@@ -4,7 +4,6 @@ import { join } from "node:path";
 import { isHardened } from "./hardened";
 import { afterAll } from "./harness/default-timeout";
 import { run } from "./harness/run";
-import { runsWholeGrids } from "./harness/ways";
 // One by one: a case builds for minutes, and beside others it would pass its limit where Bun has a sanitizer.
 import { beforeAll, testOneByOne as testWhereSupported } from "./supported";
 
@@ -70,22 +69,15 @@ beforeAll(() => {
 });
 afterAll(() => ofTestRuns?.[Symbol.dispose]());
 
-const forms: [string, string[], string][] = [
-  ["plain Bun", [], ""],
-  ["as the run builds itself", ["--aot"], ""],
-  ["one program", ["--aot", "--isolate"], "TestRunLayers:0"],
-  ["two layers", ["--aot", "--isolate"], "TestRunLayers:2,TestRunPartFiles:1"],
-];
 // The fault was in the one program, which a user's flags build. Over layers nothing was wrong.
-test.each<[string, string[], string]>(forms.slice(0, runsWholeGrids ? 4 : 2))(
-  "in a test run: %s",
-  async (_, flags, words) => {
-    const directory = String(ofTestRuns);
-    const env = { ...bunEnv, BUN_DEBUG_TEST_AOT_WORDS: words, BUN_TMPDIR: directory };
-    const ran = await run([bunExe(), "test", ...flags, "./a.test.ts"], directory, env);
-    expect(said(ran.stdout + "\n" + ran.stderr)).toEqual(expected);
-  },
-);
+test.each<[string, string[]]>([
+  ["plain Bun", []],
+  ["as the run builds itself", ["--aot"]],
+])("in a test run: %s", async (_, flags) => {
+  const directory = String(ofTestRuns);
+  const ran = await run([bunExe(), "test", ...flags, "./a.test.ts"], directory, { ...bunEnv, BUN_TMPDIR: directory });
+  expect(said(ran.stdout + "\n" + ran.stderr)).toEqual(expected);
+});
 
 test("in an executable that stays beside its files", async () => {
   using dir = tempDir("aot-module-graph-loads-files-in-place", files);
@@ -134,12 +126,9 @@ test("in an executable that holds its files", async () => {
   ]);
 });
 
-// The handlers of require.extensions load the file that they are handed, and nothing else of these programs loads by a name that the build does not know.
-test.each([
-  ["require.extensions", `require.extensions`],
-  ["Module._extensions", `(Module as any)._extensions`],
-  ["the extensions of a require that createRequire() has made", `Module.createRequire(import.meta.url).extensions`],
-])("%s loads a file that a test has just written", async (_, extensions) => {
+// The handlers of require.extensions load the file that they are handed, and nothing else of this program loads by a name that the build does not know.
+// That a read of require.extensions or of Module._extensions counts as a load: engine-tests/valueflow/host/a-read-of-the-handlers-of-*.ir.
+test("the extensions of a require that createRequire() has made loads a file that a test has just written", async () => {
   using dir = tempDir("aot-extension-handlers-load-files", {
     "tsconfig.json": "{}",
     "a.test.ts": `import { test } from "bun:test";
@@ -151,7 +140,7 @@ test("a handler", () => {
   const made = join(mkdtempSync(join(tmpdir(), "handler-")), "made.js");
   writeFileSync(made, "module.exports = 42;\\n");
   const loaded: any = new Module(made);
-  try { ${extensions}[".js"](loaded, made); console.log("SAID", loaded.exports); }
+  try { Module.createRequire(import.meta.url).extensions[".js"](loaded, made); console.log("SAID", loaded.exports); }
   catch (error: any) { console.log("SAID THROWS", error.code); }
 });
 `,

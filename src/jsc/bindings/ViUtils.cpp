@@ -12,7 +12,7 @@
 #include <JavaScriptCore/ObjectConstructor.h>
 #if ENABLE(AOT)
 #include "BunCompiledModules.h"
-#include <JavaScriptCore/JSCellButterfly.h>
+#include <JavaScriptCore/JSPromiseReaction.h>
 #endif
 
 extern "C" bool JSMock__isInPreload(Zig::GlobalObject*);
@@ -322,36 +322,33 @@ JSC_DEFINE_HOST_FUNCTION(jsViDynamicImportDidSettle, (JSGlobalObject * globalObj
 }
 
 #if ENABLE(AOT)
-JSC_DECLARE_HOST_FUNCTION(jsViLookAgainAtImport);
-
-static void lookAgainAtImport(JSGlobalObject* globalObject, JSPromise* import, JSPromise* promise)
+// Plain Bun waits for a promise of the loader, which settles ahead of the one that the program has. Compiled code has the promise that is waited for: the reaction
+// runs ahead of the program's and behind those of earlier calls, and whether anybody handles a rejection is left as it is.
+static void reactAheadOfProgram(VM& vm, JSGlobalObject* globalObject, JSPromise* import, JSPromise* promise)
 {
-    auto& vm = getVM(globalObject);
-    auto scope = DECLARE_THROW_SCOPE(vm);
+    auto isOfEarlierCall = [](JSPromiseReaction* reaction) {
+        auto* full = dynamicDowncast<JSFullPromiseReaction>(reaction);
+        auto* function = full ? dynamicDowncast<JSFunction>(full->onFulfilled()) : nullptr;
+        return function && function->isHostFunction() && function->nativeFunction() == toTagged(jsViDynamicImportDidSettle);
+    };
+    bool wasHandled = import->isHandled();
+    auto* didSettle = JSFunction::create(vm, globalObject, 2, String(), jsViDynamicImportDidSettle, ImplementationVisibility::Private);
+    import->performPromiseThenWithContext(vm, globalObject, didSettle, didSettle, jsUndefined(), promise);
+    if (!wasHandled)
+        import->setFlags(import->flags() & ~JSPromise::isHandledFlag);
 
-    MarkedArgumentBuffer arguments;
-    arguments.append(import);
-    arguments.append(promise);
-    auto* packed = JSCellButterfly::tryCreateFromArgList(vm, arguments);
-    if (!packed) [[unlikely]] {
-        throwOutOfMemoryError(globalObject, scope);
-        return;
+    // The latest reaction stands first in the list, and runs last.
+    auto* reaction = uncheckedDowncast<JSPromiseReaction>(import->payloadCell());
+    JSPromiseReaction* firstOfProgram = nullptr;
+    for (JSPromiseReaction* earlier = reaction->next(); earlier; earlier = earlier->next()) {
+        if (!isOfEarlierCall(earlier))
+            firstOfProgram = earlier;
     }
-    auto* lookAgain = JSFunction::create(vm, globalObject, 2, String(), jsViLookAgainAtImport, ImplementationVisibility::Private);
-    Bun__Timer__setTimeout(globalObject, JSValue::encode(lookAgain), JSValue::encode(packed), JSValue::encode(jsNumber(0)));
-}
-
-JSC_DEFINE_HOST_FUNCTION(jsViLookAgainAtImport, (JSGlobalObject * globalObject, CallFrame* callFrame))
-{
-    auto scope = DECLARE_THROW_SCOPE(getVM(globalObject));
-    auto* import = uncheckedDowncast<JSPromise>(callFrame->argument(0));
-    auto* promise = uncheckedDowncast<JSPromise>(callFrame->argument(1));
-    if (import->status() == JSPromise::Status::Pending)
-        lookAgainAtImport(globalObject, import, promise);
-    else
-        fulfillOnceImportsSettle(globalObject, promise);
-    RETURN_IF_EXCEPTION(scope, {});
-    return JSValue::encode(jsUndefined());
+    if (!firstOfProgram)
+        return;
+    import->setPackedCell(vm, import->flags(), reaction->next());
+    reaction->setNext(vm, firstOfProgram->next());
+    firstOfProgram->setNext(vm, reaction);
 }
 #endif
 
@@ -364,9 +361,8 @@ JSC_DEFINE_HOST_FUNCTION(jsViFulfillUnlessImporting, (JSGlobalObject * globalObj
     JSPromise* pending = pendingDynamicImport(defaultGlobalObject(globalObject));
     RETURN_IF_EXCEPTION(scope, {});
 #if ENABLE(AOT)
-    if (hasCompiledModules() && pending && !pending->isHandled()) [[unlikely]] {
-        lookAgainAtImport(globalObject, pending, promise);
-        RETURN_IF_EXCEPTION(scope, {});
+    if (hasCompiledModules() && pending) [[unlikely]] {
+        reactAheadOfProgram(vm, globalObject, pending, promise);
         return JSValue::encode(jsUndefined());
     }
 #endif
@@ -384,6 +380,17 @@ JSC_DEFINE_HOST_FUNCTION(jsViDynamicImportSettled, (JSGlobalObject * globalObjec
     auto scope = DECLARE_THROW_SCOPE(vm);
 
     auto* promise = JSPromise::create(vm, globalObject->promiseStructure());
+#if ENABLE(AOT)
+    // Plain Bun reads a text on another thread, which takes longer than the timer below. A compiled module's comes one turn later, ahead of the timer where another timer is due first.
+    if (hasCompiledModules()) [[unlikely]] {
+        JSPromise* pending = pendingDynamicImport(defaultGlobalObject(globalObject));
+        RETURN_IF_EXCEPTION(scope, {});
+        if (pending) {
+            reactAheadOfProgram(vm, globalObject, pending, promise);
+            return JSValue::encode(promise);
+        }
+    }
+#endif
     fulfillOnceImportsSettle(globalObject, promise);
     RETURN_IF_EXCEPTION(scope, {});
     return JSValue::encode(promise);

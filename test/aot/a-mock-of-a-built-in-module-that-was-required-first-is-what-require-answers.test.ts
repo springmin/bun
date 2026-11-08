@@ -81,7 +81,7 @@ const asOneProgram = casesOfOneRun("a-mock-behind-a-require", shared, [[[]], [["
 const inLayers = casesOfOneRun(
   "a-mock-behind-a-require-in-layers",
   shared,
-  [[[]], [["--debug-aot"], "TestRunLayers:2,TestRunPartFiles:1"]],
+  [[[]], [["--debug-aot"], "TestRunLayers:0"]],
   test,
 );
 
@@ -108,6 +108,6 @@ for (const name of ["bun:sqlite", "ws", "bun:jsc"]) {
   test(`require("${name}") where each test file is an image of its own`, async () => {
     const plain = toldInLayers(await inLayers.ran());
     expect(plain.filter(line => !line.includes(": pass "))).toEqual([]);
-    expect(toldInLayers(await inLayers.ran(["--debug-aot"], "TestRunLayers:2,TestRunPartFiles:1"))).toEqual(plain);
+    expect(toldInLayers(await inLayers.ran(["--debug-aot"], "TestRunLayers:0"))).toEqual(plain);
   });
 }

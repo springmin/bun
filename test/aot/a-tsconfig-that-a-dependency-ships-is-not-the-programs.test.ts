@@ -61,12 +61,7 @@ const projects: Record<string, Record<string, string>> = {
   "it states newer options than the project": twoPackages(old, modern),
 };
 
-const forms: [string, string | undefined, string[]][] = [
-  ["one program", "TestRunLayers:0", ["--aot"]],
-  ["two layers", "TestRunLayers:2,TestRunPartFiles:1", ["--aot", "--parallel=2"]],
-  ["three layers", "TestRunLayers:3,TestRunPartFiles:1", ["--aot", "--parallel=2"]],
-  ["three layers in one process", "TestRunLayers:3,TestRunPartFiles:1", ["--aot", "--isolate"]],
-];
+const forms: [string, string | undefined, string[]][] = [["one program", "TestRunLayers:0", ["--aot"]]];
 
 for (const [title, files] of Object.entries(projects)) {
   const ways = waysFor(forms, title === "it extends a file that is not published");

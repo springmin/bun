@@ -1,6 +1,3 @@
-//! Which files a call changes on disk: `writeFileSync(path, text)`, `fs.promises.rm(path)`, `Bun.write(path, text)`. `bun test` reads a file when something
-//! first loads it, so a build for a test run has to know which files of the program the run itself writes, moves or removes.
-
 use super::alternatives::{AskedOfDataFiles, Folder, WrittenNames, find_alternatives};
 use super::call_sites::is_free_name;
 use super::made_requires::follow_settled_bindings;
@@ -30,7 +27,6 @@ enum Reach {
     BelowIfRecursive(usize),
 }
 
-// The places of the operands that name what is another file behind the call, or none.
 fn operands_changed_by_function_of_fs(name: &[u8]) -> &'static [(usize, Reach)] {
     match name {
         b"writeFile" | b"writeFileSync" | b"appendFile" | b"appendFileSync" | b"truncate"
@@ -58,7 +54,6 @@ fn find_constant(inputs: &ScanInputs<'_, '_>, e: ExprId) -> Option<Constant> {
     }
 }
 
-// `fs.promises.writeFile`: where the function lives, and its name.
 fn find_function(inputs: &ScanInputs<'_, '_>, callee: ExprId) -> Option<(Holder, Atom)> {
     let &ScanInputs {
         hir, bound, atoms, ..
@@ -114,7 +109,6 @@ fn find_functions_of_other_files_called<'a>(
     named.collect()
 }
 
-// `Bun.file(path)`, itself or in a variable that holds nothing else.
 fn find_path_of_file_object(inputs: &ScanInputs<'_, '_>, file: ExprId) -> Option<ExprId> {
     let &ScanInputs {
         hir, bound, atoms, ..
@@ -130,14 +124,12 @@ fn find_path_of_file_object(inputs: &ScanInputs<'_, '_>, file: ExprId) -> Option
     }
 }
 
-// `openSync(path, "w")`. Whoever opens a file to read it changes nothing.
 fn opens_for_writing(inputs: &ScanInputs<'_, '_>, flags: Option<ExprId>) -> bool {
     let flags = flags.and_then(|flags| find_constant(inputs, flags));
     matches!(flags, Some(Constant::String(flags))
         if bun_core::strings::index_of_any(inputs.atoms.bytes(flags), b"wa+").is_some())
 }
 
-/// The operands of the call that name files which it writes, moves or removes.
 fn may_say_recursive(inputs: &ScanInputs<'_, '_>, options: ExprId) -> bool {
     let &ScanInputs { hir, atoms, .. } = inputs;
     let options = hir.skip_type_assertions(options);
@@ -339,7 +331,6 @@ pub(super) fn find_operands_that_name_changed_files<'a>(
     let &ScanInputs { hir, atoms, .. } = inputs;
     let callee = hir.skip_type_assertions(callee);
     let mut found = SmallVec::new();
-    // Most calls are calls of a member, and most members go by another name.
     let written_name = match hir.member_key(callee) {
         Some((_, MemberKey::Name(name))) => Some(atoms.bytes(name)),
         Some(_) => return found,

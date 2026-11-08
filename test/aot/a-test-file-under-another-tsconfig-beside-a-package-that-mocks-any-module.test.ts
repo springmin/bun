@@ -45,7 +45,7 @@ test("has all", () => {
 `,
 };
 
-test.each(["TestRunLayers:0", "TestRunLayers:2"])("the run ends as under plain bun test (%s)", async words => {
+test.each(["TestRunLayers:0"])("the run ends as under plain bun test (%s)", async words => {
   using dir = tempDir("aot-another-tsconfig-beside-a-package-that-mocks", files);
   const told = async (...flags: string[]) => {
     const env = { ...bunEnv, BUN_DEBUG_TEST_AOT_WORDS: words };

@@ -27,6 +27,7 @@ pub enum EnteredFrom {
     Program,
     Startup,
     CommandLine,
+    /// Machine code of the program calls it and nothing else does. The image lists what its code calls.
     CompiledCode,
 }
 
@@ -144,6 +145,7 @@ impl Feature {
         features
     }
 
+    /// What a compiled program leaves out without being asked to, where its image lists none of what compiled code enters. The native code of no built-in is in it.
     pub fn all_that_leave_unasked() -> FeatureSet {
         let mut features = Feature::all_outside_compiled_programs();
         features.union_with(&Feature::all_entered_from(EnteredFrom::CompiledCode));

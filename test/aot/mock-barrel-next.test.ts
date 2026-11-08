@@ -1,6 +1,7 @@
 // A file stands between a mocked file and its user (`export * from "./dep.js"`), beside the mocked file in the image below the user's. The mock has a name more.
 // The next test file mocks nothing and imports the user again: the name is gone, and the values are the file's own. Plain `bun test` says what is right.
-// One realm, the test files named in order, over the layers that the run takes by itself and as one program.
+// One realm, the test files named in order, over the layers that the run takes by itself: as one program it was right all along.
+// An earlier test file that has taken the namespace object of the barrel: fixed-runs/closed/namespace-taken-ahead-of-a-mock.txt.
 import { expect } from "bun:test";
 import { bunEnv, bunExe, tempDir } from "harness";
 import { raiseDefaultTimeout } from "./harness/default-timeout";
@@ -70,12 +71,13 @@ const kinds: Record<string, Kind> = {
   },
 };
 
-function project() {
+function project(names = Object.keys(kinds)) {
   const files: Record<string, string> = { "package.json": `{ "type": "module" }` };
   const importsOfUser = Array.from({ length: fillers }, (_, n) => `import "../../fill/f${n}.js";\n`).join("");
   let importsOfFiller = "";
   const testFiles: string[] = [];
-  for (const [name, kind] of Object.entries(kinds)) {
+  for (const name of names) {
+    const kind = kinds[name];
     for (const [file, text] of Object.entries(kind.files)) files[`src/${name}/${file}`] = text;
     files[`src/${name}/user.js`] = importsOfUser + kind.user;
     importsOfFiller += `import "../src/${name}/${kind.below ?? "dep.js"}";\n`;
@@ -96,22 +98,36 @@ const look = async step => console.log("| ${name}", step, (await import("./src/$
   return { files, testFiles };
 }
 
-test("the next test file reads the file's own names through a file between", async () => {
-  const { files, testFiles } = project();
-  using dir = tempDir("mock-barrel-next", files);
-  const runTests = async (...flags: string[]) => {
+function runnerOf(dir: string, testFiles: string[]) {
+  return async (...flags: string[]) => {
     const env = { ...bunEnv, BUN_DEBUG_TEST_AOT_WORDS: "TestRunSaysItsForm" };
     const command = [bunExe(), "test", "--parallel=1", "--no-isolate", ...flags, ...testFiles];
-    const { stdout, stderr, exitCode } = await run(command, String(dir), env);
+    const { stdout, stderr, exitCode } = await run(command, dir, env);
     if (exitCode !== 0) console.error(stderr);
     const form = /^AOT test run \| (layers|one program)/m.exec(stdout + stderr)?.[1];
     return { printed: stdout.split("\n").filter(line => line.startsWith("| ")), exitCode, form };
   };
+}
+
+test("the next test file reads the file's own names through a file between", async () => {
+  const { files, testFiles } = project();
+  using dir = tempDir("mock-barrel-next", files);
+  const runTests = runnerOf(String(dir), testFiles);
   const plain = await runTests();
   expect(plain.exitCode).toBe(0);
   expect(plain.printed).toHaveLength(testFiles.length);
   expect(plain.printed).toContain("| a-barrel mocked one,added,added+flag+plain");
   expect(plain.printed).toContain("| a-barrel next real,,flag+plain");
-  expect(await runTests("--aot", "--aot-memory-limit", "1MB")).toEqual({ ...plain, form: "layers" });
+  expect(await runTests("--aot")).toEqual({ ...plain, form: "one program" });
+});
+
+// Beside the other kinds that one once came out right by chance. Here it stands with as little company as it needs.
+test("a barrel that an earlier test file has loaded, by itself", async () => {
+  const { files, testFiles } = project(["company", "the-barrel-is-below-the-fillers"]);
+  using dir = tempDir("mock-barrel-next", files);
+  const runTests = runnerOf(String(dir), testFiles);
+  const plain = await runTests();
+  expect(plain.exitCode).toBe(0);
+  expect(plain.printed).toContain("| the-barrel-is-below-the-fillers mocked one,added,added+flag+plain");
   expect(await runTests("--aot")).toEqual({ ...plain, form: "one program" });
 });

@@ -1320,8 +1320,8 @@ Full documentation is available at <magenta>https://bun.com/docs/cli/run<r>
         use bun_standalone_graph::StandaloneModuleGraph::Flags as GraphFlags;
 
         crate::cli::startup_options::refuse_code_the_compiler_did_not_see();
-        let runs_compiled_code =
-            bun_resolver::StandaloneModuleGraph::compiled_program(graph).is_some();
+        let program = bun_resolver::StandaloneModuleGraph::compiled_program(graph);
+        let runs_compiled_code = program.is_some();
         // argv belongs to the compiled program, so a `-e` or `-p` in it is not ours.
         bun_jsc::initialize(bun_jsc::InitializeOptions {
             runs_compiled_code,
@@ -1580,6 +1580,12 @@ impl Run<'_> {
         'do_postgres_preconnect: {
             if !ctx.runtime_options.sql_preconnect {
                 break 'do_postgres_preconnect;
+            }
+            unsafe extern "C" {
+                safe fn Bun__canReadSqlAtStart(global: &JSGlobalObject) -> bool;
+            }
+            if !Bun__canReadSqlAtStart(global) {
+                crate::cli::startup_options::exit_for_sql_preconnect_without_sql();
             }
             let preconnect = || -> bun_jsc::JsResult<()> {
                 let Some(bun_object) = global.to_js_value().get(global, "Bun")? else {

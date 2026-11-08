@@ -1,5 +1,4 @@
-// Alone: how a field is held goes by all that the executable does to objects of its class
-// STATISTIC: SlotsWithAbsentState >= 1
+// COUNTER: FieldsLeftSlotByDelete >= 1
 type R = { x?: number; y: number };
 function use(p: R): string {
   return (p.x ?? 10) + p.y + ":" + Object.keys(p).join();

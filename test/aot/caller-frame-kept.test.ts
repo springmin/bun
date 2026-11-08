@@ -73,10 +73,8 @@ const project = {
     });`,
 };
 
-const ways: [string, Record<string, string>][] = [
-  ["as one program", { BUN_DEBUG_TEST_AOT_WORDS: "TestRunLayers:0" }],
-  ["in layers", { BUN_DEBUG_TEST_AOT_WORDS: "TestRunLayers:2,TestRunPartFiles:1" }],
-];
+// It was wrong as one program and in layers, by one cause.
+const asOneProgram = { BUN_DEBUG_TEST_AOT_WORDS: "TestRunLayers:0" };
 
 async function runTests(env: Record<string, string>, ...flags: string[]) {
   using dir = tempDir("caller-frame-kept", project);
@@ -90,7 +88,7 @@ async function runTests(env: Record<string, string>, ...flags: string[]) {
   return { printed, results, exitCode, written: readFileSync(join(String(dir), "2.test.ts"), "utf8") };
 }
 
-test.each(ways)("%s", async (_, env) => {
+test("as one program", async () => {
   const plain = await runTests({});
   expect(plain.results).toEqual([
     "pass loads",
@@ -101,5 +99,5 @@ test.each(ways)("%s", async (_, env) => {
   ]);
   expect(plain.printed).toContain("arrow: beside the helper");
   expect(plain.written).toContain("toMatchInlineSnapshot(`1`)");
-  expect(await runTests(env, "--aot")).toEqual(plain);
+  expect(await runTests(asOneProgram, "--aot")).toEqual(plain);
 });

@@ -1,5 +1,4 @@
 // Code that runs seldom reads a field by name from a value of unknown type. The table of fields answers for a field that holds -1 or 1 as it does for any integer of 32 bits, so the run time is not asked.
-// Flags: --aot-heat=EverythingIsCold
 // COUNT: operation:operationAOTGetByIdAndCache = 0
 const key = process.env.SHELF || "shelf";
 const few = process.argv.length;

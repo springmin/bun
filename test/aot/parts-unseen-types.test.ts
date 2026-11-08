@@ -50,8 +50,6 @@ test.concurrent.each([
     const plain = await seen(String(dir), [], "");
     expect(plain).toEqual({ lines: ["RAN 1 2 string 1"], exitCode: 0 });
     expect(await seen(String(dir), ["--aot"], "TestRunLayers:0")).toEqual(plain);
-    expect(await seen(String(dir), ["--aot"], "TestRunLayers:1")).toEqual(plain);
-    expect(await seen(String(dir), ["--aot"], "TestRunLayers:3")).toEqual(plain);
   },
   120_000,
 );

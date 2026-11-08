@@ -1,11 +1,10 @@
 // An executable built with --compile-exec-argv answers with --aot, and with --aot --trim, as it does without.
-import { expect } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { bunEnv } from "harness";
 import { canTrim } from "../bundler/compile-trim-features";
 import { unsupported } from "./harness/compiler";
 import { run } from "./harness/run";
 import { sharedBuilds } from "./harness/shared-builds";
-import { describe, test } from "./listed";
 
 // What each option changes is printed, so an option that is lost shows. Of a warning the first line is printed: the lines
 // below it name positions, which are those of the source with --aot and those of the bundle without.
@@ -38,7 +37,11 @@ server.stop(true);
 await new Promise(resolve => setImmediate(resolve));
 Promise.reject(new Error("nobody catches this"));
 `;
-const readsHeaderSize = `import http from "node:http";\nconsole.log("header size:", http.maxHeaderSize);\n`;
+// The headers that fetch sends by itself are longer than the 64 bytes of the option. node:http would say the number, and is most of Bun's library.
+const meetsHeaderSize = `const server = Bun.serve({ port: 0, fetch: () => new Response("answered") });
+console.log("status:", (await fetch(server.url)).status);
+server.stop(true);
+`;
 
 // Each value of each option stands in one of the lists.
 const optionLists: [entry: string, options: string][] = [
@@ -60,7 +63,7 @@ describe
   .concurrent("an executable with --compile-exec-argv answers with --aot as it does without", () => {
     const { folder, build, buildWholeAndTrimmed } = sharedBuilds("compile-exec-argv", {
       "main.mjs": program,
-      "header-size.mjs": readsHeaderSize,
+      "header-size.mjs": meetsHeaderSize,
     });
 
     test.each(optionLists)("%s %j", async (entry, options) => {
@@ -71,7 +74,7 @@ describe
       };
       const without = await answerOf(await build(entry, ...embedded));
       if (entry === "main.mjs") expect(without.stdout).toContain(`argv: ["--own","argument"]`);
-      else expect(without.stdout).toBe("header size: 64\n");
+      else expect(without.stdout).toBe("status: 431\n");
       if (!canTrim) return void expect(await answerOf(await build(entry, "--aot", ...embedded))).toEqual(without);
       for (const built of await buildWholeAndTrimmed(entry, ...embedded))
         expect(await answerOf(built)).toEqual(without);

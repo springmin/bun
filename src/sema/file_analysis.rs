@@ -13,8 +13,8 @@ use crate::fold::{Decisions, FoldError, FoldInputs};
 use crate::hir::{ExprId, File, ImportEqualsId, ImportedName, NodeData};
 use crate::hir_from_data::HostValue;
 use crate::import_sites::{
-    ChangedPath, ExportedFileChanger, ImportSite, ImportSiteKind, ImportSpecifier, JsxImportSet,
-    JsxMode, ResolvedForm, ResolvedFrom,
+    ChangedPath, ExportedFileChanger, ImportSite, ImportSiteKind, ImportSpecifier, JsxImport,
+    JsxImportSet, JsxMode, ResolvedForm, ResolvedFrom,
 };
 use crate::module_format::{DeclaredModuleType, FormatByDeclaredType, ModuleFormat};
 use crate::session::Arena;
@@ -29,23 +29,6 @@ pub struct FileInputs<'s> {
     pub own_name: &'s [u8],
 }
 
-impl FileInputs<'_> {
-    pub fn type_by_name(&self) -> DeclaredModuleType {
-        let name = self.own_name;
-        if name.ends_with(b".mjs") || name.ends_with(b".mts") {
-            DeclaredModuleType::Esm
-        } else if name.ends_with(b".cjs") || name.ends_with(b".cts") {
-            DeclaredModuleType::CommonJs
-        } else {
-            DeclaredModuleType::Unknown
-        }
-    }
-
-    pub fn is_named_es_module(&self) -> bool {
-        self.type_by_name() == DeclaredModuleType::Esm
-    }
-}
-
 #[derive(Copy, Clone, Default, Debug)]
 pub struct FileAnalysis<'s> {
     pub decisions: Decisions<'s>,
@@ -57,27 +40,25 @@ pub struct FileAnalysis<'s> {
     paths_from_own_directory: &'s [ExprId],
     answers_of_resolvers: &'s [(ExprId, ResolvedForm)],
     names_of_workers: &'s [(ExprId, ImportSpecifier)],
-    /// `writeFileSync(path, text)`, `rmSync(path)`, `Bun.write(path, text)`: each operand that names a file which the call writes, moves or removes, with what it may be,
-    /// where that is known. `is_path_from_own_directory` and `find_resolved_form` say how it is written, as of the specifier of a site.
     pub paths_of_changed_files: &'s [ChangedPath],
     pub exported_file_changers: &'s [ExportedFileChanger],
     pub asked_of_other_files: &'s [(Atom, Atom)],
     pub asked_of_data_files: &'s [(Atom, Atom)],
-    pub names_out_of_data_files: &'s [Atom],
+    pub names_out_of_data_files: &'s [(Atom, ExprId)],
     keys_stored_in_caches: &'s [(ExprId, ImportSpecifier)],
     pub jsx_imports: JsxImportSet,
     pub unused_import_symbols: &'s [SymbolId],
     pub imports_used_only_in_dead_code: &'s [SymbolId],
-    /// No code that runs reads them: `export { name }` hands them on, or the metadata of a decorator names them.
     pub imports_used_without_a_read: &'s [SymbolId],
     pub pending_macro_calls: &'s [ExprId],
     pub has_live_top_level_await: bool,
     pub errors: &'s [FoldError],
+    fold_error_count: u32,
     pub strings_over_limit: &'s [ExprId],
-    pub relies_on_running_before_calls: bool,
-    /// What the code reads of other files through its import statements, each name once, in the order of the first reads.
+    pub asks_for_main_module: bool,
     pub imported_names: &'s [ImportedName],
     requires_of_other_files: &'s [(u32, ResolvedFrom)],
+    paths_given_to_create_require: &'s [(ExprId, Atom)],
     sites_by_kind: &'s [u32],
     first_call_site: u32,
 }
@@ -88,7 +69,10 @@ const _: fn() = || {
 };
 
 impl FileAnalysis<'_> {
-    /// What the specifier of a site may be, each a `Constant`, a `Pattern` or `Unknown`.
+    pub fn jsx_takes_this(&self) -> bool {
+        self.jsx_imports.contains(JsxImport::JsxDev)
+    }
+
     pub fn alternatives_of<'a>(&'a self, specifier: &'a ImportSpecifier) -> &'a [ImportSpecifier] {
         match *specifier {
             ImportSpecifier::OneOf(range) => {
@@ -98,7 +82,6 @@ impl FileAnalysis<'_> {
         }
     }
 
-    /// The specifier of the site is written from the folder of the file, `./lib/a.js`, where `argument` makes the whole path.
     pub fn is_path_from_own_directory(&self, argument: ExprId) -> bool {
         self.decisions.is_path_from_own_directory(argument)
             || self
@@ -107,28 +90,24 @@ impl FileAnalysis<'_> {
                 .is_ok()
     }
 
-    /// The specifier of the site is the name that a resolver was asked for, where `argument` is what it answered: `require(require.resolve("./a.js"))`.
     pub fn find_resolved_form(&self, argument: ExprId) -> Option<ResolvedForm> {
         let answers = self.answers_of_resolvers;
         let index = answers.binary_search_by_key(&argument, |&(argument, _)| argument);
         index.ok().map(|index| answers[index].1)
     }
 
-    /// What `argument` may be, the first one of a `new Worker()`, where it is no constant and is known in part. `is_path_from_own_directory` and `find_resolved_form` say how it is written, as of the specifier of a site.
     pub fn find_name_of_worker(&self, argument: ExprId) -> Option<&ImportSpecifier> {
         let names = self.names_of_workers;
         let index = names.binary_search_by_key(&argument, |&(argument, _)| argument);
         index.ok().map(|index| &names[index].1)
     }
 
-    /// `require.cache[key] = entry`. Unlike the specifier of a site, a `Pattern` may have an empty prefix, and a `OneOf` may be empty.
     pub fn find_key_stored_in_cache(&self, key: ExprId) -> Option<&ImportSpecifier> {
         let keys = self.keys_stored_in_caches;
         let index = keys.binary_search_by_key(&key, |&(key, _)| key);
         index.ok().map(|index| &keys[index].1)
     }
 
-    /// What a name that is no constant may be hangs on more of a folding than the specifiers that it finds.
     pub(crate) fn names_every_file_by_a_constant(&self) -> bool {
         let mut sites = self.import_sites.iter();
         sites.all(|site| matches!(site.specifier, ImportSpecifier::Constant(_)))
@@ -149,6 +128,12 @@ impl FileAnalysis<'_> {
         Some(others[found.ok()?].1)
     }
 
+    pub fn find_path_given_to_create_require(&self, given: ExprId) -> Option<Atom> {
+        let paths = self.paths_given_to_create_require;
+        let found = paths.binary_search_by_key(&given, |it| it.0);
+        Some(paths[found.ok()?].1)
+    }
+
     pub fn import_site_of_call(&self, call: ExprId) -> Option<usize> {
         let first_call_site = self.first_call_site as usize;
         let found = self.import_sites[first_call_site..]
@@ -157,7 +142,6 @@ impl FileAnalysis<'_> {
         Some(first_call_site + found)
     }
 
-    /// What code that runs reads where no expression spells the name: the root of `import a = b.c`, the factory of a JSX element, a class that the metadata of a decorator names.
     pub fn bindings_read_without_expression(
         &self,
         hir: &File<'_>,
@@ -188,21 +172,26 @@ pub fn analyze_file<'s>(
     analyze::run(hir, options, inputs, &file, atoms, arena)
 }
 
-pub struct FoldedAgain<'s> {
+pub struct AnalyzedAgain<'s> {
     pub analysis: FileAnalysis<'s>,
-    /// The import sites, the format and the uses of the imports are those of the analysis before.
     pub has_same_import_sites: bool,
 }
 
-/// Folds a file that `analyze_file` has analyzed once more, with other `inputs` or other constants of other files. `None`: it is to be analyzed anew.
-pub fn fold_file_again<'s>(
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub enum AnalyzedAgainFrom {
+    Folding,
+    ImportScan,
+}
+
+pub fn analyze_file_again<'s>(
     hir: &File<'s>,
     bound: &Bound<'s>,
     inputs: &FoldInputs<'s>,
     file: FileInputs<'s>,
     previous: &FileAnalysis<'s>,
+    from: AnalyzedAgainFrom,
     atoms: &Interner<'s>,
     arena: &'s Arena,
-) -> Option<FoldedAgain<'s>> {
-    analyze::run_again(hir, bound, inputs, &file, previous, atoms, arena)
+) -> Option<AnalyzedAgain<'s>> {
+    analyze::run_again(hir, bound, inputs, &file, previous, from, atoms, arena)
 }

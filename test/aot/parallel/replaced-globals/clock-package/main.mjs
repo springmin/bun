@@ -1,5 +1,4 @@
 // A package of fake timers replaces the global timer functions. As in Node, the timers of Bun's own modules go on.
-// Alone: what the build knows to be replaced goes by every program of the executable
 import FakeTimers from "fake-clock";
 import { once } from "node:events";
 import http from "node:http";

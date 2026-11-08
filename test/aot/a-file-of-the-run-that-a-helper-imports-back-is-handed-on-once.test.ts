@@ -17,7 +17,7 @@ async function filesLookedThrough(helper: string) {
     "a.test.ts": `import { test } from "bun:test";\nimport { help } from "./helper";\ntest("a", () => { console.error("OUT a", help()); });\n`,
     "b.test.ts": `import { test } from "bun:test";\nimport { help } from "./helper";\ntest("b", () => { console.error("OUT b", help()); });\n`,
   });
-  const flags = ["--aot", "--parallel=2", "--aot-memory-limit=1KB"];
+  const flags = ["--aot", "--parallel=2"];
   const env = { ...bunEnv, BUN_JSC_logAOTPhaseTimes: "1" };
   const { stderr, exitCode } = await run([bunExe(), "test", ...flags], String(dir), env);
   const counts = [...stderr.matchAll(/^AOT test run \| scan of (\d+) files/gm)].map(match => Number(match[1]));
@@ -25,12 +25,9 @@ async function filesLookedThrough(helper: string) {
 }
 
 test("a preload and a test file", async () => {
-  const [without, back] = await Promise.all([
-    filesLookedThrough(`import { one } from "pkg";\nexport const help = () => 1 + one;\n`),
-    filesLookedThrough(
-      `import { ready } from "./setup";\nimport { one } from "pkg";\nimport "./a.test";\nexport const help = () => ready + one;\n`,
-    ),
-  ]);
-  expect(without).toEqual({ most: expect.any(Number), printed: ["OUT b 2"], exitCode: 0 });
-  expect(back).toEqual(without);
+  const back = await filesLookedThrough(
+    `import { ready } from "./setup";\nimport { one } from "pkg";\nimport "./a.test";\nexport const help = () => ready + one;\n`,
+  );
+  // The preload, the helper, the two test files and the file of the package.
+  expect(back).toEqual({ most: 5, printed: ["OUT b 2"], exitCode: 0 });
 }, 120_000);

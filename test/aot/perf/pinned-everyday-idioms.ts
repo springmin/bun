@@ -17,8 +17,8 @@
 //   "raised": ".."   why a pin once went up. The row is held like any other
 // An idiom that ./behind-the-jit.<os>-<arch>.json or ./typed-dearer-than-untyped.<os>-<arch>.json lists is a todo there, whatever it takes: each of them has a pin here.
 // An idiom that the platform's own file does not name is measured, printed and not judged: ./pins-from-a-log.ts writes a file from the log.
-// Nothing runs under the JIT here, and 128 idioms are the entry points of one executable.
-// `inVeryLargeProgram`: every idiom of ./everyday once more, where turn() is a function of its own that its caller finds at run time, compiled as it would be inside a very large program
+// Nothing runs under the JIT here.
+// `inVeryLargeProgram`: every idiom of ./everyday once more, where turn() is a function of its own that its caller finds at run time
 // (./everyday-idioms.ts): ./everyday-pins-in-a-very-large-program.<os>-<arch>.json. Most functions of a large application are compiled that way. ./stepped-idioms.ts holds that form where CI
 // runs it, but counts compiled code alone: a push that went into the run time at every call took 527 instructions, 209 of them in compiled code.
 // ./behind-the-jit-in-a-very-large-program.<os>-<arch>.json excuses an idiom from the line against the JIT, not from its pin here.
@@ -49,10 +49,7 @@ type Pin = Record<Form, number> & {
 type Pins = Record<string, Pin>;
 const readKeys = (file: string) => Object.keys(JSON.parse(readFileSync(join(import.meta.dir, file), "utf8")));
 const writePins = (path: string, pins: Pins) =>
-  writeFileSync(
-    path,
-    JSON.stringify(Object.fromEntries(Object.entries(pins).sort(([a], [b]) => (a < b ? -1 : 1))), null, 2) + "\n",
-  );
+  writeFileSync(path, `{\n${Object.keys(pins).sort().map(name => `${JSON.stringify(name)}: ${JSON.stringify(pins[name])}`).join(",\n")}\n}\n`);
 const isFarWorse = (now: number, pin: number) =>
   (now > pin * 1.1 && now > pin + 20) || (now > pin * 1.25 && now > pin + 4);
 const isWorse = (now: number, pin: Pin, form: Form) =>
@@ -102,7 +99,6 @@ export function pinnedEverydayIdioms(part = 1, parts = 1, inVeryLargeProgram = f
       collections: false,
       jit: false,
       inVeryLargeProgram,
-      together: measured.filter((_, index) => index % parts === part - 1),
       buildFlags: process.env.AOT_PERF_BUILD_FLAGS?.split(" ") ?? [],
     });
 

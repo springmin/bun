@@ -31,7 +31,7 @@ export function whyNoSteps(bun: string) {
 declare("one process watches another", () => whyNoSteps(bunExe()));
 
 export function steppedIdioms(bun: string, folder: string, chosen: (names: string[]) => string[], surroundings: Surroundings = "ordinary") {
-  const { names, run, executableOf, start, startBuilds } = idiomsInExecutables(bun, folder, chosen, [], true, surroundings);
+  const { names, run, executableOf, start, remove } = idiomsInExecutables(bun, folder, chosen, [], true, surroundings);
 
   async function stepsOf(name: string, form: Form, turns: number, padding: number) {
     const { stderr } = await run(folder, [bun, join(import.meta.dir, "count-steps.ts"), await executableOf(form, name)], {
@@ -59,14 +59,14 @@ export function steppedIdioms(bun: string, folder: string, chosen: (names: strin
     return Math.min(mostTurns, Math.max(1, Math.ceil(stepsOfReading / Math.max(1, compiled + native))));
   }
 
-  return { names, aTurn, turnsFor, startBuilds };
+  return { names, aTurn, turnsFor, remove };
 }
 
 if (import.meta.main) {
   const [bun, out, pattern = ".", surroundings = "ordinary"] = process.argv.slice(2);
   const folder = join(process.env.TMPDIR ?? tmpdir(), `step-idioms-${process.pid}`);
   mkdirSync(folder, { recursive: true });
-  const { names, aTurn, turnsFor } = steppedIdioms(bun, folder, all => all.filter(name => new RegExp(pattern).test(name)), surroundings as Surroundings);
+  const { names, aTurn, turnsFor, remove } = steppedIdioms(bun, folder, all => all.filter(name => new RegExp(pattern).test(name)), surroundings as Surroundings);
   const result: Record<string, Partial<Record<Form, Steps>> & { turns?: number; failure?: string }> = {};
   const waiting = [...names];
   const began = performance.now();
@@ -78,6 +78,8 @@ if (import.meta.main) {
           result[name] = turns === undefined ? {} : { turns, typed: await aTurn(name, "typed", turns), untyped: await aTurn(name, "untyped", turns) };
         } catch (error) {
           result[name] = { failure: (error as Error).message };
+        } finally {
+          for (const form of forms) remove(form, name);
         }
       }
     }),

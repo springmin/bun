@@ -712,7 +712,7 @@ When you add multiple entrypoints to a standalone executable, Bun bundles each o
 
 We may eventually detect statically-known paths in `new Worker(path)` and bundle them automatically. For now, you need to list the worker file as an entrypoint, as in the earlier example.
 
-If you use a relative path to a file not included in the standalone executable, Bun loads that path from disk relative to the process's current working directory, and errors if it doesn't exist. With [`--disallow-code-generation-from-strings=strict`](/runtime/code-generation-from-strings#files-on-disk-are-not-part-of-the-program), Bun doesn't load it.
+If you use a relative path to a file not included in the standalone executable, Bun loads that path from disk relative to the process's current working directory, and errors if it doesn't exist. An executable built with `--aot` does that only with [`--aot-allow-code-from-disk`](/compiler/compatibility#dynamic-imports). With [`--disallow-code-generation-from-strings=strict`](/runtime/code-generation-from-strings#files-on-disk-are-not-part-of-the-program), Bun doesn't load it.
 
 ---
 
@@ -734,6 +734,8 @@ That means if the executable is at `/usr/bin/hello` and the user's terminal is i
 cd /home/me/Desktop
 ./hello
 ```
+
+With `--aot`, a path is resolved the first time it is imported. After `process.chdir()`, `await import("./my.db", { with: { type: "sqlite" } })` returns the database that was opened first, not the one in the new directory.
 
 ---
 
@@ -1359,7 +1361,6 @@ interface CompileBuildOptions {
   bytecodeOrder?: string | string[] | false | null; // Order file(s) to lay the bytecode out by (requires bytecode: true)
   jitPolicy?: number; // JIT tier-up threshold scale at startup (default: 1 = normal)
   aot?: boolean; // Compile the program to machine code ahead of time (default: false)
-  aotLogTypeMismatches?: boolean; // With aot: log values that don't match their declared type (default: false)
   aotExplain?: AotReport | AotReport[]; // With aot: reports to add to BuildOutput.logs, such as "guards"
   functionSource?: boolean; // With aot: embed function source code for fn.toString() (default: true)
   allowCodeFromDisk?: boolean; // With aot: let import(), require() and new Worker() load code from disk (default: false)

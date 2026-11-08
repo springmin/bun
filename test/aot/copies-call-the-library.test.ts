@@ -1,7 +1,6 @@
 import { expect } from "bun:test";
 import { bunEnv, bunExe, tempDir } from "harness";
 import { run } from "./harness/run";
-import { waysFor } from "./harness/ways";
 import { test } from "./supported";
 
 // A file that runs again from disk is code that the build has not seen. It calls what its text imports from Bun's own modules.
@@ -51,25 +50,53 @@ const projects: Record<string, Record<string, string>> = {
   },
 };
 
-async function report(directory: string, flags: string[], words?: string) {
-  const env = words ? { ...bunEnv, BUN_DEBUG_TEST_AOT_WORDS: words } : bunEnv;
-  const { stdout, stderr, exitCode } = await run([bunExe(), "test", ...flags, "."], directory, env);
-  return { printed: (stdout + "\n" + stderr).split("\n").filter(line => line.startsWith("| ")), exitCode };
+// A run in which a file runs again from disk holds much of Bun's own library, whatever else it holds: the three projects of that kind are folders of one project and share its
+// two runs. The build finds the same for the three together as for each alone: they load compiled files by name. The project with the mock loads nothing by name, and beside the
+// others the whole run would load code by name: it runs alone. The fault showed as one program. Each folder marks what it prints and the names of its tests.
+const sharesARunWith = (title: string) =>
+  Object.keys(projects).filter(
+    other => (other === "the original beside a mock") === (title === "the original beside a mock"),
+  );
+const folderOf = (title: string) => `c${Object.keys(projects).indexOf(title) + 1}`;
+const runs = new Map<string, Promise<{ lines: string[]; exitCode: number | null }>>();
+const ranWith = (together: string[], ...flags: string[]) =>
+  runs.getOrInsertComputed([...together, ...flags].join(" "), async () => {
+    using directory = tempDir("copies-call-the-library", {
+      "package.json": `{ "name": "p", "type": "module" }`,
+      ...Object.fromEntries(
+        together.flatMap(title =>
+          Object.entries(projects[title]).map(([path, text]) => [
+            `${folderOf(title)}/${path}`,
+            text.replaceAll(`"| "`, `"| ${folderOf(title)} "`).replaceAll(`test("`, `test("${folderOf(title)} `),
+          ]),
+        ),
+      ),
+    });
+    const { stdout, stderr, exitCode } = await run([bunExe(), "test", ...flags, "."], String(directory), bunEnv);
+    return { lines: (stdout + "\n" + stderr).split("\n"), exitCode };
+  });
+
+async function report(title: string, ...flags: string[]) {
+  const { lines, exitCode } = await ranWith(sharesARunWith(title), ...flags);
+  const failed = lines.filter(line => line.startsWith("(fail) "));
+  const own = failed.filter(line => line.startsWith(`(fail) ${folderOf(title)} `));
+  return {
+    printed: lines.filter(line => line.startsWith(`| ${folderOf(title)} `)),
+    failed: own.length,
+    // A run ends with 1 where a test has failed: that is held against the project of that test alone.
+    exitCode: exitCode === 1 && failed.length > 0 && own.length === 0 ? 0 : exitCode,
+  };
 }
 
-for (const [index, [title, files]] of Object.entries(projects).entries()) {
+for (const title of Object.keys(projects)) {
   test.concurrent(
     title,
     async () => {
-      using directory = tempDir("copies-call-the-library", {
-        "package.json": `{ "name": "p", "type": "module" }`,
-        ...files,
-      });
-      const plain = await report(String(directory), []);
-      expect(plain.exitCode).toBe(0);
+      const plain = await report(title);
+      expect({ failed: plain.failed, exitCode: plain.exitCode }).toEqual({ failed: 0, exitCode: 0 });
+      expect(plain.printed.length).toBeGreaterThan(0);
       expect(plain.printed.join("\n")).not.toContain("Error");
-      for (const words of waysFor([undefined, "TestRunLayers:2"], index === 0))
-        expect(await report(String(directory), ["--aot"], words)).toEqual(plain);
+      expect(await report(title, "--aot")).toEqual(plain);
     },
     120_000,
   );

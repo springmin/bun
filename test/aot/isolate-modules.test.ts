@@ -55,7 +55,7 @@ test("--isolate=modules runs, and a file sees nothing of the file before it", as
   });
   const [oneProgram, layers] = await Promise.all([
     runTests(String(dir), undefined, "--aot"),
-    runTests(String(dir), "TestRunLayers:2", "--aot"),
+    runTests(String(dir), "TestRunLayers:0", "--aot"),
   ]);
   expect(oneProgram).toEqual(plain);
   expect(layers).toEqual(plain);

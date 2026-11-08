@@ -3,7 +3,7 @@
  * for local mode. Override via `--webkit-version=<hash>` to test a branch.
  * From https://github.com/oven-sh/WebKit releases.
  */
-export const WEBKIT_VERSION = "648208de5208542f2d9fb68c85391c5c89e54b6b";
+export const WEBKIT_VERSION = "5a61071f79134bf41844e7ea31a8449147d85dd4";
 
 /**
  * WebKit (JavaScriptCore) — the JS engine, with WTF and bmalloc.
@@ -768,13 +768,14 @@ function webkitBuildSpec(cfg: Config): DirectBuild {
   const wk = webkitLayout(cfg);
   const lists = checkoutLists(wk);
   checkAotSourceLists(wk);
+  removeGeneratedFilesThatHideSources(wk);
   const flags = webkitFlags(wk);
   const icu = icuBuild(wk);
   const codegen = jscCodegenSteps(wk, lists.jsc);
-  // Written in this graph: the first by a step of this spec, the others by the steps of ../aot.ts.
+  // Written in this graph: the first two by steps of this spec, the others by the steps of ../aot.ts.
   const aotGenerated = [
     ...aotRuntimeFactsStep(wk, lists.jsc),
-    ...aotVectorStep(wk, lists.jsc),
+    ...aotReadsThatAssumeStep(wk),
     ...aotGeneratedFiles(lists.jsc, "SCHEMA"),
     ...aotGeneratedFiles(lists.jsc, "BUILTIN_TABLE"),
   ];
@@ -849,8 +850,10 @@ function webkitLocalIncludes(cfg: Config): string[] {
 
 const androidIcuRoot = (): string => process.env.BUN_ANDROID_ICU_ROOT ?? "/tmp/icu-android";
 const windowsIcuDir = (wk: WebKitBuild): string => join(wk.B, "icu");
-export const linuxIcuRoot = (cfg: Config): string | undefined =>
-  cfg.linux && cfg.abi !== "android" ? process.env.BUN_ICU_ROOT || undefined : undefined;
+export const linuxIcuRoot = (cfg: Config): string | undefined => {
+  if (cfg.ohos) return process.env.BUN_ICU_ROOT || cfg.ohosIcuDir;
+  return cfg.linux && cfg.abi !== "android" ? process.env.BUN_ICU_ROOT || undefined : undefined;
+};
 const staticIcuLibs = (root: string): string[] =>
   ["libicui18n.a", "libicuuc.a", "libicudata.a"].map(lib => join(root, "lib", lib));
 
@@ -859,7 +862,6 @@ function icuIncludes(wk: WebKitBuild): string[] {
   if (cfg.darwin) return [join(wk.WTF, "icu")];
   if (cfg.windows) return [join(windowsIcuDir(wk), "include")];
   if (cfg.abi === "android") return [join(androidIcuRoot(), "include")];
-  if (cfg.ohos) return cfg.ohosIcuDir === undefined ? [] : [join(cfg.ohosIcuDir, "include")];
   const root = linuxIcuRoot(cfg);
   return root === undefined ? [] : [join(root, "include")];
 }
@@ -870,9 +872,6 @@ function icuBuild(wk: WebKitBuild): { libs: string[]; outputs: string[] } {
   if (cfg.abi === "android") {
     return { libs: staticIcuLibs(androidIcuRoot()), outputs: [] };
   }
-  // OHOS links the cross-built ICU from bun.ts (static .a paths); WebKit only
-  // needs the headers, supplied by icuIncludes().
-  if (cfg.ohos) return { libs: [], outputs: [] };
   const root = linuxIcuRoot(cfg);
   if (cfg.hardened) {
     if (root === undefined) {
@@ -1025,15 +1024,7 @@ function webkitFlags(wk: WebKitBuild): WebKitFlags {
   // header — OptionsJSCOnly.cmake), so no TU drags std::ios_base::Init in.
   const bannedIncludes = cfg.debug ? [] : [`-I${q(join(WTF, "wtf", "bun", "BannedIncludes"))}`];
   // -Wno-noexcept-type: WebKitCompilerFlags.cmake, C++ only.
-  const cxx = [
-    ...bannedIncludes,
-    cfg.windows ? "/clang:-std=c++23" : "-std=c++23",
-    "-Wno-noexcept-type",
-    // OHOS SDK ICU utypes.h omits `#include <unicode/utf.h>`, so U16_LENGTH /
-    // U_IS_BMP / ... are not pulled in; force-include it for C++ (the .S
-    // objects would parse it as assembly).
-    ...(cfg.ohos ? ["-include", "unicode/utf.h"] : []),
-  ];
+  const cxx = [...bannedIncludes, cfg.windows ? "/clang:-std=c++23" : "-std=c++23", "-Wno-noexcept-type"];
   const icuFlags = [
     ...(cfg.darwin ? ["-DU_DISABLE_RENAMING=1"] : cfg.windows ? ["-DU_STATIC_IMPLEMENTATION=1"] : []),
     ...icuIncludes(wk).map(i => `-I${q(i)}`),
@@ -1454,7 +1445,6 @@ function jscCodegenSteps(wk: WebKitBuild, lists: LibraryLists): { headers: strin
 // aot/AOT.cmake is data first: what JSC's cmake build and this one both need
 // to know about aot/ is written there as plain lists, outside any function.
 
-/** The files of one generated folder that are compiled or included, from the list file beside them. */
 /** `JavaScriptCore_AOT_GENERATED_DIR` of aot/AOT.cmake. */
 function aotGeneratedDirectory(wk: WebKitBuild): string {
   return join(wk.DS, "aot");
@@ -1481,15 +1471,15 @@ function aotRuntimeFactsStep(wk: WebKitBuild, lists: LibraryLists): string[] {
   return outputs;
 }
 
-/** AOT_GENERATE_VECTOR of aot/AOT.cmake. */
-function aotVectorStep(wk: WebKitBuild, lists: LibraryLists): string[] {
-  const script = join(wk.JSC, "aot", "support", "generator", "vector.ts");
-  const outputs = lists.paths("JavaScriptCore_AOT_VECTOR_GENERATED_HEADERS");
+/** AOT_CHECK_READS_THAT_ASSUME of aot/AOT.cmake. What it writes says only that the sources have passed. */
+function aotReadsThatAssumeStep(wk: WebKitBuild): string[] {
+  const script = join(wk.JSC, "aot", "codegen", "generator", "reads-that-assume.ts");
+  const outputs = [join(aotGeneratedDirectory(wk), "AOTReadsThatAssumeChecked.h")];
   gen(wk, {
     outputs,
-    cmd: [wk.cfg.bun, script, "--wtf", wk.WTF, "--out", aotGeneratedDirectory(wk)],
-    inputs: [script, join(wk.WTF, "wtf", "Vector.h")],
-    desc: "AOTVector.h",
+    cmd: [wk.cfg.bun, script, "--javascriptcore", wk.JSC, "--out", aotGeneratedDirectory(wk)],
+    inputs: [script, join(wk.JSC, "aot", "codegen", "AOTReadsThatAssume.txt"), ...handwrittenAotFiles(wk.JSC)],
+    desc: "AOTReadsThatAssumeChecked.h",
   });
   return outputs;
 }
@@ -1503,6 +1493,14 @@ function checkAotSourceLists(wk: WebKitBuild): void {
       hint: "bun scripts/build/aot-source-lists.ts writes the lists of aot/ for the tree as it is",
     });
   }
+}
+
+/** The folder of generated files stands in front of aot/'s own on the include path: a file left there under the name of a file of the checkout would be found first. */
+function removeGeneratedFilesThatHideSources(wk: WebKitBuild): void {
+  const directory = aotGeneratedDirectory(wk);
+  if (!existsSync(directory)) return;
+  const handwritten = new Set(handwrittenAotFiles(wk.JSC).map(file => basename(file)));
+  for (const name of readdirSync(directory)) if (handwritten.has(name)) rmSync(join(directory, name));
 }
 
 // ─── JavaScriptCore: compile flags ───
@@ -1798,30 +1796,29 @@ function jscSourceList(wk: WebKitBuild, lists: LibraryLists): JSCSources {
 }
 
 interface AotPrefix {
+  /** Precompiled by itself, so that what it includes first stands in front of the standard library's headers. */
   header: string;
-  /** None: precompiled by itself, so that what it includes first stands in front of the standard library's headers. */
-  base?: string;
   directories: string[];
-  files?: RegExp;
 }
 
 const aotPrefixes: AotPrefix[] = [
-  { header: "aot/support/AOTPrefix.h", directories: [] },
   {
-    header: "aot/support/AOTCompilerPrefix.h",
-    base: "aot/support/AOTPrefix.h",
-    directories: ["analysis", "builtins", "ir", "passes", "pipeline", "place", "represent", "select", "valueflow"],
-  },
-  {
-    header: "aot/support/AOTCodeGeneratorPrefix.h",
-    base: "aot/support/AOTCompilerPrefix.h",
-    directories: ["codegen"],
-    files: /^(builtins\/AOT\w*Emitter\w*|image\/AOTCodeGenerationDriver|image\/AOTCompile)\.cpp$/,
-  },
-  {
-    header: "aot/support/AOTRuntimePrefix.h",
-    base: "aot/support/AOTPrefix.h",
-    directories: ["image", "object", "runtime", "stubs", "support"],
+    header: "aot/support/AOTPrefix.h",
+    directories: [
+      "builtins",
+      "codegen",
+      "driver",
+      "facts",
+      "image",
+      "ir",
+      "machine",
+      "object",
+      "plan",
+      "runtime",
+      "stubs",
+      "support",
+      "walk",
+    ],
   },
 ];
 
@@ -1841,10 +1838,13 @@ function jscGroup(
     const file = path.startsWith(generated)
       ? `ir/${basename(path)}`
       : relative(join(JSC, "aot"), path).replaceAll(sep, "/");
-    return (
-      aotPrefixes.find(prefix => prefix.files?.test(file)) ??
-      aotPrefixes.find(prefix => prefix.directories.some(directory => file.startsWith(`${directory}/`)))
+    const prefix = aotPrefixes.find(({ directories }) =>
+      directories.some(directory => file.startsWith(`${directory}/`)),
     );
+    assert(prefix !== undefined || file.startsWith("../") || isAbsolute(file), `aot/${file} has no prefix`, {
+      hint: "It would be compiled without -Werror=switch and -Werror=dangling: name its folder in aotPrefixes (scripts/build/deps/webkit.ts)",
+    });
+    return prefix;
   };
   // Windows ARM64: the alignment directives in these files' inline asm break
   // LLVM's SEH unwind-info emission (llvm.org/pr47432), so JSC's CMakeLists
@@ -1900,10 +1900,7 @@ function jscGroup(
     cflags: [...jsc.targetFlags, "-DBUILDING_JavaScriptCore", ...fuzzilliCoverageFlags(cfg)],
     cxxflags: jsc.cxx,
     pch: join(JSC, "JavaScriptCorePrefix.h"),
-    chainedPch: aotPrefixes.map(({ header, base }) => ({
-      header: join(JSC, header),
-      ...(base !== undefined && { base: join(JSC, base) }),
-    })),
+    chainedPch: aotPrefixes.map(({ header }) => ({ header: join(JSC, header) })),
     orderOnly: codegenReady,
   };
 }
@@ -1991,7 +1988,7 @@ extern "C" const void* bun_icu_maybe_decompress(const void* item, int32_t* lengt
         return item;
 
     static std::mutex lock;
-    static auto& decompressed = *new std::unordered_map<const void*, void*>;
+    [[clang::no_destroy]] static std::unordered_map<const void*, void*> decompressed;
     static ZSTD_DCtx* context = ZSTD_createDCtx();
     static ZSTD_DDict* dictionary = &bun_icu_zstd_dict_size && bun_icu_zstd_dict_size
         ? ZSTD_createDDict_byReference(bun_icu_zstd_dict, bun_icu_zstd_dict_size)
@@ -2134,14 +2131,7 @@ export function jscPrograms(cfg: Config): JSCProgram[] {
     program("testRegExp", ["testRegExp.cpp", ...embedder], []),
     {
       ...(linuxIcuRoot(cfg) !== undefined ? readingPrebuiltIcuData(cfg, testaot) : testaot),
-      pch: [
-        { header: join(wk.JSC, "aot", "tests", "AOTTestPrefix.h") },
-        { header: join(wk.JSC, "aot", "tests", "AOTCompilerTestPrefix.h") },
-        {
-          header: join(wk.JSC, "aot", "tests", "AOTCodeGeneratorTestPrefix.h"),
-          files: /\/aot\/(tests\/AOT(Image|Stub)\w*|codegen\/\w+)\.cpp$/,
-        },
-      ],
+      pch: [{ header: join(wk.JSC, "aot", "tests", "AOTTestPrefix.h") }],
     },
   ];
 }

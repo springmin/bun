@@ -8,7 +8,7 @@ import {
 } from "bun:test";
 import { isASAN, isDebug } from "harness";
 import { basename } from "node:path";
-import { unlessLeftOut } from "./left-out";
+import "./program-alone";
 
 /**
  * The least that scripts/runner.node.ts gives a case of a Bun with assertions (--timeout): a file that runs beside two others gets three times that.
@@ -62,17 +62,14 @@ export function raisingLimits<T extends object>(
   });
 }
 
-/** For ../supported.ts, which reads from them once for all the files of a process and asks by itself whether a file is left out. */
-export const whereverTheFileRuns = {
-  test: raisingLimits(testOfBun, isASAN || isDebug),
-  beforeAll: raisingLimits(beforeAllOfBun, isASAN || isDebug),
-};
-export const test = unlessLeftOut(whereverTheFileRuns.test);
+export const test = raisingLimits(testOfBun, isASAN || isDebug);
 export const it = test;
-export const beforeAll = unlessLeftOut(whereverTheFileRuns.beforeAll);
-export const afterAll = unlessLeftOut(raisingLimits(afterAllOfBun, isASAN || isDebug));
-export const beforeEach = unlessLeftOut(raisingLimits(beforeEachOfBun, isASAN || isDebug));
-export const afterEach = unlessLeftOut(raisingLimits(afterEachOfBun, isASAN || isDebug));
+export const beforeAll = raisingLimits(beforeAllOfBun, isASAN || isDebug);
+export const afterAll = raisingLimits(afterAllOfBun, isASAN || isDebug);
+export const beforeEach = raisingLimits(beforeEachOfBun, isASAN || isDebug);
+export const afterEach = raisingLimits(afterEachOfBun, isASAN || isDebug);
+/** A second name for both. */
+export const whereverTheFileRuns = { test, beforeAll };
 
 /** A limit that is itself what the case tests: what it waits for must have ended by then, on every lane. */
 export const noLongerThan = (milliseconds: number) => ({ timeout: milliseconds });

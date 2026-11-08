@@ -1,7 +1,7 @@
 // Compares two builds of Bun by instruction counts: every small benchmark, and one request of every route of every server.
 //
 //   bun test/aot/perf/compare-builds.ts --before <bun> --after <bun>
-//       [--threshold 2] [--only <regular expression>] [--sizes small,called,very-large] [--servers bun,node,hono | none]
+//       [--threshold 2] [--only <regular expression>] [--sizes small,called] [--servers bun,node,hono | none]
 //       [--modules <node_modules>] [--jobs 16] [--out <folder>] [--build-flag <flag>]..
 //
 // It prints the rows that got slower by more than the threshold, worst first, then the rows that got faster, and exits with 1 if any row got slower.
@@ -30,13 +30,11 @@ export type Readings = Map<string, Reading>;
 export type Change = { name: string; before: number; after: number; percent: number; runtimeMovedToo: boolean };
 
 // The same text is compiled differently depending on what surrounds it.
-//   small       the benchmark is the whole program, and its loop calls turn() directly
-//   called      the loop finds turn() at run time, so turn() is compiled as a function that somebody calls, not as part of the loop
-//   very-large  the same, compiled as it would be inside a very large program, where little counts as code that runs often
+//   small   the benchmark is the whole program, and its loop calls turn() directly
+//   called  the loop finds turn() at run time, so turn() is compiled as a function that somebody calls, not as part of the loop
 export const sizes = {
-  "small": {},
-  "called": { inVeryLargeProgram: true, buildFlags: ["--aot-limit=MaxWarmCodeValues:1048576"] },
-  "very-large": { inVeryLargeProgram: true, buildFlags: [] as string[] },
+  small: { findsTurnAtRunTime: false },
+  called: { findsTurnAtRunTime: true },
 };
 export type Size = keyof typeof sizes;
 export const allServers = ["bun", "node", "hono", "elysia", "express", "fastify", "koa"];
@@ -75,15 +73,11 @@ export async function measureBenchmarks(
   size: Size,
   { only = /./, jobs = availableParallelism(), buildFlags = [] as string[] } = {},
 ): Promise<Readings> {
-  const { inVeryLargeProgram = false, buildFlags: flagsOfSize = [] } = sizes[size] as {
-    inVeryLargeProgram?: boolean;
-    buildFlags?: string[];
-  };
   mkdirSync(folder, { recursive: true });
   const { names, measure } = idiomsAgainstTheJit(bun, folder, {
     collections: false,
-    inVeryLargeProgram,
-    buildFlags: [...flagsOfSize, ...buildFlags],
+    inVeryLargeProgram: sizes[size].findsTurnAtRunTime,
+    buildFlags,
   });
   const readings: Readings = new Map();
   await inParallel(

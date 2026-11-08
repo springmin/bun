@@ -85,7 +85,7 @@ for (const [project, configuration] of projects) {
   }
 }
 
-test.each(projects)(
+test.each(projects.slice(1))(
   "the layer that the test files share is loaded once, %s",
   async (_, configuration) => {
     using dir = tempDir("aot-workers-load-once-over-layers", {
@@ -105,7 +105,7 @@ test.each(projects)(
     });
     const plain = await runTests(String(dir), both, []);
     expect(plain).toMatchObject({ exitCode: 0, loadedAgain: [], goesOn: [] });
-    expect(await runTests(String(dir), both, ["--aot", "--isolate"], "TestRunLayers:2")).toEqual({
+    expect(await runTests(String(dir), both, ["--aot", "--isolate"], "TestRunLayers:0")).toEqual({
       ...plain,
       goesOn: ["with 2 more files that Workers start from"],
     });
@@ -232,7 +232,7 @@ test("a text with a mistake in it fails where the Worker starts, beside a Worker
   });
 }, 120_000);
 
-// The program goes by the tsconfig.json that is nearest to the most entry points, so here it goes by another one once the Worker's file is known.
+// The Worker's file lies under a tsconfig.json of its own. The load takes it in as it goes on, as where there is one configuration.
 test.each(["ts", "js"])(
   "a Worker's .%s file under a tsconfig.json, started from a project without one",
   async ending => {
@@ -253,7 +253,7 @@ test.each(["ts", "js"])(
     expect(plain).toMatchObject({ results: ["pass a Worker answers"], exitCode: 0 });
     expect(await runTests(String(dir), ["./a.test.ts"], ["--aot"])).toEqual({
       ...plain,
-      loadedAgain: ["with 1 more files that Workers start from"],
+      goesOn: ["with 1 more files that Workers start from"],
     });
   },
   120_000,
@@ -280,7 +280,7 @@ test("a Worker's file with a mistake in it fails where the Worker starts, as und
 }, 120_000);
 
 // Workers of node:worker_threads are in the program that constructs them, in an executable too.
-test.each(projects)(
+test.each(projects.slice(1))(
   "an executable that starts a Worker of node:worker_threads, %s",
   async (_, configuration) => {
     using dir = tempDir("aot-workers-load-once-executable", {

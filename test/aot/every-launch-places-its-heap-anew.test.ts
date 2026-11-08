@@ -1,5 +1,5 @@
 import { expect } from "bun:test";
-import { bunEnv, bunExe, isWindows, tempDirWithBunTypes as tempDir, isOhos} from "harness";
+import { bunEnv, bunExe, isWindows, tempDirWithBunTypes as tempDir } from "harness";
 import { join } from "path";
 import { unsupported } from "./harness/commands";
 import { test } from "./harness/default-timeout";
@@ -17,9 +17,7 @@ const launches = 6;
 const gigabytesInARange: Record<string, number> = { "first thread": 32, "structures": 4, "worker": 32 };
 const gigabytesInFourTerabytes = 4096;
 
-// OHOS gives every launch the same address-space layout: the ranges the program
-// observes are not randomized.
-test.skipIf(!!unsupported || isOhos)(
+test.skipIf(!!unsupported)(
   "every launch places its heaps anew",
   async () => {
     using dir = tempDir("aot-every-launch-places-its-heap-anew", { "program.ts": program });

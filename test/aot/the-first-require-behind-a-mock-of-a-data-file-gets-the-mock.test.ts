@@ -63,7 +63,6 @@ async function runTests(directory: string, words: string | undefined, ...flags: 
 for (const [way, words] of [
   ["at default flags", undefined],
   ["as one program", "TestRunLayers:0"],
-  ["over two layers", "TestRunLayers:2,TestRunPartFiles:1"],
 ] as const) {
   test(`require() answers as under plain bun test, ${way}`, async () => {
     using dir = tempDir("aot-first-require-behind-a-mock-of-a-data-file", files);

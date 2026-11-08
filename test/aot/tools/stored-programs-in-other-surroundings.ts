@@ -4,18 +4,17 @@
 //   bun test/aot/tools/stored-programs-in-other-surroundings.ts <surroundings> <a copy of test/aot/parallel>
 //
 //   open-world               one line behind the leading comments of every file: a store under a name nobody knows to an object nobody knows. It prints nothing.
-//                            What flow had proven of the program's objects becomes a guard of the run, so every path behind a failed guard is compiled, and some are taken.
+//                            What was proven of the program's objects becomes a guess that the run tests, so the code behind every failed test is compiled, and some of it runs.
 //   loops-in-try             try { LOOP } finally { count }: the error goes on
 //   loops-in-try-and-catch   try { LOOP } catch (error) { throw error; } finally { count }
 //                            Every loop, on the lines where it stands, so no line number moves. A loop in a loop then stands in a try in a loop.
-//                            Whatever a pass moves out of a loop would leave a handler, and every block that a pass puts in front of a loop stands at a handler's border.
+//                            Whatever is built in front of a loop would leave a handler, and every block in front of a loop stands at a handler's border.
 //
 // The driver takes the programs from beside itself, so copy the tree's `test` folder, rewrite `aot/parallel` in the copy and run the copy's `aot/run-parallel.ts`:
-// at default flags, and with --more-flags=--aot-check=verify-each-pass or --more-flags=--aot-validate for every program, with --each-alone. The driver holds each rewritten
-// program against plain Bun on the same text. What to look at: an answer that is not plain Bun's, a signal, a build that stops, a line of the validator.
+// at default flags, and with --aot-check=Validate for every program. The driver holds each rewritten program against plain Bun on the same text.
+// What to look at: an answer that is not plain Bun's, a signal, a build that stops.
 //
-// With every loop in a try, --aot-verify-each-pass stopped six builds of 8,642 that build as they stand. One was a look-up in a Map that left its `try` with the loop:
-// at default flags an error then passed the `catch` that plain Bun gives it to.
+// With every loop in a try, a look-up in a Map once left its `try` with the loop: an error then passed the `catch` that plain Bun gives it to.
 //
 // These notice the change and fail for that alone. In an open world: programs whose stored output says what a closed world refuses or leaves out, pins on counts of functions
 // (one such line takes an image from two dozen functions to 1,800), stored line numbers, and files whose first line declares their format.

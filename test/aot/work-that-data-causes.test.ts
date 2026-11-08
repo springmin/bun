@@ -6,12 +6,27 @@ import { bunExe, isASAN, isDebug, isLinux, isWindows, tempDir } from "harness";
 import { copyFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll } from "./harness/default-timeout";
-import { measureUntilWithinBounds } from "./harness/measure-again";
 import { run } from "./harness/run";
 import { beforeAll, describe, test } from "./supported";
 
 const sources = ["forms.js", "typed-forms.ts"];
 const inFolder = (source: string) => join(import.meta.dir, "work-that-data-causes", source);
+
+// CI ends a test file that has run for five minutes.
+const lastStart = 200_000;
+
+// Other work on the machine only adds to the memory that is left. What is over its bound is measured again, four times at most: code that keeps more does so every time.
+async function measureUntilWithinBounds<T>(
+  name: string,
+  measure: () => Promise<T>,
+  isWithinBounds: (measured: T) => boolean,
+) {
+  for (let attemptsLeft = 3; ; attemptsLeft--) {
+    const measured = await measure();
+    if (attemptsLeft === 0 || isWithinBounds(measured) || performance.now() > lastStart) return measured;
+    console.error(`ASKED AGAIN: ${name}`);
+  }
+}
 
 describe("compile/aot/work that data causes", () => {
   const dir = tempDir("aot-work-that-data-causes", {});

@@ -549,6 +549,7 @@ pub(crate) mod Jest {
     }
 }
 
+/// Nothing transpiles a test file or a preload that is compiled, so nothing has looked at what it imports.
 pub(crate) fn compiled_entry_point_imports_vitest(path: &[u8]) -> bool {
     bun_jsc::compiled_program::is_compiled_module(path)
         && bun_removable_features::removable_body!(AotCompiler, ReturnDefault, {
@@ -557,6 +558,7 @@ pub(crate) fn compiled_entry_point_imports_vitest(path: &[u8]) -> bool {
         })
 }
 
+/// `VirtualMachine::has_globals_of_vitest` for a compiled file that loads now.
 fn loads_compiled_file_below_vitest(vm: &VirtualMachine) -> bool {
     thread_local! {
         static LAST_TEST_FILE: core::cell::RefCell<(Vec<u8>, bool)> = const { core::cell::RefCell::new((Vec::new(), false)) };
@@ -577,11 +579,7 @@ fn loads_compiled_file_below_vitest(vm: &VirtualMachine) -> bool {
 }
 
 /// `Bun.jest(path)`
-pub(crate) fn jest(
-    cx: &mut JsScope<'_>,
-    path: Option<&[u8]>,
-    by_who_loads: bool,
-) -> JsResult<JSValue> {
+pub(crate) fn jest(cx: &mut JsScope<'_>, path: Option<&[u8]>) -> JsResult<JSValue> {
     let global_object = cx.global();
     let vm = global_object.bun_vm();
 
@@ -600,13 +598,17 @@ pub(crate) fn jest(
         }
     }
 
-    let is_of_vitest = by_who_loads
-        && bun_jsc::compiled_program::compiled_program().is_some()
-        && loads_compiled_file_below_vitest(vm);
-    jsc::from_js_host_call(global_object, || match is_of_vitest {
-        true => Jest::Bun__Jest__vitestModuleObject(global_object),
-        false => Jest::Bun__Jest__testModuleObject(global_object),
+    jsc::from_js_host_call(global_object, || {
+        Jest::Bun__Jest__testModuleObject(global_object)
     })
+}
+
+pub(crate) fn asked_by_compiled_test_file(own_globals: bool) -> u32 {
+    let vm = VirtualMachine::get();
+    match own_globals {
+        true => vm.transpiler.options.own_test_globals,
+        false => u32::from(loads_compiled_file_below_vitest(vm)),
+    }
 }
 
 /// `setDefaultTimeout(milliseconds)` and `jest.setTimeout(milliseconds)`

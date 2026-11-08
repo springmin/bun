@@ -4,7 +4,6 @@
 import { expect } from "bun:test";
 import { bunEnv, bunExe, tempDir } from "harness";
 import { run } from "./harness/run";
-import { runsWholeGrids } from "./harness/ways";
 import { test } from "./supported";
 
 const seen = `JSON.stringify([typeof jest, typeof xit, typeof xtest, typeof xdescribe, typeof vi, typeof expect])`;
@@ -32,6 +31,13 @@ const files: Record<string, string> = {
     test("test", () => {
       console.log("SEEN vitest", require("peek")(), peekEsm(), inHelper());
       console.log("SEEN vitest", require("uses").read());
+    });
+  `,
+  // A file of its own: where a test deletes \`jest\` nobody knows what the runner hands out, and the build of such a run costs eight times as much.
+  "stores.test.js": `
+    import { test } from "vitest";
+    test("test", () => {
+      console.log("SEEN vitest, before", require("uses").read());
       globalThis.jest = { fn() {} };
       try {
         console.log("SEEN vitest, a jest that script puts on globalThis", require("uses").read());
@@ -58,6 +64,7 @@ const files: Record<string, string> = {
 
 const runs: string[][] = [
   ["./vitest.test.js"],
+  ["./stores.test.js"],
   ["./bun.test.js"],
   ["./bun.test.js", "./vitest.test.js"],
   ["./vitest.test.js", "./bun.test.js"],
@@ -88,7 +95,6 @@ export const plainAnswersByWhoLoadsFirst = () =>
     expect((await runTests(String(dir), undefined, ["./vitest.test.js", "./bun.test.js"])).stdout).toEqual([
       `SEEN vitest ${none} ${none} undefined undefined`,
       "SEEN vitest ReferenceError: jest is not defined | undefined | ReferenceError: jest is not defined | has none",
-      "SEEN vitest, a jest that script puts on globalThis function | undefined | true | has jest",
       `SEEN bun:test ${none} ${none} undefined undefined`,
       "SEEN bun:test ReferenceError: jest is not defined | undefined | ReferenceError: jest is not defined | has none",
     ]);
@@ -101,17 +107,11 @@ export const plainAnswersByWhoLoadsFirst = () =>
 
 const ways = {
   "as one program": "TestRunLayers:0",
-  "over one layer": "TestRunLayers:1",
-  "over two layers": "TestRunLayers:2",
 };
-
-// On a build in front of the cure eleven of the runs differed as one program and over layers alike, and this one over layers alone.
-const differedOverLayersAlone = "--preload=./of-neither.js --globals=vitest ./vitest.test.js";
 
 export function compiledAnswersAsPlain(way: keyof typeof ways) {
   const words = ways[way];
   for (const flags of runs) {
-    if (way !== "as one program" && !runsWholeGrids && flags.join(" ") !== differedOverLayersAlone) continue;
     test.concurrent(
       `${way}: bun test ${flags.join(" ")}`,
       async () => {

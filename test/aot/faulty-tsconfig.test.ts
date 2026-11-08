@@ -48,11 +48,7 @@ const places: [string, (config: (paths: object) => object) => Record<string, str
     }),
   ],
 ];
-const forms: [string, string, string[]][] = [
-  ["as the run is built by itself", "", []],
-  ["one program", "TestRunLayers:0", []],
-  ["three layers", "TestRunLayers:3", ["--isolate"]],
-];
+const forms: [string, string, string[]][] = [["as the run is built by itself", "", []]];
 
 for (const [fault, code, config] of faults) {
   for (const [place, files] of places) {

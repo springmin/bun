@@ -9,7 +9,8 @@
 //                               what the front end makes of that program today (./ir-test-from-source.ts).
 //   # -- generated: add f0      Every line below is written anew: for each RUN, each named function as the run prints it,
 //                               or with `*` every function that has a name: a -LABEL on its name and a -NEXT for every line.
-//                               `f0` is the function with that id, for one without a name.
+//                               `f0` is the function with that id, for one without a name. `walk` prints units of code, which
+//                               have the id alone: `f0` or `*` takes each unit of the function, with a -LABEL on `code f0:Body`.
 //
 // So an input does not go stale against the front end, and a change of what a pass prints is this command and a diff to read.
 //
@@ -20,6 +21,9 @@
 // little. It writes each file with a source anew in a temporary folder, without the generated listing, and runs it there: do the check lines
 // that somebody wrote hold for what the front end makes today? `--part=1/2` takes every second file.
 //
+// With --print-anew it writes nothing and takes one file, which may have no IR text at all, as those in ../from-source: it prints the file as
+// it would be written anew. ../engine/answers.ts runs what is printed.
+//
 // With --counts it then runs every file, marked or not. Where a check line fails and the nearest line of the output differs from it
 // only in numbers (`instructions: 14, patchpoints: 2`), the check line takes those numbers, and the old and the new line are printed.
 import { tempDir } from "harness";
@@ -27,6 +31,7 @@ import { readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { availableParallelism } from "node:os";
 import { basename, join } from "node:path";
 import { testaot, toolEnv } from "../shell/tools";
+import { numberedByLegend, withoutInheritedFieldsAlone } from "./answers-test-from-source";
 import { recordsOfSource } from "./ir-test-from-source";
 
 const sourceMark = /^# -- source: (\S+)$/;
@@ -57,8 +62,20 @@ function generate(prefix: string, output: string[], functions: string[]) {
   // lower-to-b3 and lower-to-air end a function with a line of words, the printer of the IR with a brace.
   const endsWithWords = output.some(line => line.startsWith("end of function "));
   let isWanted = false;
+  // A unit that `walk` has no code for is its head and one sentence.
+  let endsAfterOneLine = false;
   for (const line of output) {
-    if (line.startsWith("function ")) {
+    const unit = /^code (f\d+):\S+/.exec(line);
+    if (unit) {
+      isWanted = functions.includes("*") || functions.includes(unit[1]);
+      if (!isWanted) continue;
+      // `code f1` alone is also the beginning of `code f10:Body`, and a function has several units.
+      lines.push(`# ${prefix}-LABEL: ${unit[0]}`);
+      const rest = line.slice(unit[0].length);
+      if (rest.trim()) lines.push(`# ${prefix}: ${patternOf(rest)}`);
+      endsAfterOneLine = !rest.includes(" {");
+    } else if (line.startsWith("function ")) {
+      endsAfterOneLine = false;
       const name = / name="((?:[^"\\]|\\.)*)"/.exec(line);
       const id = /^function f\d+/.exec(line)!;
       const isNamed = name !== null && (functions.includes("*") || functions.includes(name[1]));
@@ -72,7 +89,7 @@ function generate(prefix: string, output: string[], functions: string[]) {
       isWanted = endsWithWords || line.endsWith("{");
     } else if (isWanted && line.trim()) {
       lines.push(`# ${prefix}-NEXT: ${patternOf(line)}`);
-      isWanted = endsWithWords ? !line.startsWith("end of function ") : line !== "}";
+      isWanted = !endsAfterOneLine && (endsWithWords ? !line.startsWith("end of function ") : line !== "}");
     }
   }
   return lines;
@@ -85,13 +102,18 @@ const runsOf = (lines: string[]) =>
   });
 const hasOwnLines = (lines: string[], prefix: string) =>
   lines.some(line => new RegExp(`^# ${prefix}(-[A-Z0-9-]+)?: `).test(line));
+/** It matches the first word of whatever a run prints. testaot refuses `{{*}}` alone: a pattern has to consume a character. */
+const placeholderOf = (prefix: string) => `# ${prefix}: [[word]]`;
 
 function failuresOf(path: string, lines: string[]) {
   // A prefix needs a line before testaot runs anything.
   const placeholders = runsOf(lines)
     .filter(({ prefix, line }) => !lines[line - 1].startsWith("# RUN(%") && !hasOwnLines(lines, prefix))
-    .map(({ prefix }) => `# ${prefix}: function`);
-  using folder = tempDir("aot-ir-test-anew", { [basename(path)]: [...lines, ...placeholders].join("\n") + "\n" });
+    .map(({ prefix }) => placeholderOf(prefix));
+  // Once for a prefix: a second line with the variable wants the same word again.
+  using folder = tempDir("aot-ir-test-anew", {
+    [basename(path)]: [...lines, ...new Set(placeholders)].join("\n") + "\n",
+  });
   const { stdout, stderr } = Bun.spawnSync([testaot!, "run", basename(path)], { cwd: String(folder), env: toolEnv });
   const printed = stdout.toString().replaceAll("\r\n", "\n").split("\n");
   const failures = printed.filter(line => line.startsWith("FAIL "));
@@ -99,7 +121,7 @@ function failuresOf(path: string, lines: string[]) {
   return [`testaot printed: ${printed.join(" ")}${stderr}`];
 }
 
-function update(path: string, checks?: "inputs" | "anew") {
+function update(path: string, checks?: "inputs" | "anew" | "print") {
   const before = readFileSync(path, "utf8");
   let lines = before.replace(/\n$/, "").split("\n");
   const sourceAt = lines.findIndex(line => sourceMark.test(line));
@@ -122,7 +144,18 @@ function update(path: string, checks?: "inputs" | "anew") {
     // The IR text is what is no comment. Comments between its lines are check lines written by hand: they stay in front of it.
     const last = marked() < 0 ? lines.length : marked();
     const comments = lines.slice(0, last).filter(line => line.startsWith("#"));
-    lines = [...comments, "", ...records, ...lines.slice(last)];
+    // `# f1 = sum, f2 = Box`: the directives name the functions by the numbers that they have today.
+    lines = [
+      ...numberedByLegend(comments, records),
+      "",
+      ...records.map(withoutInheritedFieldsAlone),
+      ...lines.slice(last),
+    ];
+  }
+  if (checks === "print") {
+    if (sourceAt < 0) throw new Error("it has no source");
+    process.stdout.write(lines.join("\n") + "\n");
+    return "printed";
   }
   if (checks === "anew") {
     if (sourceAt < 0) return "no source";
@@ -150,9 +183,9 @@ function update(path: string, checks?: "inputs" | "anew") {
     const kept = lines.slice(0, at + 1);
     const runs = runsOf(kept);
     // A prefix needs a line before testaot runs anything.
-    const placeholders = runs.map(({ prefix }) => `# ${prefix}: function`);
+    const placeholders = runs.map(({ prefix }) => placeholderOf(prefix));
     // Without the marker: testaot wants a label below it for each function that it names.
-    writeFileSync(path, [...kept.slice(0, -1), ...placeholders].join("\n") + "\n");
+    writeFileSync(path, [...kept.slice(0, -1), ...new Set(placeholders)].join("\n") + "\n");
     const { stdout, stderr } = Bun.spawnSync([testaot!, "run", path, "--show-output"], { env: toolEnv });
     const printed = stdout.toString().replaceAll("\r\n", "\n").split("\n");
     const outputs = new Map<number, string[]>();
@@ -209,7 +242,9 @@ const checks = process.argv.includes("--check-inputs")
   ? "inputs"
   : process.argv.includes("--check-anew")
     ? "anew"
-    : undefined;
+    : process.argv.includes("--print-anew")
+      ? "print"
+      : undefined;
 const [part, parts] = (process.argv.find(argument => argument.startsWith("--part="))?.slice(7) ?? "1/1")
   .split("/")
   .map(Number);
@@ -217,7 +252,7 @@ const paths = process.argv.slice(2).filter(argument => !argument.startsWith("--"
 if (!testaot || paths.length === 0) {
   console.error(
     testaot
-      ? "usage: bun test/aot/tools/update-ir-tests.ts [--counts | --check-inputs | --check-anew] <file or folder> .."
+      ? "usage: bun test/aot/tools/update-ir-tests.ts [--counts | --check-inputs | --check-anew | --print-anew] <file or folder> .."
       : "there is no testaot",
   );
   process.exit(2);
@@ -264,19 +299,22 @@ for (const path of paths.flatMap(filesBelow)) {
   try {
     what = update(path, checks);
   } catch (error) {
-    (checks ? console.log : console.error)(`${path}: ${error instanceof Error ? error.message.split("\n")[0] : error}`);
+    (checks && checks !== "print" ? console.log : console.error)(
+      `${path}: ${error instanceof Error ? error.message.split("\n")[0] : error}`,
+    );
     process.exitCode = 1;
   }
   counts[what] = (counts[what] ?? 0) + 1;
   if (what === "written") console.log(path);
 }
-console.log(
-  Object.entries(counts)
-    .map(([what, count]) => `${count} ${what}`)
-    .join(", "),
-);
+if (checks !== "print")
+  console.log(
+    Object.entries(counts)
+      .map(([what, count]) => `${count} ${what}`)
+      .join(", "),
+  );
 if (takesCounts) {
   let total = 0;
-  for (let rewritten; (rewritten = updateCounts(paths)) > 0;) total += rewritten;
+  for (let rewritten; (rewritten = updateCounts(paths)) > 0; ) total += rewritten;
   console.log(`${total} check lines took other numbers`);
 }

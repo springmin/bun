@@ -49,8 +49,8 @@ const tables = [
   [`const Module = require("node:module");`, "Module._cache"],
 ];
 
-async function expectAsPlain(use: string) {
-  for (const [declared, table] of tables) {
+async function expectAsPlain(use: string, spellings: string[][]) {
+  for (const [declared, table] of spellings) {
     using dir = tempDir("uses-of-require-cache", filesOf(declared, table, use));
     const plain = await run([bunExe(), "test"], String(dir), bunEnv);
     const compiled = await run([bunExe(), "test", "--aot"], String(dir), bunEnv);
@@ -81,6 +81,6 @@ const asksForEveryExport = {
   "the table handed to a function": `(table => table[keyOfNames].exports.nobodyNamesThis())(TABLE)`,
 };
 
-// Which is which: src/aot/builtins/resolve/tests/module_cache.rs.
+// Which is which: src/aot/builtins/resolve/tests/module_cache.rs. The other names of the table go through the form that a build once got wrong.
 for (const [title, use] of Object.entries({ ...asksForNothing, ...asksForEveryExport }))
-  test(title, () => expectAsPlain(use));
+  test(title, () => expectAsPlain(use, title === "typeof what an entry exports" ? tables : tables.slice(0, 1)));

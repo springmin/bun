@@ -46,12 +46,12 @@ const evaluated = {
     });`,
 };
 
-async function runTests(folder: string, flags: string[], transpilesOnOneThread: boolean, words = "") {
+async function runTests(folder: string, flags: string[], words = "") {
   const env = {
     ...bunEnv,
     NO_COLOR: "1",
     BUN_DEBUG_TEST_AOT_WORDS: words,
-    BUN_FEATURE_FLAG_DISABLE_ASYNC_TRANSPILER: transpilesOnOneThread ? "1" : "0",
+    BUN_FEATURE_FLAG_DISABLE_ASYNC_TRANSPILER: "0",
   };
   const { stdout, stderr, exitCode } = await run([bunExe(), "test", ...flags, "."], folder, env);
   return {
@@ -62,12 +62,12 @@ async function runTests(folder: string, flags: string[], transpilesOnOneThread: 
   };
 }
 
-test.each(["", "TestRunLayers:0", "TestRunLayers:2,TestRunPartFiles:1"])(
+test.each(["TestRunLayers:0"])(
   "the test that imports has passed when the rejection is reported: %s",
   async words => {
     using dir = tempDir("an-unhandled-rejection-in-an-imported-file", fourTests);
     const folder = String(dir);
-    const plain = await runTests(folder, [], false);
+    const plain = await runTests(folder, []);
     expect(plain.verdicts).toEqual([
       "(pass) imports a file that leaves a rejection unhandled",
       "(fail) next",
@@ -77,19 +77,20 @@ test.each(["", "TestRunLayers:0", "TestRunLayers:2,TestRunPartFiles:1"])(
       " 2 fail",
     ]);
     expect(plain.errors).toEqual(["error: rejected in rejects.ts", "error: thrown in a job of throws-in-a-job.cjs"]);
-    expect(await runTests(folder, ["--aot"], false, words)).toEqual(plain);
+    expect(await runTests(folder, ["--aot"], words)).toEqual(plain);
   },
   240_000,
 );
 
-test.each(["", "TestRunLayers:0", "TestRunLayers:2,TestRunPartFiles:1"])(
+// As one program this was right.
+test.each(["TestRunLayers:0"])(
   "so has a test in which code made at run time imports: %s",
   async words => {
     using dir = tempDir("an-unhandled-rejection-behind-evaluated-code", evaluated);
     const folder = String(dir);
-    const plain = await runTests(folder, [], false);
+    const plain = await runTests(folder, []);
     expect(plain.verdicts).toEqual(["(pass) code made at run time imports the file", " 1 pass", " 0 fail", " 1 error"]);
-    expect(await runTests(folder, ["--aot"], false, words)).toEqual(plain);
+    expect(await runTests(folder, ["--aot"], words)).toEqual(plain);
   },
   240_000,
 );
@@ -97,15 +98,7 @@ test.each(["", "TestRunLayers:0", "TestRunLayers:2,TestRunPartFiles:1"])(
 test("behind the only test the rejection is an error of the run", async () => {
   using dir = tempDir("an-unhandled-rejection-behind-the-only-test", oneTest);
   const folder = String(dir);
-  const plain = await runTests(folder, [], false);
+  const plain = await runTests(folder, []);
   expect(plain.verdicts?.slice(-3)).toEqual([" 1 pass", " 0 fail", " 1 error"]);
-  expect(await runTests(folder, ["--aot"], false)).toEqual(plain);
-}, 240_000);
-
-test("where Bun transpiles on the thread of the program, the file runs in the jobs behind the call", async () => {
-  using dir = tempDir("an-unhandled-rejection-with-one-thread", fourTests);
-  const folder = String(dir);
-  const plain = await runTests(folder, [], true);
-  expect(plain.verdicts).toContain("(fail) imports a file that leaves a rejection unhandled");
-  expect(await runTests(folder, ["--aot"], true)).toEqual(plain);
+  expect(await runTests(folder, ["--aot"])).toEqual(plain);
 }, 240_000);

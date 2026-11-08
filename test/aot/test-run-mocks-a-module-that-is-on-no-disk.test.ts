@@ -80,9 +80,7 @@ test("under plain Bun a mock of a module that is on no disk reaches the files of
   });
 });
 
-test.each(["TestRunLayers:0", "TestRunLayers:1", "TestRunLayers:2", "TestRunLayers:2,TestRunPartFiles:1"])(
-  "a mock of a module that is on no disk reaches the files of the project that import it: %s",
-  async words => {
-    expect({ words, ...(await report(words, "--aot")) }).toEqual({ words, ...plain });
-  },
-);
+// Each test file is a program of its own, over the program that holds the files of the project.
+test("a mock of a module that is on no disk reaches the files of the project that import it", async () => {
+  expect(await report("TestRunLayers:0", "--aot")).toEqual(plain);
+});

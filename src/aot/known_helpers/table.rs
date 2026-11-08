@@ -5,6 +5,7 @@ use super::canonical::{
 use super::find::FindInput;
 use super::published::PUBLISHED_FUNCTIONS;
 use super::{PublishedFunction, Reference, Shape};
+use crate::builtins::ResolvedBuiltins;
 use bun_sema::atom::{Atom, Interner};
 use bun_sema::bind::{BindOptions, RuntimeBindOptions};
 use bun_sema::file_analysis::{FileInputs, analyze_file};
@@ -137,8 +138,10 @@ pub(super) fn analyze<R>(
         runtime: Some(RuntimeBindOptions {
             jsx_factory_root: None,
             jsx_fragment_root: None,
+            jsx_paths: [None; 2],
             emits_decorator_metadata: false,
             hoists_top_level_variables: false,
+            object_prototype_takes_names: false,
         }),
         ..BindOptions::default()
     };
@@ -154,12 +157,16 @@ pub(super) fn analyze<R>(
         own_name: b"",
     };
     let (bound, analysis) = analyze_file(&mut hir, bind_options, &fold, file, &atoms, arena);
+    let builtins = ResolvedBuiltins::default();
     then(&FindInput {
         atoms: &atoms,
         hir: &hir,
         bound: &bound,
+        analysis: &analysis,
         decisions: &analysis.decisions,
+        builtins: &builtins,
         module_format: analysis.module_format,
+        names_added_to_builtins: &[],
         is_held_early: &|| true,
     })
 }

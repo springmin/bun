@@ -3,6 +3,7 @@ import { bunEnv, bunExe, isASAN, isGlibc, isLinux, isOhos, tempDir } from "harne
 import { join } from "node:path";
 import { readElfFile, stackMayBeRead, stackMayBeWritten, type ElfFile } from "./elf-file";
 import { isHardened, locksEnvironment } from "./hardened";
+import "./harness/real-executables";
 import { run as runCommand } from "./harness/run";
 import { describe, test } from "./supported";
 

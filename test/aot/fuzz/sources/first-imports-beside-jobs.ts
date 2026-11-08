@@ -81,18 +81,59 @@ const requiredWhileLoaded: Record<string, { oneLoad: Record<string, string>; two
   },
 };
 
+// A call for the root of a load in progress, or for a module below it, leaves the load as it is and settles behind the
+// call that began it, as in Node.js and in an executable built without --aot. In plain Bun on one thread the later call
+// hurries the load along and mostly settles first. The lines of those ticks.
+const inTicks = (first: number, last: number, line: string) =>
+  Object.fromEntries(Array.from({ length: last - first + 1 }, (_, index) => [`${first + index}: `, line]));
+const specifiedBesideLoad: typeof requiredWhileLoaded = {
+  ...requiredWhileLoaded,
+  "imports the root again": {
+    oneLoad: inTicks(
+      0,
+      14,
+      "0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 low mid root 15 16 17 18 19 20 21 IMPORTED 22 23 AGAIN 24 25 26 27 28 29 30 31 32 33 34 35",
+    ),
+    twoLoads: inTicks(
+      0,
+      14,
+      "0 1 2 3 4 5 6 7 8 9 second-low second 10 11 12 13 14 low mid root 15 16 SECOND 17 18 19 20 21 IMPORTED 22 23 AGAIN 24 25 26 27 28 29 30 31 32 33 34 35",
+    ),
+  },
+  "imports the lowest module": {
+    oneLoad: inTicks(
+      3,
+      14,
+      "0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 low mid root 15 16 17 18 19 20 21 IMPORTED 22 23 LOW 24 25 26 27 28 29 30 31 32 33 34 35",
+    ),
+    twoLoads: inTicks(
+      3,
+      14,
+      "0 1 2 3 4 5 6 7 8 9 second-low second 10 11 12 13 14 low mid root 15 16 SECOND 17 18 19 20 21 IMPORTED 22 23 LOW 24 25 26 27 28 29 30 31 32 33 34 35",
+    ),
+  },
+};
+const specifiedOfProgram: Record<string, Record<string, string>> = {
+  "the same module again two turns later": { "a-body ": "a0 a1 a2 a3 a4 a5 a6 P a7 Q a8 a9 a10 a11 a12 a13 a14 a15" },
+};
+
 export default family("first imports beside jobs", [
-  ...Object.keys(programs).map(name => ({ name, ...always, make: () => make(name) })),
+  ...Object.keys(programs).map(name => ({
+    name,
+    ...always,
+    specified: specifiedOfProgram[name],
+    make: () => make(name),
+  })),
   ...Object.keys(eventsBesideLoad).map(name => ({
     name: `a job beside the load ${name}`,
     ...always,
-    specified: requiredWhileLoaded[name]?.oneLoad,
+    specified: specifiedBesideLoad[name]?.oneLoad,
     make: () => makeEventBesideLoad(name),
   })),
   ...Object.keys(eventsBesideLoad).map(name => ({
     name: `a job beside two loads ${name}`,
     ...always,
-    specified: requiredWhileLoaded[name]?.twoLoads,
+    specified: specifiedBesideLoad[name]?.twoLoads,
     make: () => makeEventBesideLoad(name, true),
   })),
   ...(["a further entry point", "imported by name"] as const).flatMap(form => [
@@ -104,7 +145,7 @@ export default family("first imports beside jobs", [
     ...Object.keys(eventsBesideLoad).map(name => ({
       name: `a job beside the load ${name}, ${form}`,
       ...always,
-      specified: requiredWhileLoaded[name]?.oneLoad,
+      specified: specifiedBesideLoad[name]?.oneLoad,
       make: () => startedAs(form, makeEventBesideLoad(name)),
     })),
   ]),

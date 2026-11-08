@@ -14,7 +14,7 @@ export function filterRequested(names: string[]) {
   );
 }
 
-/** AOT_SERVERS_FLAGS="--aot-heat=everything-is-hot": more flags for every build with --aot. What a server answers does not depend on them. */
+/** AOT_SERVERS_FLAGS="--aot-erase-types": more flags for every build with --aot. What a server answers does not depend on them. */
 export const moreFlags = (process.env.AOT_SERVERS_FLAGS ?? "").split(" ").filter(Boolean);
 /** AOT_SERVERS_ENVIRONMENT="A=1 B=2": more variables for every run of an executable that was built with --aot. */
 export const moreEnvironment = Object.fromEntries((process.env.AOT_SERVERS_ENVIRONMENT ?? "").split(" ").filter(Boolean).map(pair => pair.split("="))); // prettier-ignore
@@ -30,7 +30,6 @@ export function packagesUnlikeLockfile(lockfile: string, modules: string) {
   });
 }
 
-/** Runs `bun install` in the folder, by its bun.lock if it has one, or links AOT_SERVERS_MODULES, which must hold the same packages, as its node_modules. */
 /** Returns a line for each direct dependency of the manifest that the node_modules folder holds in another version or not at all. */
 export function packagesUnlikeManifest(manifest: string, modules: string) {
   const { dependencies, devDependencies } = JSON.parse(readFileSync(manifest, "utf8"));

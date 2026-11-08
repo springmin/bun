@@ -2,15 +2,15 @@
 // RUN: link
 // CHECK: layout [[instance]] kind=Instance name="C"
 // CHECK-LABEL: function {{*}}name="m"
-// CHECK: thisType={type=[[instance]] site=[[site]]}
+// CHECK: thisType={type=[[instance]]}
 // CHECK: b0([[this]]: [[instance]]):
 // CHECK: = NewClosure [[this]] function=
 // CHECK-LABEL: function {{*}}name="g"
-// CHECK: thisType={type=[[instance]] site=[[siteOfGetter]]}
+// CHECK: thisType={type=[[instance]]}
 // CHECK-LABEL: function {{*}}kind=Arrow
-// CHECK: captures=[{type=[[instance]] site=[[site]] variableName="this"}] thisType
+// CHECK: captures=[{type=[[instance]] variableName="this"}] thisType
 // CHECK-LABEL: function {{*}}kind=Arrow
-// CHECK: captures=[{type=[[instance]] site=[[siteOfGetter]] variableName="this"}] thisType
+// CHECK: captures=[{type=[[instance]] variableName="this"}] thisType
 
 export class C {
   x = 1;
@@ -21,3 +21,6 @@ export class C {
     return (() => this.x)();
   }
 }
+
+// A method has its body once reached code reads its name.
+export function readsTheNames(o) { return [o.m]; }

@@ -1,4 +1,3 @@
-// Alone: which kind of array a reader asks for first goes by every array that the executable holds
 // A read, a store through a second name of the same array, then a read: what is stored is NaN.
 var neverTaken = process.argv.length > 99;
 function touch(list: any[]): any { if (neverTaken) list[0] = "s"; return list; }

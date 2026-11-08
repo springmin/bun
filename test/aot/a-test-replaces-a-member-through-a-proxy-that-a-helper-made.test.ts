@@ -6,7 +6,7 @@ import { test } from "./supported";
 const project = casesOfOneRun(
   "a-test-replaces-a-member-through-a-proxy-that-a-helper-made",
   { "package.json": `{ "name": "p", "type": "module" }` },
-  [[[]], [["--debug-aot"], "TestRunLayers:2"], [["--debug-aot"], "TestRunLayers:0"]],
+  [[[]], [["--debug-aot"], "TestRunLayers:0"]],
 );
 
 function runsAsPlain(
@@ -34,7 +34,6 @@ function runsAsPlain(
   test(title, async () => {
     const plain = (await project.ran()).get(name);
     expect(plain?.printed).toBe(expected + "\n");
-    expect((await project.ran(["--debug-aot"], "TestRunLayers:2")).get(name)).toEqual(plain);
     expect((await project.ran(["--debug-aot"], "TestRunLayers:0")).get(name)).toEqual(plain);
   });
 }

@@ -54,7 +54,7 @@ async function run(dir: string, flags: string[], words = "") {
   return { lines: stdout.split("\n").filter(line => line.startsWith("OUT")), exitCode };
 }
 
-test("every line is as in plain bun test, as one program and over layers", async () => {
+test("every line is as in plain bun test", async () => {
   using folder = tempDir("aot-mock-builtin-live", files);
   const dir = String(folder);
   const plain = await run(dir, []);
@@ -67,5 +67,4 @@ test("every line is as in plain bun test, as one program and over layers", async
   );
   expect(plain.lines.length).toBe(6);
   expect(await run(dir, ["--aot"], "TestRunLayers:0")).toEqual(plain);
-  expect(await run(dir, ["--aot"], "TestRunLayers:2,TestRunPartFiles:1")).toEqual(plain);
 }, 240_000);

@@ -42,6 +42,7 @@ const programs = [
   // A shared file rebinds `module`, deletes `module.exports` or stores into `module.parent`, and the test file looks.
   "commonjs/a-required-file-stores-the-main-module-into-its-module",
   "commonjs/keys-of-a-child-that-deleted-its-module-exports",
+  "commonjs/a-require-gets-what-the-file-left-under-the-exports-of-its-module",
   "commonjs/a-store-into-module-parent-of-a-required-file",
   "commonjs/a-store-into-module-parent-in-front-of-the-first-read",
   "commonjs/a-module-object-and-then-a-text-stored-into-module-parent",
@@ -69,7 +70,7 @@ function copyAsTestFile(directory: string, program: string) {
 
 async function runTests(directory: string, ...flags: string[]) {
   // A project as small as this one is one program unless the word asks for layers. run() fails where the run has none.
-  const env = { ...bunEnv, BUN_DEBUG_TEST_AOT_WORDS: "TestRunLayers:2" };
+  const env = { ...bunEnv, BUN_DEBUG_TEST_AOT_WORDS: "TestRunLayers:0" };
   const { stdout, stderr, exitCode } = await run([bunExe(), "test", "--isolate", ...flags, "./p"], directory, env);
   if (exitCode !== 0 && exitCode !== 1) console.error(stderr);
   const printed: Record<string, string[]> = {};

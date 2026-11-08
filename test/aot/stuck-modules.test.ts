@@ -40,3 +40,17 @@ describe.concurrent("a test file that never finishes loading", () => {
     expect(await notesOf(files, "--aot")).toEqual(plain);
   });
 });
+
+test("a factory that never settles holds the import() that came to it, and no test", async () => {
+  const files = {
+    "a.test.ts": `import { expect, mock, test } from "bun:test";
+mock.module("./late.ts", () => new Promise(() => {}));
+void import("./late.ts");
+test("runs", () => expect(1).toBe(1));
+`,
+    "late.ts": `export const late = 1;`,
+  };
+  const plain = await notesOf(files);
+  expect(plain).toEqual({ notes: [], exitCode: 0 });
+  expect(await notesOf(files, "--aot")).toEqual(plain);
+});

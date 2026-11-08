@@ -47,12 +47,7 @@ const filler = Array.from(
 
 const ways: [string, string[], Record<string, string>][] = [
   ["as one program", [], { BUN_DEBUG_TEST_AOT_WORDS: "TestRunLayers:0" }],
-  ["over two layers", [], { BUN_DEBUG_TEST_AOT_WORDS: "TestRunLayers:2" }],
-  [
-    "over the layers that a large run takes",
-    ["--parallel=2", "--aot-memory-limit", "1MB"],
-    { BUN_DEBUG_TEST_AOT_WORDS: "TestRunSaysItsForm" },
-  ],
+  ["with two workers", ["--parallel=2"], { BUN_DEBUG_TEST_AOT_WORDS: "TestRunSaysItsForm" }],
 ];
 
 async function runTests(directory: string, env: Record<string, string>, ...flags: string[]) {
@@ -73,9 +68,8 @@ async function runTests(directory: string, env: Record<string, string>, ...flags
 export function mockLacksAHandedOnName(part: number, of: number) {
   describe.each(ways)("%s", (way, flags, env) => {
     describe.each(Object.keys(mocks))("%s", mock => {
-      // The witness failed in all three ways on the build in front of the cure, as the five others did: none in layers alone.
-      const runsIn = (user: string) =>
-        waysFor(ways, mock === "vi.doMock" && user === "export from").some(([each]) => each === way);
+      // On the build right in front of the cure `export from` failed under either mock, in both layered ways and not as one program.
+      const runsIn = (user: string) => waysFor(ways, user === "export from").some(([each]) => each === way);
       const mine = Object.keys(users).filter((_, index) => index % of === part);
       test.each(mine.filter(runsIn))("%s", async user => {
         using dir = tempDir("mock-lacks-handed-on-name", {
@@ -91,7 +85,7 @@ export function mockLacksAHandedOnName(part: number, of: number) {
         expect(plain.seen.results).toEqual(["pass other", "pass reads"]);
         expect(plain.seen.printed).toContain(`| read: "mock v" undefined undefined true`);
         const compiled = await runTests(String(dir), env, "--aot", ...flags);
-        if (flags.length) expect(compiled.all).toContain("AOT test run | layers 2");
+        if (flags.length) expect(compiled.all).toContain("AOT test run | one program");
         expect(compiled.seen).toEqual(plain.seen);
       });
     });

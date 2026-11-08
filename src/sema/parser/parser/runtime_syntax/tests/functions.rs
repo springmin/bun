@@ -63,6 +63,35 @@ fn directive_beside_strictness_of_file_and_classes() {
 }
 
 #[test]
+fn directive_of_function_is_a_bare_string_at_the_head() {
+    for (text, expected) in [
+        (r#"function f() { "use strict" as any }"#, &[false][..]),
+        (r#"function f() { "use strict"! }"#, &[false]),
+        (r#"function f() { <any>"use strict" }"#, &[false]),
+        (
+            r#"function f() { "use strict" satisfies string }"#,
+            &[false],
+        ),
+        (r#"function f() { "use strict" as const }"#, &[false]),
+        (r#"function f() { "a" as any; "use strict" }"#, &[false]),
+        (
+            r#"function f() { type A = 1; "use strict"; return () => 1 }"#,
+            &[false, false],
+        ),
+        (
+            r#"function f() { "use strict" } function g() { type A = 1; "use strict" }"#,
+            &[true, false],
+        ),
+        (
+            r#"function f() { "use strict" } function g() { declare const a: 1; "use strict" }"#,
+            &[true, false],
+        ),
+    ] {
+        assert_eq!(function_strictness(text), expected, "{text}");
+    }
+}
+
+#[test]
 fn function_directive_is_rare_syntax() {
     use rare::DIRECTIVE_IN_FUNCTION;
     for (text, expected) in [

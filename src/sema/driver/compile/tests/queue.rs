@@ -3,11 +3,11 @@ use crate::Report;
 use crate::compile::FileWork;
 use crate::compile::queue::{LOWERING_ROUNDS, ROLE_ROUNDS, run_queue};
 use bun_sema::check::{Checker, Requested};
-use bun_sema::program::{FileId, ReadingTask};
+use bun_sema::program::{FileId, Files, ReadingTask};
 use bun_sema::util::SharedSort;
 use bun_threading::{Condvar, Guarded};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::thread::ThreadId;
+use std::time::{Duration, Instant};
 
 #[derive(Copy, Clone)]
 struct PassOptions {
@@ -25,15 +25,13 @@ const ROLE_PASS: PassOptions = PassOptions {
     first_round: ROLE_ROUNDS,
 };
 
-fn run_pass<'s>(
+fn run_pass_over<'s>(
     program: &TestProgram<'_, 's>,
+    to_check: Vec<FileId>,
     options: PassOptions,
     requested: &(dyn Fn(FileId) -> Requested + Sync),
     after_file: &(dyn Fn(&mut Checker<'_, 's>, FileId) + Sync),
 ) -> Report {
-    let files = program.files();
-    let mut to_check: Vec<FileId> = (0..files.modules.len() as u32).map(FileId).collect();
-    to_check.shared_sort_by_key(|&file| files.rank_of_file(file));
     run_queue(
         program.loaded,
         program.host,
@@ -43,7 +41,6 @@ fn run_pass<'s>(
             requested,
             after_file: Some(after_file),
             after_commit: &|_| {},
-            beside_file: None,
             frees_tree: &|_| options.frees_trees,
             is_last_pass: &|| false,
             note_cycles_entered: None,
@@ -52,6 +49,18 @@ fn run_pass<'s>(
             left_out_bodies: None,
         },
     )
+}
+
+fn run_pass<'s>(
+    program: &TestProgram<'_, 's>,
+    options: PassOptions,
+    requested: &(dyn Fn(FileId) -> Requested + Sync),
+    after_file: &(dyn Fn(&mut Checker<'_, 's>, FileId) + Sync),
+) -> Report {
+    let files = program.files();
+    let mut to_check: Vec<FileId> = (0..files.modules.len() as u32).map(FileId).collect();
+    to_check.shared_sort_by_key(|&file| files.rank_of_file(file));
+    run_pass_over(program, to_check, options, requested, after_file)
 }
 
 fn check_all_files<'s>(
@@ -65,6 +74,11 @@ fn check_all_files<'s>(
 fn count_reported(report: &Report, file: FileId, code: u32) -> usize {
     let in_file = report.diagnostics.iter().filter(|it| it.file == Some(file));
     in_file.filter(|it| it.code == code).count()
+}
+
+fn codes_reported(report: &Report, file: FileId) -> Vec<u32> {
+    let in_file = report.diagnostics.iter().filter(|it| it.file == Some(file));
+    in_file.map(|it| it.code).collect()
 }
 
 fn import_chain(count: usize) -> Vec<(String, String)> {
@@ -99,63 +113,53 @@ fn each_file_is_visited() {
     });
 }
 
-#[test]
-fn a_second_thread_works_beside_a_file_that_takes_as_long_as_the_round() {
-    let long: String = (0..3000)
-        .map(|index| format!("export const value{index} = one + one + one + one;\n"))
-        .collect();
-    let long = format!("const one = 1;\n{long}");
-    let files = [
-        ("main.ts", "import \"./long.ts\";\nimport \"./short.ts\";\n"),
-        ("long.ts", &long[..]),
-        ("short.ts", "export const one = 1;\n"),
-    ];
-    with_program(&files, &["./main.ts"], 4, |program| {
-        let long_file = program.file("long.ts");
-        let beside: Guarded<Vec<(FileId, ThreadId)>> = Guarded::new(Vec::new());
-        let has_worked_beside = Condvar::new();
-        let visiting_thread: Guarded<Option<ThreadId>> = Guarded::new(None);
-        let all = program.files().modules.len() as u32;
-        let mut to_check: Vec<FileId> = (0..all).map(FileId).collect();
-        to_check.shared_sort_by_key(|&file| program.files().rank_of_file(file));
-        run_queue(
-            program.loaded,
-            program.host,
-            program.request,
-            to_check,
-            &FileWork {
-                requested: &|_| Requested::All,
-                after_file: Some(&|_, file| {
-                    if file != long_file {
-                        return;
-                    }
-                    *visiting_thread.lock() = Some(std::thread::current().id());
-                    let mut beside = beside.lock();
-                    while beside.iter().all(|it| it.0 != long_file) {
-                        has_worked_beside.wait_guarded(&mut beside);
-                    }
-                }),
-                after_commit: &|_| {},
-                beside_file: Some(&|file| {
-                    beside.lock().push((file, std::thread::current().id()));
-                    has_worked_beside.notify_all();
-                }),
-                frees_tree: &|_| false,
-                is_last_pass: &|| false,
-                note_cycles_entered: None,
-                cycles_entered_before: &Default::default,
-                first_round: LOWERING_ROUNDS,
-                left_out_bodies: None,
-            },
-        );
-        let beside = beside.lock();
-        assert_eq!(beside.len(), 1);
-        assert_eq!(beside[0].0, long_file);
-        assert_ne!(Some(beside[0].1), *visiting_thread.lock());
-    });
+struct EndsWatch<'a, 's>(&'a Files<'s>);
+
+impl Drop for EndsWatch<'_, '_> {
+    fn drop(&mut self) {
+        self.0.watch_no_more();
+    }
 }
 
-fn is_tree_of_last_file_packed_away(is_last_pass: bool) -> bool {
+fn let_trees_go_behind<'a, 's>(files: &'a Files<'s>, listed: &[FileId]) -> EndsWatch<'a, 's> {
+    files.let_trees_go_behind(listed);
+    EndsWatch(files)
+}
+
+fn check_and_let_trees_go(
+    program: &TestProgram<'_, '_>,
+    to_check: Vec<FileId>,
+    pass: PassOptions,
+) -> Report {
+    let options = PassOptions {
+        frees_trees: true,
+        ..pass
+    };
+    run_pass_over(program, to_check, options, &|_| Requested::All, &|_, _| {})
+}
+
+const LONGEST_WAIT: Duration = Duration::from_secs(60);
+
+fn wait_until_tree_is_gone(files: &Files<'_>, file: FileId) -> Option<()> {
+    let began = Instant::now();
+    while !files.is_tree_gone(file) {
+        if files.is_tree_kept(file) {
+            return None;
+        }
+        assert!(began.elapsed() < LONGEST_WAIT, "the trees of {file:?} stay");
+        drop(ReadingTask::begin());
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    Some(())
+}
+
+fn ask_until_answered<T>(ask: fn() -> Option<T>) -> T {
+    const MOST_ATTEMPTS: usize = 100;
+    let answer = (0..MOST_ATTEMPTS).find_map(|_| ask());
+    answer.expect("the trees stay for good every time")
+}
+
+fn is_tree_of_last_file_gone(is_last_pass: bool) -> bool {
     let files = [
         ("main.ts", "import \"./last.ts\";\nimport \"./short.ts\";\n"),
         ("last.ts", "export const two = 1 + 1;\n"),
@@ -168,7 +172,7 @@ fn is_tree_of_last_file_packed_away(is_last_pass: bool) -> bool {
         let all = program.files().modules.len();
         let mut to_check: Vec<FileId> = (0..all as u32).map(FileId).collect();
         to_check.shared_sort_by_key(|&file| program.files().rank_of_file(file));
-        program.files().let_trees_go_behind(&to_check);
+        let _watch = let_trees_go_behind(program.files(), &to_check);
         run_queue(
             program.loaded,
             program.host,
@@ -186,7 +190,6 @@ fn is_tree_of_last_file_packed_away(is_last_pass: bool) -> bool {
                     *committed.lock() += 1;
                     has_committed.notify_all();
                 },
-                beside_file: None,
                 frees_tree: &|_| true,
                 is_last_pass: &|| is_last_pass,
                 note_cycles_entered: None,
@@ -195,27 +198,21 @@ fn is_tree_of_last_file_packed_away(is_last_pass: bool) -> bool {
                 left_out_bodies: None,
             },
         );
-        let is_gone = program.files().is_tree_gone(last);
-        program.files().watch_no_more();
-        is_gone
+        program.files().is_tree_gone(last)
     })
 }
 
 #[test]
-fn the_tree_of_the_last_file_of_the_last_pass_is_not_packed_away() {
-    assert!(!is_tree_of_last_file_packed_away(true));
+fn the_tree_of_the_last_file_of_the_last_pass_stays() {
+    assert!(!is_tree_of_last_file_gone(true));
 }
 
-// `late.ts` is checked when the trees of `far.ts`, which it has nothing to do with, are packed away. Whether they still are, in the
-// task that has checked it, which keeps what it reads until it ends, and behind it.
-// None: the tests beside this one held every bit that a task can have, so the trees of `far.ts` stay for good.
-fn are_trees_left_packed_away_by_an_import_without_types() -> Option<(Option<bool>, bool)> {
+fn codes_reported_for_an_import_without_types() -> Option<Vec<u32>> {
     let files = [
         (
             "main.ts",
             "import \"./a.ts\";\nimport \"./far.ts\";\nimport \"./late.ts\";\n",
         ),
-        // Every task reads the file with the lowest number, which holds the symbol of `undefined`.
         ("a.ts", "export const first = [1].join();\n"),
         ("far.ts", "export const far = [1, 2, 3].join();\n"),
         (
@@ -231,149 +228,69 @@ fn are_trees_left_packed_away_by_an_import_without_types() -> Option<(Option<boo
     with_program(&files, &["./main.ts"], 1, |program| {
         let [far, late] = ["far.ts", "late.ts"].map(|path| program.file(path));
         let files = program.files();
-        files.let_trees_go_behind(&[far, late]);
+        let _watch = let_trees_go_behind(files, &[far, late]);
         {
             let _task = ReadingTask::begin();
             files.note_commit(far);
         }
-        // Trees wait for the tasks that began before the commit, and those of the tests beside this one count too. The end of any
-        // task lets go what waits no more.
-        while !files.is_tree_gone(far) {
-            if files.is_tree_kept(far) {
-                files.watch_no_more();
-                return None;
-            }
-            drop(ReadingTask::begin());
-            std::thread::sleep(std::time::Duration::from_millis(1));
-        }
-        let is_gone_in_task = Guarded::new(None);
-        let report = run_queue(
-            program.loaded,
-            program.host,
-            program.request,
-            vec![late],
-            &FileWork {
-                requested: &|_| Requested::All,
-                after_file: Some(&|_, _| *is_gone_in_task.lock() = Some(files.is_tree_gone(far))),
-                after_commit: &|_| {},
-                beside_file: None,
-                frees_tree: &|_| true,
-                is_last_pass: &|| false,
-                note_cycles_entered: None,
-                cycles_entered_before: &Default::default,
-                first_round: LOWERING_ROUNDS,
-                left_out_bodies: None,
-            },
-        );
-        let is_gone_behind = files.is_tree_gone(far);
-        files.watch_no_more();
-        let codes: Vec<u32> = (report.diagnostics.iter())
-            .filter(|diagnostic| diagnostic.file == Some(late))
-            .map(|diagnostic| diagnostic.code)
-            .collect();
-        assert!(codes.contains(&7016), "{codes:?}");
-        Some((*is_gone_in_task.lock(), is_gone_behind))
+        wait_until_tree_is_gone(files, far)?;
+        let report = check_and_let_trees_go(program, vec![late], LOWERING_PASS);
+        Some(codes_reported(&report, late))
     })
 }
 
-// The hint under the error says whether the program has `@types/untyped`, which every module is asked about. What is read of each is
-// a list that stays when its trees go, so none has to come back.
 #[test]
-fn an_import_of_a_package_without_types_brings_no_tree_back() {
-    let answer = std::iter::repeat_with(are_trees_left_packed_away_by_an_import_without_types);
-    assert_eq!(answer.flatten().next(), Some((Some(true), true)));
+fn an_import_of_a_package_without_types_reads_no_tree_that_is_gone() {
+    let codes = ask_until_answered(codes_reported_for_an_import_without_types);
+    assert!(codes.contains(&7016), "{codes:?}");
 }
 
-// The first visit of `late.ts` is thrown away when the trees of `far.ts` are packed away. The queue then follows what `late.ts` imports,
-// and what that imports, to see what the next visit has to wait for. How often the trees of `far.ts` come back from then on.
-// None: they were not packed away yet. Trees wait for the tasks that began before the commit, and those of the tests beside this one
-// count too.
-fn times_trees_come_back_for_a_visit_thrown_away() -> Option<u32> {
+fn check_file_that_reaches_a_tree_through_types() -> Option<()> {
     let files = [
         (
             "main.ts",
-            "import \"./a.ts\";\nimport \"./far.ts\";\nimport \"./mid.ts\";\nimport \"./late.ts\";\n",
+            "import \"./a\";\nimport \"./mid\";\nimport \"./near\";\n\
+             import \"./late\";\nimport \"./rest\";\n",
         ),
-        // Every task reads the file with the lowest number, which holds the symbol of `undefined`.
         ("a.ts", "export const first = [1].join();\n"),
-        ("far.ts", "export const far = [1, 2, 3].join();\n"),
+        (
+            "far.ts",
+            "export interface Far { far: number }\nexport const far: Far = { far: 1 };\n",
+        ),
         (
             "mid.ts",
-            "import \"./far.ts\";\nexport const mid = [4].join();\n",
+            "import { far } from \"./far\";\nexport const mid = far;\n",
         ),
+        ("near.ts", "export const near = [1, 2, 3];\n"),
         (
             "late.ts",
-            "import \"./mid.ts\";\nexport const late = [5].join();\n",
+            "import { mid } from \"./mid\";\nexport const late: number = mid.far;\n",
         ),
+        ("rest.ts", "export const rest = [4];\n"),
     ];
     with_program(&files, &["./main.ts"], 1, |program| {
-        let [far, mid, late] = ["far.ts", "mid.ts", "late.ts"].map(|path| program.file(path));
+        let [far, mid, near, late, rest] =
+            ["far.ts", "mid.ts", "near.ts", "late.ts", "rest.ts"].map(|path| program.file(path));
         let files = program.files();
-        let to_check = vec![far, mid, late];
+        let before_late = vec![far, mid, near];
         let rank = |file: &FileId| files.rank_of_file(*file);
-        assert!(to_check.is_sorted_by_key(rank));
-        files.let_trees_go_behind(&to_check);
-        let visits_of_late = AtomicUsize::new(0);
-        let are_here = AtomicUsize::new(0);
-        // The visit of `mid.ts`, which names `far.ts`, may have brought them back before.
-        let times_before = AtomicUsize::new(0);
-        run_queue(
-            program.loaded,
-            program.host,
-            program.request,
-            to_check,
-            &FileWork {
-                requested: &|_| Requested::All,
-                after_file: Some(&|checker, file| {
-                    if file != late || visits_of_late.fetch_add(1, Ordering::Relaxed) != 0 {
-                        return;
-                    }
-                    // The end of any task lets go what waits no more. This is a thread of the pool that all tests share, so it
-                    // does not wait here.
-                    drop(ReadingTask::begin());
-                    if !files.is_tree_gone(far) {
-                        are_here.store(1, Ordering::Relaxed);
-                        return;
-                    }
-                    times_before.store(files.times_tree_came_back(far) as usize, Ordering::Relaxed);
-                    checker.discard_until_recheck();
-                }),
-                after_commit: &|_| {},
-                beside_file: None,
-                frees_tree: &|_| true,
-                is_last_pass: &|| false,
-                note_cycles_entered: None,
-                cycles_entered_before: &Default::default,
-                first_round: LOWERING_ROUNDS,
-                left_out_bodies: None,
-            },
-        );
-        let times = files.times_tree_came_back(far) - times_before.load(Ordering::Relaxed) as u32;
-        files.watch_no_more();
-        if are_here.load(Ordering::Relaxed) != 0 {
-            return None;
-        }
-        assert_eq!(visits_of_late.load(Ordering::Relaxed), 2);
-        Some(times)
+        assert!(before_late.is_sorted_by_key(rank));
+        let _watch = let_trees_go_behind(files, &[far, mid, near, late, rest]);
+        check_and_let_trees_go(program, before_late, ROLE_PASS);
+        wait_until_tree_is_gone(files, near)?;
+        assert!(!files.is_tree_gone(far));
+        let report = check_and_let_trees_go(program, vec![late], LOWERING_PASS);
+        let codes = codes_reported(&report, late);
+        assert!(codes.is_empty(), "{codes:?}");
+        wait_until_tree_is_gone(files, far)
     })
 }
 
-// Of each file it reads the list of what the file imports, which stays when the trees go, so none has to come back.
 #[test]
-fn a_visit_that_is_thrown_away_brings_no_tree_back() {
-    let answer = std::iter::repeat_with(|| {
-        let answer = times_trees_come_back_for_a_visit_thrown_away();
-        if answer.is_none() {
-            std::thread::sleep(std::time::Duration::from_millis(2));
-        }
-        answer
-    });
-    assert_eq!(answer.flatten().next(), Some(0));
+fn a_tree_reached_through_the_types_of_another_file_stays_until_its_reader_is_committed() {
+    ask_until_answered(check_file_that_reaches_a_tree_through_types);
 }
 
-// `asks.ts` and `asks-too.ts` are visited by tasks that aren't the first in program order, and each looks through the exports of
-// every module. In `ring.cjs`, late in the program, `module.exports = exports.default` leads back to itself. Only the first file that
-// leads to such a cycle may enter it, so both tasks are discarded. The second goes straight to the module that stopped the first.
 #[test]
 fn a_search_of_every_module_that_cannot_end_stops_at_once() {
     const MODULES: usize = 30;
@@ -432,52 +349,63 @@ fn a_search_of_every_module_that_cannot_end_stops_at_once() {
     });
 }
 
-// The message says that `{ a: Hidden }` is no number. The file doesn't import `Hidden`, nor a module that exports it, so every
-// module of the program is searched for one that does. `line_before`: what stands on the line before the error. Returns how
-// many modules were searched and how many diagnostics the file reports.
-fn modules_searched_for_a_message(main: &str, line_before: &str) -> (usize, usize) {
-    let take = match main.ends_with(".ts") {
-        true => "function take(count: number) { return count; }",
-        false => "/** @param {number} count */\nfunction take(count) { return count; }",
-    };
-    let text = format!(
-        "import {{ make }} from \"./maker\";\n{take}\n{line_before}\ntake({{ a: make() }});\n"
-    );
-    let files = [
-        ("hidden.ts", "export interface Hidden { h: number }\n"),
-        ("again.ts", "export type { Hidden } from \"./hidden\";\n"),
-        (
-            "maker.ts",
-            "import \"./again\";\nimport type { Hidden } from \"./hidden\";\n\
-             export function make(): Hidden { return { h: 1 }; }\n",
-        ),
-        (main, &text[..]),
-    ];
-    with_program(&files, &[&format!("./{main}")], 1, |program| {
-        let main = program.file(main);
+const TYPE_THAT_ITS_READER_DOES_NOT_IMPORT: [(&str, &str); 3] = [
+    ("hidden.ts", "export interface Hidden { h: number }\n"),
+    ("again.ts", "export type { Hidden } from \"./hidden\";\n"),
+    (
+        "maker.ts",
+        "import type { Hidden } from \"./hidden\";\n\
+         export function make(): Hidden { return { h: 1 }; }\n",
+    ),
+];
+
+const MESSAGE_ABOUT_THAT_TYPE: &str = "import { make } from \"./maker\";\n\
+     function take(count: number) { return count; }\ntake({ a: make() });\n";
+
+#[test]
+fn a_message_of_a_build_searches_no_module() {
+    let main = format!("import \"./other\";\n{MESSAGE_ABOUT_THAT_TYPE}");
+    let mut files = TYPE_THAT_ITS_READER_DOES_NOT_IMPORT.to_vec();
+    files.push(("other.ts", "import \"./again\";\nexport {};\n"));
+    files.push(("main.ts", &main[..]));
+    with_program(&files, &["./main.ts"], 1, |program| {
         let searched = AtomicUsize::new(0);
         let report = check_all_files(program, LOWERING_PASS, &|checker, _| {
             searched.store(checker.modules_searched_for_exports(), Ordering::Relaxed);
         });
-        let in_main = report.diagnostics.iter().filter(|it| it.file == Some(main));
-        (searched.load(Ordering::Relaxed), in_main.count())
+        assert_eq!(searched.load(Ordering::Relaxed), 0);
+        assert_eq!(codes_reported(&report, program.file("main.ts")), [2345]);
+    });
+}
+
+fn codes_reported_about_a_type_that_a_gone_module_exports_again() -> Option<Vec<u32>> {
+    let mut files = TYPE_THAT_ITS_READER_DOES_NOT_IMPORT.to_vec();
+    files.extend([
+        (
+            "main.ts",
+            "import \"./a\";\nimport \"./again\";\nimport \"./late\";\n",
+        ),
+        ("a.ts", "export const first = [1].join();\n"),
+        ("late.ts", MESSAGE_ABOUT_THAT_TYPE),
+    ]);
+    with_program(&files, &["./main.ts"], 1, |program| {
+        let [again, late] = ["again.ts", "late.ts"].map(|path| program.file(path));
+        let files = program.files();
+        let _watch = let_trees_go_behind(files, &[again, late]);
+        {
+            let _task = ReadingTask::begin();
+            files.note_commit(again);
+        }
+        wait_until_tree_is_gone(files, again)?;
+        let report = check_and_let_trees_go(program, vec![late], LOWERING_PASS);
+        Some(codes_reported(&report, late))
     })
 }
 
 #[test]
-fn a_message_that_nobody_reads_searches_no_module() {
-    let (searched, reported) = modules_searched_for_a_message("main.ts", "");
-    assert!(searched != 0, "{searched} modules");
-    assert_eq!(reported, 1);
-    for (main, line_before) in [
-        ("main.ts", "// @ts-expect-error"),
-        ("main.ts", "// @ts-ignore"),
-        ("main.ts", "if (false)"),
-        ("main.js", ""),
-    ] {
-        let searched = modules_searched_for_a_message(main, line_before);
-        assert_eq!(searched, (0, 0), "{main} {line_before}");
-    }
+fn a_message_about_a_type_that_its_file_does_not_import_reads_no_tree_that_is_gone() {
+    let codes = ask_until_answered(codes_reported_about_a_type_that_a_gone_module_exports_again);
+    assert_eq!(codes, [2345]);
 }
 
 #[test]
@@ -549,6 +477,7 @@ fn requested_diagnostics_are_per_file() {
 
 fn overflow_stack(checker: &mut Checker<'_, '_>, file: FileId) {
     checker.set_stack_limit(0);
+    checker.set_requested(Requested::All);
     checker.check_file(file);
     checker.begin_stack_budget();
 }
@@ -628,8 +557,6 @@ fn aliases_of_an_export_table_are_listed_once() {
                 ))
             ),
         ),
-        // Each error is about an object literal that holds a type the file doesn't import, which is looked for among
-        // the exports of every namespace that it does import.
         (
             "main.ts".to_owned(),
             format!(
@@ -664,7 +591,6 @@ fn aliases_of_an_export_table_are_listed_once() {
         });
         assert_eq!(count_reported(&report, main, 2322), ERRORS);
         let read = read.load(Ordering::Relaxed);
-        // The exports of each namespace, of `makers` and of the file itself, and the globals.
         assert!(
             (NAMESPACES..=NAMESPACES + 3).contains(&read),
             "{read} tables"

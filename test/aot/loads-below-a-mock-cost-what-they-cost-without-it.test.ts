@@ -2,7 +2,6 @@ import { expect } from "bun:test";
 import { bunEnv, bunExe, tempDir } from "harness";
 import { join } from "node:path";
 import { raiseDefaultTimeout } from "./harness/default-timeout";
-import { measureUntilWithinBounds } from "./harness/measure-again";
 import { run } from "./harness/run";
 import { test } from "./supported";
 
@@ -65,6 +64,22 @@ async function timeOfFilesThatMockInTimesThatOfTheOthers() {
       0,
     );
   return sumOf("mocking") / sumOf("plain");
+}
+
+// CI ends a test file that has run for five minutes.
+const lastStart = 200_000;
+
+// Other work on the machine only adds to a time. One that is over its bound is measured again, four times at most: code that costs more does so every time.
+async function measureUntilWithinBounds(
+  name: string,
+  measure: () => Promise<number>,
+  isWithinBounds: (measured: number) => boolean,
+) {
+  for (let attemptsLeft = 3; ; attemptsLeft--) {
+    const measured = await measure();
+    if (attemptsLeft === 0 || isWithinBounds(measured) || performance.now() > lastStart) return measured;
+    console.error(`ASKED AGAIN: ${name}`);
+  }
 }
 
 test("a mocked module does not make every load walk the modules below it", async () => {

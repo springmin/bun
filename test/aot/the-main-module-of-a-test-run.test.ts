@@ -2,7 +2,6 @@ import { expect } from "bun:test";
 import { bunEnv, bunExe, tempDir } from "harness";
 import { afterAll } from "./harness/default-timeout";
 import { run } from "./harness/run";
-import { runsWholeGrids } from "./harness/ways";
 // One by one: a case takes two minutes where Bun has a sanitizer, and beside others it would come near its limit.
 import { beforeAll, testOneByOne as test } from "./supported";
 
@@ -86,29 +85,19 @@ test("require.main is the test file that runs: plain Bun", () => {
   expect(plain.stdout).toContain("evicted.test.cjs after undefined undefined");
 });
 
-const forms: [string, Record<string, string>][] = [
-  ["compiled", {}],
-  ["test files from disk", { BUN_AOT_TEST_FILES_FROM_DISK: "1" }],
-  [
-    "test files from disk that name what they use",
-    { BUN_AOT_TEST_FILES_FROM_DISK: "1", BUN_AOT_TESTS_NAME_WHAT_THEY_USE: "1" },
-  ],
-];
-// From disk a run costs twice what it costs compiled, so in front of a merge there is one such run.
-test.each(forms.slice(0, runsWholeGrids ? 3 : 2))("require.main is the test file that runs: %s", async (_, env) => {
-  expect(await runTests(String(dir), env, "--aot")).toEqual(plain);
+test("require.main is the test file that runs: compiled", async () => {
+  expect(await runTests(String(dir), {}, "--aot")).toEqual(plain);
 });
 
 // `require.main` is what the cache holds under the path in `Bun.main`, and `import.meta.main` compares with it, at every read.
-test.each([
-  { way: "as one program", words: "TestRunLayers:0" },
-  { way: "over two layers", words: "TestRunLayers:2,TestRunPartFiles:1" },
-])("a test that stores into Bun.main is followed: $way", async ({ words }) => {
-  using dir = tempDir("aot-main-module-of-a-test-run", {
-    "package.json": `{ "type": "module" }`,
-    "preload.cjs": ``,
-    "helper.cjs": `exports.me = module;\nexports.isMain = () => require.main === module;\nexports.main = () => require.main;`,
-    "a.test.js": `import { expect, test } from "bun:test";
+test.each([{ way: "as one program", words: "TestRunLayers:0" }])(
+  "a test that stores into Bun.main is followed: $way",
+  async ({ words }) => {
+    using dir = tempDir("aot-main-module-of-a-test-run", {
+      "package.json": `{ "type": "module" }`,
+      "preload.cjs": ``,
+      "helper.cjs": `exports.me = module;\nexports.isMain = () => require.main === module;\nexports.main = () => require.main;`,
+      "a.test.js": `import { expect, test } from "bun:test";
       import helper from "./helper.cjs";
       const name = m => (m && m.filename ? m.filename.split(/[\\\\/]/).at(-1) : String(m));
       test("stores", () => {
@@ -122,17 +111,18 @@ test.each([
         console.log("back", name(helper.main()), helper.isMain(), import.meta.main);
         expect(Bun.main).toBe(before);
       });`,
-  });
-  const plain = await runTests(String(dir), {});
-  expect(plain).toEqual({
-    stdout: [
-      "at first undefined false true",
-      "nowhere /nowhere/entry.js undefined false false",
-      "helper helper.cjs true true false",
-      "back undefined false true",
-    ],
-    results: ["pass stores"],
-    exitCode: 0,
-  });
-  expect(await runTests(String(dir), { BUN_DEBUG_TEST_AOT_WORDS: words }, "--aot")).toEqual(plain);
-});
+    });
+    const plain = await runTests(String(dir), {});
+    expect(plain).toEqual({
+      stdout: [
+        "at first undefined false true",
+        "nowhere /nowhere/entry.js undefined false false",
+        "helper helper.cjs true true false",
+        "back undefined false true",
+      ],
+      results: ["pass stores"],
+      exitCode: 0,
+    });
+    expect(await runTests(String(dir), { BUN_DEBUG_TEST_AOT_WORDS: words }, "--aot")).toEqual(plain);
+  },
+);

@@ -1,19 +1,19 @@
 use crate::atom::known;
 use crate::hir::{
-    Class, Comment, Expr, ExprId, ExprKind, File, Fixed, Flags, Func, IdList, Member, MemberKind,
-    ModifierKind, Param, PatId, PatKind, Span, StmtId, TypeNodeId, TypeParamId, end_of_expr,
-    has_body, is_nested_namespace, modifier_text, start_of,
+    BinOp, Class, ClassId, Comment, Expr, ExprId, ExprKind, File, Fixed, Flags, Func, IdList,
+    Member, MemberKind, ModifierKind, Param, PatId, PatKind, Span, StmtId, StmtKind, TypeNodeId,
+    TypeParamId, end_of_expr, find_runtime_constructor, find_super_call_statement, has_body,
+    is_nested_namespace, is_parenthesized, modifier_text, parameter_properties, start_of,
 };
 use crate::session::Arena;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
+use std::cmp::Reverse;
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 struct TypeRange {
     start: u32,
     end: u32,
-    // So many bytes stand in its place that the source lacks. A range either removes or adds.
     added: u32,
-    // How much shorter the text in front of it is than the source in front of it.
     removed_before: i64,
 }
 
@@ -23,7 +23,6 @@ impl TypeRange {
     }
 }
 
-/// A part of the source in whose place `text` stands.
 pub struct ReplacedText {
     pub start: u32,
     pub end: u32,
@@ -47,6 +46,7 @@ impl TypeRanges {
         self.ranges.is_empty()
     }
 
+    #[cfg(any(test, feature = "test_support"))]
     pub fn remove_from(&self, text: &[u8]) -> Vec<u8> {
         let mut kept = Vec::with_capacity(text.len());
         let mut at = 0;
@@ -85,6 +85,10 @@ impl TypeRanges {
         )
     }
 
+    pub fn map_start(&self, offset: u32) -> u32 {
+        self.map_end(offset)
+    }
+
     pub fn map_end(&self, offset: u32) -> u32 {
         self.map(
             offset,
@@ -101,37 +105,20 @@ impl TypeRanges {
             None => offset,
         }
     }
-
-    /// Whether the text holds all of this part of the source, byte for byte.
-    pub fn keeps_as_written(&self, from: u32, to: u32) -> bool {
-        let (start, end) = (self.map_offset(from), self.map_offset(to));
-        let next =
-            (self.written_over).partition_point(|(at, text)| at + text.len() as u32 <= start);
-        end - start == to - from && (self.written_over.get(next)).is_none_or(|(at, _)| end <= *at)
-    }
 }
 
-/// The ranges in two or three bytes each, for whoever keeps them as long as the text.
 #[derive(Default, Clone, PartialEq, Eq, Debug)]
 pub struct PackedTypeRanges {
-    // For each range, how far it starts behind the range before it, and its length.
     bytes: Box<[u8]>,
     removed: i64,
     written_over: Box<[(u32, Box<[u8]>)]>,
 }
 
 impl PackedTypeRanges {
-    /// For each range, how many bytes are kept between it and the range before it, and its length: seven bits a byte, the lowest first.
-    /// No length: how many bytes the text has there that the source lacks follows.
-    pub fn as_bytes(&self) -> &[u8] {
-        &self.bytes
-    }
-
     pub fn kept_len(&self, len_of_text: usize) -> usize {
         (len_of_text as i64 - self.removed) as usize
     }
 
-    /// `kept` has room for `kept_len(text.len())`.
     pub fn remove_from(&self, text: &[u8], kept: &mut [u8]) {
         let (mut bytes, mut at, mut written) = (&self.bytes[..], 0, 0);
         let mut keep = |part: &[u8], added_behind: usize| {
@@ -210,6 +197,7 @@ pub fn find_type_ranges_beside(file: &File<'_>, mut replaced: Vec<ReplacedText>)
     if !file.is_js {
         finder.run();
     }
+    finder.leave_what_stands_in(&mut replaced);
     replaced.append(&mut finder.replaced);
     for part in &replaced {
         finder.add(part.start + part.text.len() as u32, part.end);
@@ -241,18 +229,16 @@ pub fn find_type_ranges_beside(file: &File<'_>, mut replaced: Vec<ReplacedText>)
         }
     }
     removed.retain(|range| range.0 < range.1);
-    // What stands in a part that is removed goes with it.
     let is_kept = |part: &ReplacedText| {
         let start = part.start;
         let end = part.end.min(start + part.text.len() as u32);
-        // Text that is only added belongs to what stands in front of it.
         let next =
             removed.partition_point(|range| range.1 < start || (range.1 == start && start < end));
         !part.text.is_empty() && removed.get(next).is_none_or(|range| end <= range.0)
     };
     let mut replaced: Vec<ReplacedText> = replaced.into_iter().filter(is_kept).collect();
-    replaced.sort_unstable_by_key(|part| part.start);
-    replaced.dedup_by_key(|part| part.start);
+    replaced.sort_unstable_by_key(|part| (part.start, part.end));
+    replaced.dedup_by_key(|part| (part.start, part.end));
     let added = replaced.iter().filter_map(|part| {
         let added = (part.text.len() as u32).checked_sub(part.end - part.start)?;
         (added > 0).then_some((part.end, part.end, added))
@@ -277,9 +263,13 @@ pub fn find_type_ranges_beside(file: &File<'_>, mut replaced: Vec<ReplacedText>)
         ranges: ranges.collect(),
         written_over: Vec::new(),
     };
-    let written_over = replaced
-        .into_iter()
-        .map(|part| (ranges.map_offset(part.start), part.text));
+    let written_over = replaced.into_iter().map(|part| {
+        let at = match part.start == part.end {
+            true => ranges.map_offset(part.start),
+            false => ranges.map_start(part.start),
+        };
+        (at, part.text)
+    });
     ranges.written_over = written_over.collect();
     ranges
 }
@@ -291,6 +281,7 @@ struct Finder<'a, 's> {
     replaced: Vec<ReplacedText>,
     ends_of_statements: Vec<u32>,
     comments_passed: RefCell<Vec<u32>>,
+    comments_before_last_asked: Cell<usize>,
 }
 
 fn is_part_of_name(byte: u8) -> bool {
@@ -314,6 +305,7 @@ impl<'a, 's> Finder<'a, 's> {
             replaced: Vec::new(),
             ends_of_statements: Vec::new(),
             comments_passed: RefCell::default(),
+            comments_before_last_asked: Cell::new(0),
         }
     }
 
@@ -321,10 +313,25 @@ impl<'a, 's> Finder<'a, 's> {
         let file = self.file;
         for index in 0..file.stmts.len() {
             let statement = StmtId(index as u32);
-            // The `b` of `namespace a.b` goes with `a` or stays with it.
             if file.is_erased_statement(statement) && !is_nested_namespace(file, statement) {
                 let end = self.end_of_erased_statement(file[statement].loc.end as usize);
                 self.add_whole(file[statement].start, end as u32);
+            }
+            let bodies = match file[statement].kind {
+                StmtKind::If { yes, no, .. } => [yes, no],
+                StmtKind::For { body, .. }
+                | StmtKind::ForIn { body, .. }
+                | StmtKind::ForOf { body, .. }
+                | StmtKind::While { body, .. }
+                | StmtKind::DoWhile { body, .. }
+                | StmtKind::Labeled { body, .. }
+                | StmtKind::With { body, .. } => [body, StmtId::NONE],
+                _ => continue,
+            };
+            for body in bodies.into_iter().filter_map(StmtId::some) {
+                if file.is_erased_statement(body) {
+                    self.ends_of_statements.push(file[body].start);
+                }
             }
         }
         for declaration in file.var_decls.iter() {
@@ -340,8 +347,15 @@ impl<'a, 's> Finder<'a, 's> {
         for class in file.classes.iter() {
             self.add_class(class);
         }
-        for member in file.members.iter() {
-            self.add_member(member);
+        if !file.modifiers_of_params.is_empty() {
+            for index in 0..file.classes.len() {
+                self.add_parameter_properties(ClassId(index as u32));
+            }
+        }
+        for class in file.classes.iter() {
+            for member in &file.members[class.members.range()] {
+                self.add_member(member);
+            }
         }
         for specifier in file.import_specs.iter().filter(|it| it.type_only) {
             self.add_list_element(specifier.start, specifier.end);
@@ -366,6 +380,39 @@ impl<'a, 's> Finder<'a, 's> {
                 self.add(modifier.pos, self.skip_spaces(end) as u32);
             }
         }
+    }
+
+    fn leave_what_stands_in(&mut self, replaced: &mut Vec<ReplacedText>) {
+        if replaced.is_empty() {
+            return;
+        }
+        replaced.sort_unstable_by_key(|part| {
+            let is_written_over = part.start < part.end;
+            (part.start, is_written_over, Reverse(part.end))
+        });
+        replaced.dedup_by_key(|part| (part.start, part.end));
+        let mut outermost: Vec<ReplacedText> = Vec::with_capacity(replaced.len());
+        for part in replaced.drain(..) {
+            match outermost.last_mut() {
+                Some(last) if part.start < last.end => {}
+                Some(last) if part.end == last.end => {
+                    last.text = [&last.text[..], &part.text[..]].concat().into();
+                }
+                _ => outermost.push(part),
+            }
+        }
+        *replaced = outermost;
+        let stands_in_part = |start: u32, end: u32| {
+            let behind = replaced.partition_point(|part| part.start < end);
+            let last = behind.checked_sub(1).map(|last| &replaced[last]);
+            last.is_some_and(|part| part.start <= start && end <= part.end)
+        };
+        self.found
+            .retain(|&(start, end)| !stands_in_part(start, end));
+        self.replaced
+            .retain(|part| !stands_in_part(part.start, part.end));
+        self.ends_of_statements
+            .retain(|&at| !stands_in_part(at, at + 1));
     }
 
     fn end_of_erased_statement(&self, end: usize) -> usize {
@@ -412,17 +459,36 @@ impl<'a, 's> Finder<'a, 's> {
     fn skip_trivia(&self, mut at: usize) -> usize {
         loop {
             at = self.skip_spaces(at);
-            let rest = self.text.get(at..).unwrap_or_default();
-            if rest.starts_with(b"//") {
-                let length = rest.iter().position(|&byte| is_line_break(byte));
-                at += length.unwrap_or(rest.len());
-            } else if rest.starts_with(b"/*") {
-                let length = bun_core::strings::index_of(&rest[2..], b"*/");
-                at += length.map_or(rest.len(), |length| length + 4);
-            } else {
+            if self.byte(at) != b'/' {
                 return at;
             }
+            let rest = self.text.get(at..).unwrap_or_default();
+            match self.byte(at + 1) {
+                b'/' => {
+                    let length = rest.iter().position(|&byte| is_line_break(byte));
+                    at += length.unwrap_or(rest.len());
+                }
+                b'*' => {
+                    let length = bun_core::strings::index_of(&rest[2..], b"*/");
+                    at += length.map_or(rest.len(), |length| length + 4);
+                }
+                _ => return at,
+            }
         }
+    }
+
+    fn count_comments_before(&self, at: usize) -> usize {
+        let comments = &self.file.comments;
+        let starts_before = |comment: &Comment| (comment.pos as usize) < at;
+        let last_asked = self.comments_before_last_asked.get();
+        let last = last_asked.checked_sub(1).map(|last| &comments[last]);
+        let next = comments.get(last_asked);
+        if last.is_none_or(starts_before) && !next.is_some_and(starts_before) {
+            return last_asked;
+        }
+        let before = comments.partition_point(starts_before);
+        self.comments_before_last_asked.set(before);
+        before
     }
 
     fn skip_trivia_back(&self, mut at: usize) -> usize {
@@ -431,7 +497,7 @@ impl<'a, 's> Finder<'a, 's> {
             while is_space(self.byte_before(at)) {
                 at -= 1;
             }
-            let before = comments.partition_point(|comment| (comment.pos as usize) < at);
+            let before = self.count_comments_before(at);
             match before.checked_sub(1) {
                 Some(last) if comments[last].end as usize >= at => {
                     self.comments_passed.borrow_mut().push(last as u32);
@@ -461,7 +527,7 @@ impl<'a, 's> Finder<'a, 's> {
 
     fn add_whole(&mut self, start: u32, end: u32) {
         self.add(start, end);
-        let end = end as usize;
+        let end = self.skip_trivia(end as usize);
         if self.is_followed_by_one_of(end, b"([`+-/<*") || self.is_followed_by_operator_word(end) {
             self.ends_of_statements.push(start);
         }
@@ -502,7 +568,10 @@ impl<'a, 's> Finder<'a, 's> {
             return;
         };
         let name_end = self.file[name].end as usize;
-        let mark = self.skip_trivia(name_end);
+        let mark = match has_mark {
+            true => self.skip_trivia(name_end),
+            false => name_end,
+        };
         let mark_end = match has_mark && matches!(self.byte(mark), b'?' | b'!') {
             true => mark + 1,
             false => name_end,
@@ -565,6 +634,49 @@ impl<'a, 's> Finder<'a, 's> {
         self.add(start as u32, end);
     }
 
+    fn add_parameter_properties(&mut self, class: ClassId) {
+        let file = self.file;
+        let Some(constructor) = find_runtime_constructor(file, class) else {
+            return;
+        };
+        let constructor = file[constructor].func;
+        let (mut fields, mut stores) = (Vec::new(), Vec::new());
+        for parameter in parameter_properties(file, constructor) {
+            let name = file[file[parameter].pat];
+            let Some(name) = self.text.get(name.pos as usize..name.end as usize) else {
+                return;
+            };
+            fields.extend([name, b"; "].concat());
+            stores.extend([&b" this."[..], name, b" = ", name, b";"].concat());
+        }
+        if fields.is_empty() {
+            return;
+        }
+        let bodies = &file.body_starts;
+        let Ok(body) = bodies.binary_search_by_key(&constructor.0, |body| body.0.0) else {
+            return;
+        };
+        let super_call = match file[class].extends.is_some() {
+            true => find_super_call_statement(file, constructor),
+            false => None,
+        };
+        let stores_at = match super_call {
+            Some((statement, _)) => file[statement].loc.end,
+            None => bodies[body].1 + 1,
+        };
+        if super_call.is_some() && self.byte_before(stores_at as usize) != b';' {
+            stores.insert(0, b';');
+        }
+        let first_member = file.members[file[class].members.start as usize];
+        for (at, text) in [(first_member.start, fields), (stores_at, stores)] {
+            self.replaced.push(ReplacedText {
+                start: at,
+                end: at,
+                text: text.into_boxed_slice(),
+            });
+        }
+    }
+
     fn add_member(&mut self, member: &Member) {
         let has_no_code = match member.kind {
             MemberKind::CallSignature
@@ -576,6 +688,19 @@ impl<'a, 's> Finder<'a, 's> {
         if has_no_code || member.flags.intersects(Flags::AMBIENT | Flags::ABSTRACT) {
             self.add_whole(member.start, member.loc.end);
             return;
+        }
+        let file = self.file;
+        for modifier in &file.modifiers[member.modifiers.range()] {
+            let ModifierKind::Keyword(flag) = modifier.kind else {
+                break;
+            };
+            if !TYPE_MODIFIERS.contains(flag) {
+                break;
+            }
+            let end = modifier.pos as usize + modifier_text(flag).len();
+            if self.is_followed_by_one_of(end, b"[*") || self.is_followed_by_operator_word(end) {
+                self.ends_of_statements.push(modifier.pos);
+            }
         }
         let annotation = self.find_annotation(member.ty);
         if let Some((start, end)) = annotation {
@@ -600,6 +725,9 @@ impl<'a, 's> Finder<'a, 's> {
             name_end = self.skip_trivia_back(name_end - 1);
         }
         let before = self.text.get(..name_end).unwrap_or_default();
+        if !matches!(before.last(), Some(b'c' | b't')) {
+            return;
+        }
         let is_named_like_modifier = [&b"static"[..], b"get", b"set"].iter().any(|&word| {
             (before.strip_suffix(word))
                 .is_some_and(|front| !front.last().is_some_and(|&byte| is_part_of_name(byte)))
@@ -674,13 +802,56 @@ impl<'a, 's> Finder<'a, 's> {
         self.add_angle_brackets(self.file[first].start, self.file[last].end);
     }
 
+    fn find_operand_that_binds_looser(&self, mut operand: ExprId, end: usize) -> Option<ExprId> {
+        let behind = match self.text.get(self.skip_trivia(end)..).unwrap_or_default() {
+            [b'*', b'*', ..] => 5,
+            [b'*' | b'/' | b'%', ..] => 4,
+            [b'+' | b'-', ..] => 3,
+            [b'<', b'<', ..] | [b'>', b'>', ..] => 2,
+            _ => return None,
+        };
+        while !is_parenthesized(self.file, operand)
+            && let ExprKind::As { expr, .. }
+            | ExprKind::Satisfies { expr, .. }
+            | ExprKind::AsConst(expr) = self.file[operand].kind
+        {
+            operand = expr;
+        }
+        let ExprKind::Binary { op, .. } = self.file[operand].kind else {
+            return None;
+        };
+        let own = match op {
+            BinOp::Pow => 4,
+            BinOp::Mul | BinOp::Div | BinOp::Rem => 4,
+            BinOp::Add | BinOp::Sub => 3,
+            BinOp::Shl | BinOp::Shr | BinOp::UShr => 2,
+            _ => 1,
+        };
+        (own < behind && !is_parenthesized(self.file, operand)).then_some(operand)
+    }
+
     fn add_around_operand(&mut self, expression: &Expr, operand: ExprId) {
         let operand_start = start_of(self.file, operand);
         let is_prefix =
             self.byte(expression.pos as usize) == b'<' && expression.pos < operand_start;
         if !is_prefix {
             let start = end_of_expr(self.file, operand);
-            self.add(start, expression.end);
+            match self.find_operand_that_binds_looser(operand, expression.end as usize) {
+                Some(looser) => {
+                    let open = start_of(self.file, looser);
+                    self.replaced.push(ReplacedText {
+                        start: open,
+                        end: open,
+                        text: Box::new(*b"("),
+                    });
+                    self.replaced.push(ReplacedText {
+                        start,
+                        end: expression.end,
+                        text: Box::new(*b")"),
+                    });
+                }
+                None => self.add(start, expression.end),
+            }
             if self.is_followed_by_one_of(expression.end as usize, b"([`") {
                 self.ends_of_statements.push(start);
             }

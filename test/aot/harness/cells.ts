@@ -3,7 +3,6 @@ import { bunExe, tempDir } from "harness";
 import { join } from "node:path";
 import { describe, test } from "../supported";
 import { run } from "./run";
-import { partOfGrid } from "./ways";
 
 /**
  * One small function that logs what it sees. `row` is what the program's loop is handed beside its name and description.
@@ -36,21 +35,16 @@ async function printedByPlainBun(dir: string, lines: number) {
 
 /**
  * Every cell prints in an executable what it prints under `bun run`, or the line that is stored for it.
- * A table is a tool for finding faults: in front of a merge one cell in `oneIn` runs, another part each day, and every cell on a bench.
- * `always`: cells that run every day, because a fault planted in the compiler (`--aot-sabotage`) turns them wrong: a net that can ring.
+ * A table is a tool for finding faults. It runs on a bench, every cell of it.
  */
 export function testCells(
   title: string,
-  all: Cell[],
+  cells: Cell[],
   atOnce: number,
   helpers: string,
   call: string,
   stored?: Map<string, string>,
-  oneIn = 20,
-  always: string[] = [],
 ) {
-  const part = new Set(partOfGrid(title, all, oneIn, cell => cell.id));
-  const cells = all.filter(cell => part.has(cell) || always.includes(cell.id));
   const programs = Array.from({ length: Math.ceil(cells.length / atOnce) }, (_, i) =>
     cells.slice(i * atOnce, i * atOnce + atOnce),
   );

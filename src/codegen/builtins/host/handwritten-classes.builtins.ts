@@ -1,10 +1,11 @@
 import * as b from "bun-builtins-table";
 import { methodsOfSubtleCrypto } from "./methods-of-subtle-crypto.ts";
-import { answering, promiseOf } from "./native-code.ts";
+import { cookiesOfRequestsCell, parametersOfRequestsCell, parametersOfRoutesWithoutAnyCell } from "./native-cells.ts";
+import { answering, constructing, promiseOf } from "./native-code.ts";
 
 const externalState = ["ExternalState"];
 const objectOrUndefined = b.union(b.object, b.undefined);
-const convertedToCharacters = [b.readAsCharacters, b.runs("ToPrimitive")];
+const convertedToCharacters = [b.runs("ToPrimitive")];
 const runsCodeOfOperands = {
   capability: "js",
   throws: true,
@@ -17,7 +18,7 @@ const webCoreClass = (name: string, instanceCppClass: b.CppClassRef, options: b.
 
 const lockedNativeValue = (structureSlot: string): b.ClassOptions => ({
   instanceStructureCppExpression: `globalObject->domStructure(WebCore::DOMStructureSlot::${structureSlot})`,
-  lockedObjects: ["prototype"],
+  lockedMembers: ["prototype"],
   stateHeap: "ExternalState",
 });
 
@@ -55,34 +56,81 @@ export default b.declarations(
       "globalObject->m_JSBunRequestStructure.getInitializedOnMainThread(globalObject)->storedPrototypeObject()",
     instanceStructureCppExpression: "globalObject->m_JSBunRequestStructure.getConcurrently()",
     hasConstructor: false,
-    lockedObjects: ["prototype"],
+    lockedMembers: ["prototype"],
     types: [b.viewType("bun.BunRequest")],
     proto: {
       clone: {
         returns: b.instance("BunRequest").fresh,
         capability: "js",
         throws: true,
-        uses: { this: [b.readsContents(), b.runsTransitively("OwnKeys", "OwnValues")] },
+        // A map of cookies that the request has made is copied for the clone.
+        uses: {
+          this: [
+            b.readsContents(),
+            b.runsTransitively("OwnKeys", "OwnValues"),
+            b.createdIn(b.instance("Bun.CookieMap").fresh, b.nativeCell(cookiesOfRequestsCell)),
+          ],
+        },
         reads: externalState,
         writes: externalState,
         implementation: b.hostCall,
       },
+      // JSBunRequest.cpp: the map is made of the header at the first read and kept in the request. Another receiver gets undefined.
       cookies: {
         this: b.any,
-        getter: objectOrUndefined,
+        getter: b.union(b.instance("Bun.CookieMap"), b.undefined),
         capability: "js",
         throws: true,
         runsOnlyOperandCode: true,
-        uses: { this: [b.runs(b.named("headers"))] },
+        uses: {
+          this: [
+            b.runs(b.named("headers")),
+            b.createdIn(b.instance("Bun.CookieMap").fresh, b.nativeCell(cookiesOfRequestsCell)),
+            b.returnedFrom(cookiesOfRequestsCell),
+          ],
+        },
         reads: externalState,
         writes: externalState,
         implementation: b.generic,
       },
+      // The host makes the object with the request, or at the first read, and keeps it in the request. Another receiver gets undefined.
       params: {
         this: b.any,
         getter: objectOrUndefined,
         capability: "heap",
-        uses: { this: b.inspected },
+        uses: {
+          this: [b.returnedFrom(parametersOfRequestsCell), b.returnedFrom(parametersOfRoutesWithoutAnyCell)],
+        },
+        reads: externalState,
+        writes: externalState,
+        implementation: b.generic,
+      },
+    },
+  }),
+
+  // ServerRouteList.cpp: a string under each name of the route. Object.prototype is not above it: createJSBunRequestParamsPrototype()
+  // makes an empty object below an object without a prototype that bears the tag, of which the table says nothing. A route without names gets an object without a prototype.
+  b.namespace("%RequestParamsTag%", {}),
+  b.inherits("%RequestParamsTag%", null),
+  b.namespace("%RequestParamsPrototype%", {}),
+  b.inherits("%RequestParamsPrototype%", "%RequestParamsTag%"),
+  b.hostObject(parametersOfRequestsCell, { prototype: "%RequestParamsPrototype%", otherNames: b.string }),
+  b.hostObject(parametersOfRoutesWithoutAnyCell, { prototype: null }),
+
+  // JSFFICallback.cpp of JavaScriptCore: what Bun.FFI.callback() makes. bun:ffi lays each below JSCallback.prototype.
+  // createPrototype(): an object below Object.prototype with `close` and nothing else. Of the own properties of an instance, `ptr` and `threadsafe`, the table says nothing.
+  b.class("%FFICallback%", {
+    hasConstructor: false,
+    // bun:ffi gives every one another prototype.
+    isNeverPristine: true,
+    prototypeListsAllMembers: true,
+    stateHeap: "ExternalState",
+    proto: {
+      // A callback that is closed has no address any more. On another receiver it throws.
+      close: {
+        capability: "heap",
+        throws: true,
+        uses: { this: [b.definesName(["ptr"], b.strictNull)] },
         reads: externalState,
         writes: externalState,
         implementation: b.generic,
@@ -144,8 +192,15 @@ export default b.declarations(
       },
     ],
   }),
-  ["CryptoKey", "URLPattern"].flatMap(path => constructorOnly(path)),
-  ["Bun.Cookie", "Bun.CookieMap"].flatMap(path => [...constructorOnly(path), ...b.inherits(path, "Object.prototype")]),
+  constructorOnly("CryptoKey"),
+  // JSURLPattern.cpp: the constructor converts a string or the members of a dictionary, and makes the wrapper of a new URLPattern.
+  constructorOnly("URLPattern", { construct: constructing(b.instance("URLPattern").fresh, b.hostCall) }),
+  // JSURLPatternPrototype: an object below Object.prototype that bears the tag of the class. Of its members the table says nothing.
+  b.static("URLPattern.prototype", b.property(b.instance("URLPattern"))),
+  constructorOnly("Bun.Cookie"),
+  b.class("Bun.CookieMap", { instanceCppClass: b.cppClass("JSCookieMap"), ...lockedNativeValue("JSCookieMap") }),
+  // Both constructors stand below Object.prototype.
+  ["Bun.Cookie", "Bun.CookieMap"].flatMap(path => b.inherits(path, "Object.prototype")),
 
   // JSCookie.cpp: they make strings of their operands, and `from` reads the members of its options.
   b.static("Bun.Cookie.parse", {
@@ -168,7 +223,7 @@ export default b.declarations(
     writes: externalState,
     implementation: b.generic,
   }),
-  // FormData.bind.ts: a Blob, a string or bytes, and it throws for anything else. Parsing runs no JavaScript.
+  // FormData.bind.ts: a Blob, a string or bytes, and it throws for anything else.
   b.static("FormData.from", {
     ...runsCodeOfOperands,
     args: { input: b.any.optional, boundary: b.any.optional },
@@ -189,7 +244,7 @@ export default b.declarations(
       lengthOrAdditionalAlgorithm: [b.everything],
     },
   }),
-  // ObjectURLRegistry.bind.ts: they throw for an operand of another type and convert nothing. The registry keeps the bytes and not the Blob.
+  // ObjectURLRegistry.bind.ts: they throw for an operand of another type. The registry keeps the bytes and not the Blob.
   b.static("URL.createObjectURL", {
     args: { object: b.any.optional },
     returns: b.string,

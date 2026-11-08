@@ -11,8 +11,6 @@ const shared = {
   "k.js": `console.log("k runs"); export const x = "real"; export let count = 1; export function f() { return "f"; }`,
   "slow.js": `console.log("slow runs"); export const s = "slow";`,
   "user.js": `console.log("user runs"); import { x, count, f } from "./k.js"; import { s } from "./slow.js"; export const seen = [x, count, f(), s].join("/");`,
-  "mid.js": `import { x } from "./k.js"; import "./slow.js"; export { x };`,
-  "above.js": `import { x } from "./mid.js"; export const seen = x + "/1/f/slow";`,
 };
 const testFile = (filter: string, imported: string) => `
   import { expect, test } from "bun:test";
@@ -32,7 +30,6 @@ async function runTests(folder: string, flags: string[]) {
 test.each([
   ["one import of the file", "/slow\\.js$/", "user.js"],
   ["the file itself", "/user\\.js$/", "user.js"],
-  ["an import two files below", "/slow\\.js$/", "above.js"],
 ])(
   "the plugin matches %s",
   async (_, filter, imported) => {

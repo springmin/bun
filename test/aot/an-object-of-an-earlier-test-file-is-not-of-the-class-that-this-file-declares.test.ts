@@ -132,7 +132,6 @@ async function runTests(directory: string, words: string | undefined, ...flags: 
 for (const [way, words] of [
   ["as the runner divides it", undefined],
   ["as one program", "TestRunLayers:0"],
-  ["over two layers, both files in one process", "TestRunLayers:2,TestRunPartFiles:3"],
 ] as const) {
   test(`an object of an earlier test file is not of the class that this file declares, ${way}`, async () => {
     using dir = tempDir("aot-an-object-of-an-earlier-test-file-is-not-of-the-class", files);

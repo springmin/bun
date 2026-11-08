@@ -70,13 +70,6 @@ test.each([[["test"]], [["test", "--aot"]]])("in a test run: bun %j", async comm
   expect({ seen: seenIn(stdout + stderr), exitCode }).toEqual({ seen: answers, exitCode: 0 });
 });
 
-test("in a test run over two layers", async () => {
-  using dir = tempDir("aot-package-worker-file", files);
-  const env = { ...bunEnv, BUN_DEBUG_TEST_AOT_WORDS: "TestRunLayers:2" };
-  const { stdout, stderr, exitCode } = await run([bunExe(), "test", "--aot", "--timeout=60000"], String(dir), env);
-  expect({ seen: seenIn(stdout + stderr), exitCode }).toEqual({ seen: answers, exitCode: 0 });
-});
-
 // The Worker of such a package starts from a file that nothing imports, which the build leaves out. The folder and the URL in the path lead to the package's own index.js.
 test("a part of the path is not the file", async () => {
   using dir = tempDir("aot-package-worker-file", {
@@ -102,7 +95,8 @@ test("both load", () => expect([typeof byFolder.start, typeof byUrl.start]).toEq
     taken: stderr.split("\n").filter(line => line.includes("files that Workers start from")),
     exitCode,
   }).toEqual({
-    taken: [],
+    // The two files that the whole paths name, and nothing for "lib" or any other part.
+    taken: ["AOT load goes on | with 2 more files that Workers start from"],
     exitCode: 0,
   });
 });

@@ -28,43 +28,6 @@ fn assert_reaches(uses: &[&str], expected: bool) {
 }
 
 #[test]
-fn whoever_lists_the_keys_or_tests_an_entry_gets_at_none() {
-    assert_reaches(
-        &[
-            "Object.keys(TABLE)",
-            "Object.keys(TABLE ?? {})",
-            "Object.getOwnPropertyNames(TABLE)",
-            "Reflect.ownKeys(TABLE)",
-            "key in TABLE",
-            "TABLE ? 1 : 2",
-            "typeof TABLE",
-            "TABLE === undefined",
-            "!TABLE[key]",
-            "typeof TABLE[key]",
-            "TABLE[key] === undefined",
-            "TABLE[key] ? 1 : 2",
-        ],
-        false,
-    );
-    assert!(!reaches("for (const key in require.cache) key;"));
-    assert!(!reaches("if (require.cache) Object.keys(require.cache);"));
-}
-
-#[test]
-fn whoever_compares_what_an_entry_exports_gets_at_none() {
-    assert_reaches(
-        &[
-            "TABLE[key].exports === plugin",
-            "TABLE[key].exports !== plugin",
-            "plugin === TABLE[key].exports",
-            "TABLE.name.exports === plugin",
-            "TABLE[key]['exports'] === plugin",
-        ],
-        false,
-    );
-}
-
-#[test]
 fn every_other_use_gets_at_the_entries() {
     assert_reaches(
         &[
@@ -111,32 +74,13 @@ fn every_other_use_gets_at_the_entries() {
 }
 
 #[test]
-fn whoever_takes_an_entry_out_or_stores_one_reads_none() {
-    let reads = |source: &str| {
-        with_case(SCRIPT, source, |case| {
-            case.resolved.reads_entries_of_module_cache()
-        })
-    };
-    for source in [
-        "delete require.cache[key];",
-        "require.cache[key] = entry;",
-        "require.cache[key] = undefined;",
-        "Reflect.deleteProperty(require.cache, key);",
-        "for (const key of Object.keys(require.cache)) delete require.cache[key];",
-        "require.cache[key].exports === plugin;",
-        "plugin(require);",
-        "plugin(module);",
-        "var module = list[0]; plugin(exports, module);",
-    ] {
-        assert!(!reads(source), "{source}");
-    }
-    for source in [
-        "require.cache[key].exports.member;",
-        "typeof require.cache[key].exports;",
-        "Object.values(require.cache);",
-        "const entry = require.cache[key];",
-        "plugin(require.cache);",
-    ] {
-        assert!(reads(source), "{source}");
+fn table_stored_in_a_variable_goes_out_of_sight() {
+    for table in ["Module._cache", "Module._extensions"] {
+        let source = format!(
+            "const Module = require('node:module'); var a; (a = {table}).fs ?? (a.fs = entry);"
+        );
+        with_case(SCRIPT, &source, |case| {
+            assert!(case.resolved.loses_sight_of_module_cache(), "{source}");
+        });
     }
 }

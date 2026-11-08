@@ -5,6 +5,7 @@
 // An edge from x to y, in an ES module:
 //   S `import "./y"`   N a name of y read while x runs   L a name of y read after everything   E the default import
 //   R `export * from`  X `export { name } from`          D `import()` that nobody waits for    A `await import()`
+//   Q `require()`      I `import()` that says how it settles, or, after 50 ms, that it has not
 // and in a CommonJS module:
 //   Q `require()`, a member read at once   q the member read after everything   Z `const { name } = require()`
 //   F `require()` itself after everything  D `import()` that nobody waits for
@@ -21,6 +22,7 @@ export const tables = [
   "three-calls",
   "continuations",
   "commonjs",
+  "requires",
 ] as const;
 export type Table = (typeof tables)[number];
 export type Cell = { id: string; what: string; entry: string; files: Record<string, string> };
@@ -41,6 +43,8 @@ function esModule({ name, edges, waits, fails }: Module) {
     if (kind === "X") head.push(`export { v${to} } from "./${file}";`);
     if (kind === "D") body.push(`keep(import("./${file}"));`);
     if (kind === "A") body.push(`await import("./${file}");`);
+    if (kind === "Q") body.push(`require("./${file}");`);
+    if (kind === "I") body.push(`keep(told(import("./${file}"), "${name}${to}"));`);
   }
   return [
     ...head,
@@ -93,6 +97,7 @@ const ways: Record<string, (x: string, y: string, gap: string) => string> = {
   thens: (x, y, gap) =>
     `const p = keep(import(${x})); ${gap}const q = keep(import(${y})); ${settles("p", "x")} ${settles("q", "y")} await Promise.allSettled([p, q]);`,
   one: x => `const m = await import(${x}); log("x+" + Object.keys(m));`,
+  required: x => `const m = require(${x}); log("x+" + Object.keys(m));`,
   twice: x =>
     `const p = keep(import(${x})), q = keep(import(${x})); ${settles("p", "p")} ${settles("q", "q")} await Promise.allSettled([p, q]); log("one object: " + ((await p) === (await q)));`,
   tick: (x, y) =>
@@ -197,6 +202,7 @@ function graphsOfESModules(table: Exclude<Table, "commonjs" | "continuations">, 
     throws: "fl",
     four: "fr",
     "three-calls": "tc",
+    requires: "rq",
   };
   const cells: Cell[] = [];
   const add = (all: string[], kinds: string[], waits: string, way: string, fails = "") => {
@@ -246,6 +252,14 @@ function graphsOfESModules(table: Exclude<Table, "commonjs" | "continuations">, 
       if (reached.size < 4 || waitsForItself(all, kindOf)) continue;
       seen.add(key);
       for (const way of ["all", "late", "thens"]) add(all, kinds, "", way);
+    }
+    return cells;
+  }
+
+  if (table === "requires") {
+    for (const kinds of tuples([..."-SQI"], 6)) {
+      if (!kinds.includes("Q") || !kinds.includes("I") || (kinds[1] === "-" && kinds[3] === "-")) continue;
+      for (const way of ["one", "thens", "required"]) add(["a", "b", "c"], kinds, "", way);
     }
     return cells;
   }
@@ -342,6 +356,10 @@ globalThis.tag = s => s;
 globalThis.look = m => log("{" + Object.keys(m).map(k => { try { return k + "=" + m[k]; } catch (e) { return k + "!" + e.name; } }) + "}");
 globalThis.log = s => { lines.push(s); };
 globalThis.keep = p => { p.catch(() => {}); pending.push(p); return p; };
+globalThis.told = (p, who) => new Promise(done => {
+  const timer = setTimeout(() => { log(who + "?"); done(); }, 50);
+  p.then(() => log(who + "+"), e => log(who + "!" + e.name)).then(() => { clearTimeout(timer); done(); });
+});
 ` + cells.map(cell => `async function ${cell.id}() { ${cell.entry} }\n`).join("");
   files[entry] = functions + (table === "commonjs" ? `(async () => {\n${loop}})();\n` : loop);
   files[testFile] =

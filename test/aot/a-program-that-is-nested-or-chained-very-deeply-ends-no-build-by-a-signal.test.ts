@@ -5,7 +5,6 @@
 import { expect } from "bun:test";
 import { bunEnv, bunExe, tempDir } from "harness";
 import { join } from "node:path";
-import { partOfGrid } from "./harness/ways";
 import { test } from "./supported";
 
 const rows = (count: number, row: (index: number) => string) =>
@@ -29,6 +28,12 @@ const shapes: Record<string, [string, (n: number) => string]> = {
   ],
   "blocks": ["js", n => `${"{".repeat(n)}console.log(1);${"}".repeat(n)}`],
   "ifs": ["js", n => `let c = 1;\n${"if (c) ".repeat(n)}console.log(c);`],
+  "loops": ["js", n => `let c = 0;\n${"while (c) ".repeat(n)}c = 0;\nconsole.log(c);`],
+  "loops round a sum": [
+    "js",
+    n =>
+      `let left = 0;\nfunction more() { return left-- > 0; }\nfunction f() {\n  let sum = 0;\n  ${"while (more()) ".repeat(n)}sum += 1;\n  return sum;\n}\nconsole.log(f());`,
+  ],
   "arrow functions": ["js", n => `const x = ${"() => ".repeat(n)}0;\nconsole.log(typeof x);`],
   "functions": ["js", n => `${"function f() { ".repeat(n)}${"}".repeat(n)}\nconsole.log(typeof f);`],
   "members": ["js", n => `const a = {}; a.b = a;\nconst x = a${".b".repeat(n)};\nconsole.log(x === a);`],
@@ -102,8 +107,13 @@ const isParsedInALoop = new Set(["members", "optional members", "fluent calls", 
 const shallow = 500;
 // Far beyond where any shape that nests is refused today: between 3,000 and 54,000 levels on Linux x64.
 const deep = 200_000;
-// At `deep` the parser is the first to give up. What it still bears is the deepest that the walks behind it meet, and they bear less.
-const between = [4_000, 8_000, 16_000, 32_000, 64_000];
+// It is compiled in full, which at `deep` takes twenty seconds of processor time.
+// It is checked at `deep` and built at a depth at which every fault of this kind so far would have shown.
+const builtLessDeep: Record<string, number> = {
+  "callers": 50_000,
+  // The front end bears it, and the engine follows the sum from the head of each loop to the head around it.
+  "loops round a sum": 3_000,
+};
 
 test.concurrent.each(Object.entries(shapes))(
   "%s",
@@ -111,7 +121,8 @@ test.concurrent.each(Object.entries(shapes))(
     using dir = tempDir("aot-deep-programs", {
       "package.json": `{ "name": "p" }`,
       [`shallow.${extension}`]: program(shallow) + "\n",
-      [`deep.${extension}`]: program(deep) + "\n",
+      [`deep.${extension}`]: program(builtLessDeep[name] ?? deep) + "\n",
+      ...(name in builtLessDeep ? { [`checked.${extension}`]: program(deep) + "\n" } : {}),
     });
     const cwd = String(dir);
     const plain = await ended([bunExe(), `./shallow.${extension}`], cwd);
@@ -139,7 +150,10 @@ test.concurrent.each(Object.entries(shapes))(
       });
     if (refused.exitCode !== 0 && !isParsedInALoop.has(name)) expect(refused.stderr).toMatch(saysWhere);
 
-    const checked = await ended([bunExe(), "check", `./deep.${extension}`], cwd);
+    const checked = await ended(
+      [bunExe(), "check", `./${name in builtLessDeep ? "checked" : "deep"}.${extension}`],
+      cwd,
+    );
     expect(checked.signal).toBeNull();
     if (checked.exitCode !== 0)
       expect({ exitCode: checked.exitCode, said: checked.stdout + checked.stderr }).toEqual({
@@ -150,17 +164,30 @@ test.concurrent.each(Object.entries(shapes))(
   600_000,
 );
 
+// At `deep` the parser is the first to give up. What it still bears is the deepest that the walks behind it meet, and they bear less.
+// Thirteen shapes once ended a test run by one panic, where the parser bore a file and the binder did not: each is here at every depth at which it did so on Linux x64.
 // The files belong to the run and no test loads them: what the engine's own parser makes of them is another matter.
-// Thirteen shapes once ended the run by one panic, each at a depth of its own: three of them are in every run, one for each of those depths on Linux x64.
-const onceEndedARun = new Set(["function types", "blocks", "casts"]);
-test("the depths in between, as the files of one test run", async () => {
-  const all = Object.entries(shapes);
-  const others = all.filter(([name]) => !onceEndedARun.has(name));
-  const drawn = partOfGrid("deep shapes as the files of a test run", others, 6, ([name]) => name);
+const onceEndedARun: Record<string, number[]> = {
+  "object literals": [8_000],
+  "arrow functions": [8_000],
+  "functions": [8_000],
+  "function types": [8_000, 16_000],
+  "blocks": [16_000, 32_000],
+  "fluent calls": [16_000, 32_000, 64_000],
+  "optional members": [16_000, 32_000, 64_000],
+  "members": [32_000, 64_000],
+  "casts": [32_000, 64_000],
+  "ternaries": [32_000],
+  "nots": [32_000],
+  "assignments": [32_000],
+  "conditional types": [32_000],
+};
+test("the shapes that once ended a test run, as the files of one", async () => {
   const files: Record<string, string> = { "package.json": `{ "name": "p" }` };
   const loads: string[] = [];
-  [...all.filter(([name]) => onceEndedARun.has(name)), ...drawn].forEach(([, [extension, program]], shape) => {
-    for (const n of between) {
+  Object.entries(onceEndedARun).forEach(([name, depths], shape) => {
+    const [extension, program] = shapes[name];
+    for (const n of depths) {
       files[`shape-${shape}/deep-${n}.${extension}`] = program(n) + "\n";
       loads.push(`() => import("./shape-${shape}/deep-${n}.${extension}")`);
     }

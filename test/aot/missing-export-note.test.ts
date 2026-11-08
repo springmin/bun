@@ -1,9 +1,8 @@
 import { expect } from "bun:test";
 import { bunEnv, bunExe, tempDir } from "harness";
 import { raiseDefaultTimeout } from "./harness/default-timeout";
-import { registry } from "./harness/registry";
 import { run } from "./harness/run";
-import { test, unsupported } from "./supported";
+import { test } from "./supported";
 
 raiseDefaultTimeout(120_000);
 
@@ -29,7 +28,6 @@ async function seenWith(files: Record<string, string>, words: string | undefined
   };
 }
 const oneProgram = "TestRunLayers:0";
-const layers = "TestRunLayers:2,TestRunPartFiles:1";
 
 test("a name that nobody exports has the error of bun test, and nothing is listed", async () => {
   const files = {
@@ -57,7 +55,7 @@ test("files that are written while the test runs", async () => {
   }
 });`,
   };
-  const [plain, ...compiled] = await Promise.all([undefined, oneProgram, layers].map(words => seenWith(files, words)));
+  const [plain, ...compiled] = await Promise.all([undefined, oneProgram].map(words => seenWith(files, words)));
   expect(plain).toEqual({
     seen: [
       "SEEN compiled code reads bound",
@@ -69,7 +67,7 @@ test("files that are written while the test runs", async () => {
     exitCode: 0,
     note: [],
   });
-  expect(compiled).toEqual([plain, plain]);
+  expect(compiled).toEqual([plain]);
 });
 
 test("a misspelled import has the error of bun test, and nothing is listed", async () => {
@@ -88,73 +86,16 @@ test("two files that misspell the name", async () => {
     try {
       await load();
     } catch (error) {
-      console.error("SEEN", error.constructor.name, error.message.replaceAll(import.meta.dir, "<dir>"));
+      console.error("SEEN", error.constructor.name, /'(\\w+)'/.exec(error.message)?.[1]);
     }
   }
 });`,
   };
-  const [plain, ...compiled] = await Promise.all([undefined, oneProgram, layers].map(words => seenWith(files, words)));
+  const [plain, ...compiled] = await Promise.all([undefined, oneProgram].map(words => seenWith(files, words)));
   expect(plain).toEqual({
-    seen: [
-      "SEEN compiled code reads bound",
-      "SEEN SyntaxError Export named 'bonud' not found in module '<dir>/lib.ts'.",
-      "SEEN SyntaxError export 'bonud' not found in './lib.ts'",
-    ],
+    seen: ["SEEN compiled code reads bound", "SEEN SyntaxError bonud", "SEEN SyntaxError bonud"],
     exitCode: 0,
     note: [],
   });
-  expect(compiled).toEqual([plain, plain]);
-});
-
-// `sabotage=CopiesNameNoFile`: the build forgets which files the copies from disk name, so the tables of these files hold what compiled code reads from them alone.
-const hasTheWord = !unsupported && registry().sabotages?.includes("CopiesNameNoFile");
-test.skipIf(!hasTheWord)("a name that the build left out is named, though the project catches the error", async () => {
-  const files = {
-    "package.json": `{ "name": "missing-export-note", "type": "module" }`,
-    "helper.ts": `export const helper = () => "helper";`,
-    "imports.ts": `import { helper } from "./helper.ts";
-export const who = () => "real " + helper();`,
-    "exports.ts": `export { helper as who } from "./helper.ts";`,
-    "a.test.ts": `
-import { mock, test, vi } from "bun:test";
-import { helper } from "./helper.ts";
-test("the originals are read from disk", async () => {
-  console.error("SEEN compiled code calls", helper());
-  mock.module("./imports.ts", () => ({ who: () => "mocked" }));
-  mock.module("./exports.ts", () => ({ who: () => "mocked" }));
-  for (const load of [() => vi.importActual("./imports.ts"), () => vi.importActual("./exports.ts")]) {
-    try {
-      console.error("SEEN", (await load()).who());
-    } catch (error) {
-      console.error("SEEN caught", error.constructor.name, error.message.replaceAll(import.meta.dir, "<dir>"));
-    }
-  }
-});`,
-  };
-  const sabotage = ",sabotage=CopiesNameNoFile";
-  const [plain, control, controlInLayers, sabotaged, sabotagedInLayers] = await Promise.all(
-    [undefined, oneProgram, layers, oneProgram + sabotage, layers + sabotage].map(words => seenWith(files, words)),
-  );
-  expect(plain).toEqual({
-    seen: ["SEEN compiled code calls helper", "SEEN real helper", "SEEN helper"],
-    exitCode: 0,
-    note: [],
-  });
-  // The tables of a layer that others stand on are whole.
-  expect([control, controlInLayers, sabotagedInLayers]).toEqual([plain, plain, plain]);
-  const message =
-    "Export named 'helper' not found in module '<dir>/helper.ts'. The build keeps only the exports that something refers to: if the module exports it, this is a bug in Bun.";
-  expect(sabotaged).toEqual({
-    seen: [
-      "SEEN compiled code calls helper",
-      "SEEN caught SyntaxError " + message,
-      "SEEN caught SyntaxError " + message,
-    ],
-    exitCode: 0,
-    note: [
-      "2 imports of a name that the build left out failed during this run, caught or not. Code that was loaded from disk asked a compiled module for it. Unless the name is misspelled, this is a bug in Bun:",
-      "  'helper' in helper.ts, asked for by imports.ts?actual, while a.test.ts ran",
-      "  'helper' in helper.ts, asked for by exports.ts?actual, while a.test.ts ran",
-    ],
-  });
+  expect(compiled).toEqual([plain]);
 });

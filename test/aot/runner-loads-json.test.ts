@@ -4,8 +4,7 @@ import { expect } from "bun:test";
 import { bunEnv, bunExe, tempDir } from "harness";
 import { raiseDefaultTimeout } from "./harness/default-timeout";
 import { run } from "./harness/run";
-import { waysFor } from "./harness/ways";
-import { describe, test } from "./supported";
+import { test } from "./supported";
 
 raiseDefaultTimeout(120_000);
 
@@ -27,10 +26,8 @@ const loaders: Record<string, (path: string) => string> = {
 };
 const paths = ["./data.json", "./only.json", "./settings.toml"];
 
-const ways: [string, Record<string, string>][] = [
-  ["as one program", { BUN_DEBUG_TEST_AOT_WORDS: "TestRunLayers:0" }],
-  ["in layers", { BUN_DEBUG_TEST_AOT_WORDS: "TestRunLayers:2" }],
-];
+// All five failed as one program on the build in front of the cure, none in layers.
+const asOneProgram = { BUN_DEBUG_TEST_AOT_WORDS: "TestRunLayers:0" };
 
 async function runTests(directory: string, env: Record<string, string>, ...flags: string[]) {
   const { stdout, stderr, exitCode } = await run([bunExe(), "test", ...flags], directory, { ...bunEnv, ...env });
@@ -39,25 +36,19 @@ async function runTests(directory: string, env: Record<string, string>, ...flags
   return { printed: stdout.split("\n").filter(line => line.startsWith("| ")), results, exitCode };
 }
 
-// All five failed as one program on the build in front of the cure, none in layers: that way has a guard and no witness.
-const witness = "vi.importMock";
-
-describe.each(ways)("%s", (way, env) => {
-  const runsIn = (name: string) => waysFor(ways, name === witness).some(([each]) => each === way);
-  test.each(Object.keys(loaders).filter(runsIn))("%s", async name => {
-    using dir = tempDir("runner-loads-json", {
-      ...shared,
-      "a.test.js": `import { jest, test, vi } from "bun:test";
+test.each(Object.keys(loaders))("as one program > %s", async name => {
+  using dir = tempDir("runner-loads-json", {
+    ...shared,
+    "a.test.js": `import { jest, test, vi } from "bun:test";
 import { now } from "./lib.mjs";
 const say = names => JSON.stringify(names) + " " + Object.keys(names ?? {});
 test("t", async () => {
 ${paths.map(path => `  console.log("| ${path}:", say(${loaders[name](path)}));`).join("\n")}
   console.log("| the importer:", now());
 });`,
-    });
-    const plain = await runTests(String(dir), {});
-    expect(plain.exitCode).toBe(0);
-    expect(plain.printed).toHaveLength(paths.length + 1);
-    expect(await runTests(String(dir), env, "--aot")).toEqual(plain);
   });
+  const plain = await runTests(String(dir), {});
+  expect(plain.exitCode).toBe(0);
+  expect(plain.printed).toHaveLength(paths.length + 1);
+  expect(await runTests(String(dir), asOneProgram, "--aot")).toEqual(plain);
 });

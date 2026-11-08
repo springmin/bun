@@ -1,6 +1,6 @@
 import { trimExecutable } from "bun:internal-for-testing";
 import { describe, expect, setDefaultTimeout, test } from "bun:test";
-import { isOhos, tempDir } from "harness";
+import { tempDir } from "harness";
 import { closeSync, existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { constants } from "node:os";
 import { join } from "node:path";
@@ -128,25 +128,26 @@ describeLink("a trimmable link", () => {
   const objectsWithBoth = ["feature_code", "both", "entry", "table", "embedder", "main"];
 
   // A compile of thousands of functions. Beside twenty others on a machine with few processors it gets a twentieth of them, and a minute is not enough.
-  test.serial("removes what only the entry point reaches, code and constants, and nothing retained", async () => {
-    using dir = tempDir("trim-elf", cuttableSources);
-    const folder = String(dir);
-    const result = await linked(folder, { compilesFeatureCode: true });
-    const { featuresOf, summary } = result;
-    const removable = ["feature_code", "feature_code_0", "feature_code_1499", "feature_numbers"];
-    expect(removable.map(featuresOf)).toEqual(removable.map(() => [Extra]));
-    expectRetained(result, ["main", "retained", "Bun__abortForRemovedFeature"]);
-    expectCleanRuns(result);
-    expect(summary.removedBytes).toBeGreaterThan(100_000);
-    // OHOS pads segments to 64 KiB, so the removed bytes need not shrink the file.
-    if (!isOhos) {
+  test.serial(
+    "removes what only the entry point reaches, code and constants, and nothing retained",
+    async () => {
+      using dir = tempDir("trim-elf", cuttableSources);
+      const folder = String(dir);
+      const result = await linked(folder, { compilesFeatureCode: true });
+      const { featuresOf, summary } = result;
+      const removable = ["feature_code", "feature_code_0", "feature_code_1499", "feature_numbers"];
+      expect(removable.map(featuresOf)).toEqual(removable.map(() => [Extra]));
+      expectRetained(result, ["main", "retained", "Bun__abortForRemovedFeature"]);
+      expectCleanRuns(result);
+      expect(summary.removedBytes).toBeGreaterThan(100_000);
       expect(summary.fileBytesSaved).toBeGreaterThanOrEqual(128 * 1024);
       const sizeOf = (name: string) => statSync(join(folder, name)).size;
       expect(sizeOf("program") - sizeOf("trimmed")).toBe(summary.fileBytesSaved);
-    }
-    expect(await exitCodeOf(folder, "trimmed", guardedArguments)).toBe(70);
-    expect(await exitCodeOf(folder, "program", guardedArguments)).toBeLessThan(64);
-  });
+      expect(await exitCodeOf(folder, "trimmed", guardedArguments)).toBe(70);
+      expect(await exitCodeOf(folder, "program", guardedArguments)).toBeLessThan(64);
+    },
+    240_000,
+  );
 
   test("retains a constant folded into an equal one of the feature", async () => {
     using dir = tempDir("trim-elf", sources);
@@ -507,7 +508,8 @@ const rustFiles = (toy: string) => ({
   "main.c": rustMain,
 });
 
-const endedByTrap = 128 + constants.signals.SIGTRAP;
+// What fills a removed range of code: `hlt` on x86-64, which only the kernel may run, and `udf #0` on arm64.
+const endedByTrap = 128 + (process.arch === "x64" ? constants.signals.SIGSEGV : constants.signals.SIGILL);
 
 async function wrappedRust(folder: string, isBitcode: boolean) {
   const crate = await findGuardCrate();

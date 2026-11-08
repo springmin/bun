@@ -66,7 +66,6 @@ async function seenIn(directory: string, words: string | undefined, ...flags: st
     ...(words ? { BUN_DEBUG_TEST_AOT_WORDS: words } : {}),
   };
   const { stdout, stderr, exitCode } = await run([bunExe(), "test", "--isolate", ...flags], directory, env);
-  // The workers of a parallel run say it on the other stream.
   const lines = (stdout + "\n" + stderr).split("\n");
   return { seen: lines.filter(line => line.startsWith("SEEN ")).sort(), exitCode };
 }
@@ -86,12 +85,6 @@ test("what plain Bun answers require() of a file that nothing names the kind of"
   expect(plain.seen).toHaveLength(33);
 });
 
-test.each([
-  ["one program", "TestRunLayers:0", []],
-  ["two layers", "TestRunLayers:2,TestRunPartFiles:1", ["--parallel=2"]],
-])(
-  "require() of a file that nothing names the kind of answers what an import has loaded: %s",
-  async (_, words, flags) => {
-    expect(await seenIn(String(dir), words, "--aot", ...flags)).toEqual(plain);
-  },
-);
+test("require() of a file that nothing names the kind of answers what an import has loaded: one program", async () => {
+  expect(await seenIn(String(dir), "TestRunLayers:0", "--aot")).toEqual(plain);
+});

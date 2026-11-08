@@ -49,6 +49,7 @@ inline bool collectOwnEnumerableProperties(JSC::VM& vm, JSC::JSObject* object, O
     return true;
 }
 
+// The Structure of a compiled object doesn't say which properties it has.
 inline bool onlyOneCompiledObjectHasOwn(JSC::VM& vm, JSC::JSCell* first, JSC::JSCell* second, JSC::PropertyName name)
 {
     namespace PropertyWalk = JSC::AOT::PropertyWalk;

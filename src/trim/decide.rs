@@ -200,6 +200,7 @@ fn retain_all_a_program_can_enter(retained: &mut RetainedFeatures, is_template: 
     }
     let mut features = FeatureSet::all();
     features.subtract(&Feature::all_outside_compiled_programs());
+    // The image lists all of it that the program can enter, and those uses are kept already. A template gets its program later.
     if !is_template {
         features.subtract(&Feature::all_entered_from(EnteredFrom::CompiledCode));
     }
@@ -222,6 +223,7 @@ fn features_reachable_by(cause: UnseenCodeCause) -> FeatureSet {
             features.insert(Feature::Jit);
             features
         }
+        // Nothing says what the image lists either.
         UnseenCodeCause::ReportMissing => {
             let mut features = program_features;
             features.union_with(&Feature::all_entered_from(EnteredFrom::CompiledCode));

@@ -18,54 +18,33 @@ async function build(env: Record<string, string>) {
   });
   const [stderr, exitCode] = await Promise.all([child.stderr.text(), child.exited]);
   expect(exitCode).toBe(0);
-  return stderr.split("\n").filter(line => line.startsWith("AOT stage step | "));
+  return stderr.split("\n").filter(line => /^AOT phase times: front end \| \w+: /.test(line));
 }
 
 test("with the stage log, and only with it", async () => {
   const lines = await build({ BUN_JSC_logAOTPhaseTimes: "1" });
   for (const step of [
-    // Three quarters of a build of 4,000 packages lay here, and the stage had no line of its own.
-    "Load | a round of the load | find_code_that_starts_workers",
-    "BindModules | application | bind_modules, all of it",
-    "BindModules | runtime | bind_modules, all of it",
-    "BindModules | bind_modules | resolve_exports",
-    "BindModules | resolve_exports | solve",
-    "BindModules | application | find_left_out_code",
-    "BindModules | find_left_out_code | Walk::run",
-    "BindModules | application | finish_plan",
-    // The last stage of the front end, which the first result waits for in every layer of a test run.
-    "LinkAndEmit | stage | link_while, all of it",
-    "LinkAndEmit | link | LinkMoveDefinitionsNanoseconds",
-    "LinkAndEmit | link, beside the rest of its step | build_module_records",
-    "LinkAndEmit | behind the link | what was loaded is let go",
-    "LinkAndEmit | emit | the program is written, the sessions are dropped",
+    "Load: the application",
+    "Load: contents of the program",
+    "BindModules: application: bind modules",
+    "BindModules: library: bind modules",
+    "BindModules: bind: resolve exports",
+    "BindModules: exports: solve",
+    "BindModules: reach: walk",
+    "BindModules: application: finish the plan",
+    "LinkAndEmit: choose definitions",
+    "LinkAndEmit: number the program",
+    "LinkAndEmit: what the link stage hands on",
+    "LinkAndEmit: what the load drops behind the link",
+    "LinkAndEmit: what the threads drop behind emit",
   ]) {
     expect(lines).toContainEqual(
       expect.stringMatching(
         new RegExp(
-          `^AOT stage step \\| ${step.replaceAll("|", "\\|")} \\| wall [0-9.]+ ms \\| cpu [0-9]+ ms( \\| instructions [0-9.]+ M)?$`,
+          `^AOT phase times: front end \\| ${step} \\| wall [0-9.]+ ms \\| cpu [0-9.]+ ms \\| resident [0-9]+ MB \\| peak [0-9]+ MB( \\| instructions [0-9.]+ M)?$`,
         ),
       ),
     );
   }
   expect(await build({})).toEqual([]);
-}, 120_000);
-
-// The walk that finds what no code reaches goes on one thread. Where it is run a second time, from nothing, the log says why.
-test("why the walk for what is left out runs again", async () => {
-  using dir = tempDir("aot-why-the-walk-runs-again", {
-    "main.cjs": `const tree = { parent: null, children: [] };\nconsole.log(tree.parent, tree.children.length, require("./b.cjs").m);\nglobalThis.keep = module;\n`,
-    "b.cjs": `exports.m = 1;\n`,
-  });
-  await using child = Bun.spawn({
-    cmd: [bunExe(), "build", "--compile", "--aot", "main.cjs", "--outfile", "main"],
-    cwd: String(dir),
-    env: { ...bunEnv, BUN_JSC_logAOTPhaseTimes: "1" },
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  const [stderr, exitCode] = await Promise.all([child.stderr.text(), child.exited]);
-  expect(stderr.split("\n").filter(line => line.startsWith("AOT walk for what is left out runs again"))).toEqual([
-    "AOT walk for what is left out runs again | a module object is out of sight, and files name `children` and `parent`",
-  ]);
-  expect(exitCode).toBe(0);
 }, 120_000);

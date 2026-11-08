@@ -105,7 +105,7 @@ async function judge(file: string): Promise<string[]> {
   const compiled = await run(file, isPlain ? [] : ["--debug-aot", ...flags], seconds);
   const lines: string[] = [];
   const death = typeof compiled.code === "string" && compiled.code !== plain.code ? compiled.code : /^panic\b|internal compiler error/m.test(compiled.printed) && !/^panic\b/m.test(plain.printed) ? "a panic" : undefined;
-  if (death) lines.push(`DIES ${file}: ${death} (plain ${plain.code}): ${firstMatch(compiled.printed, /panic|internal compiler error|AOT validation|Trap|Segmentation/)}`);
+  if (death) lines.push(`DIES ${file}: ${death} (plain ${plain.code}): ${firstMatch(compiled.printed, /panic|internal compiler error|Trap|Segmentation/)}`);
   else if (compiled.verdicts.size === 0) lines.push(`NOT-BUILT ${file}: ${firstMatch(compiled.printed, /^error\b/) || firstMatch(compiled.printed, /\berror\b/i) || compiled.code}`);
   if (compiled.verdicts.size > 0 || death) {
     for (const [name, theirs] of plain.verdicts) {

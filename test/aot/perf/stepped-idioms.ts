@@ -3,8 +3,7 @@
 // it lets the program go one instruction at a time, over the few turns that the pin names.
 // A pin holds the instructions in the code that the compiler made. Those of Bun and the C library waver with where the lists of free cells stand, and go by the model of the processor:
 // they are not judged.
-// ./counted-idioms.ts says what an idiom does beside the straight path. This says what the straight path costs: a call that is no longer copied into its caller, a test more in a loop,
-// a load that no longer stands in front of it.
+// This says what the straight path costs: a call that is no longer copied into its caller, a test more in a loop, a load that no longer stands in front of it.
 //
 // The numbers are exact. A row fails when it reads over its pin by more than 2% and by more than 2 instructions: one instruction more in a turn of fifteen is no news, and every change
 // of generated code makes some. The pin stands still, so small rises add up until they trip it: a pin is never taken anew upward without a word on which change did it and why ("raised"),
@@ -29,9 +28,10 @@
 // "in-a-very-large-program": turn() is a function of its own that its caller finds at run time, compiled as it would be inside a very large program, where nothing marks it as code that
 // runs often: most functions of a large application are compiled that way. Their pins are ./idiom-steps-in-a-very-large-program.linux-<arch>.json.
 //
+// CI does not run it: ./stepped-idioms-*.measure.ts are for the bench.
 // A pin only goes down: a number that has to rise is a trade, and somebody decides it.
-//   AOT_PERF=lower bun test test/aot/perf/stepped-idioms-     writes every number that got better into the file
-//   AOT_PERF=update ..                                        rewrites the pins as counted, and how many turns a reading takes: for a new idiom
+//   AOT_PERF=lower bun test ./test/aot/perf/stepped-idioms-*.measure.ts     writes every number that got better into the file
+//   AOT_PERF=update ..                                                      rewrites the pins as counted, and how many turns a reading takes: for a new idiom
 import { afterAll, expect } from "bun:test";
 import { existsSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { bunExe, isASAN, isDebug, isMusl, tempDir } from "harness";
@@ -70,7 +70,7 @@ export function steppedIdiomsAgainstPins(part = 1, parts = 1, surroundings: Surr
     const written: Pins = {};
     const folder = String(tempDir("aot-stepped-idioms", {}));
     let all: string[] = [];
-    const { names, aTurn, turnsFor, startBuilds } = steppedIdioms(
+    const { names, aTurn, turnsFor, remove } = steppedIdioms(
       bunExe(),
       folder,
       every => (all = every).filter((_, index) => index % parts === part - 1),
@@ -81,7 +81,6 @@ export function steppedIdiomsAgainstPins(part = 1, parts = 1, surroundings: Surr
       // Another part may have written since this one read.
       if (Object.keys(written).length) writePins(pinsPath, { ...readPins(pinsPath), ...written });
     });
-    startBuilds();
 
     if (part === 1) {
       test("every pin names an idiom", () => expect(Object.keys(pins).filter(name => !all.includes(name))).toEqual([]));
@@ -92,26 +91,30 @@ export function steppedIdiomsAgainstPins(part = 1, parts = 1, surroundings: Surr
         name,
         () =>
           slot(async () => {
-            const pin = mode === "update" ? undefined : pins[name];
-            const turns = pin ? pin.turns : mode === "update" || mode === "lower" ? await turnsFor(name) : undefined;
-            if (turns === undefined) return void (!pin && mode && (written[name] = {}));
-            const read = async (padding = 0) => ({ typed: (await aTurn(name, "typed", turns, padding)).compiled, untyped: (await aTurn(name, "untyped", turns, padding)).compiled });
-            const now = await read();
-            if (!pin) return void (written[name] = forms.every(form => Number.isFinite(now[form])) ? { turns, ...now } : {});
-            for (const padding of [8, 12, 24, 28]) {
-              if (!forms.some(form => isWorse(now[form], pin, form))) break;
-              const again = await read(padding);
-              for (const form of forms) now[form] = Math.min(now[form], again[form]);
+            try {
+              const pin = mode === "update" ? undefined : pins[name];
+              const turns = pin ? pin.turns : mode === "update" || mode === "lower" ? await turnsFor(name) : undefined;
+              if (turns === undefined) return void (!pin && mode && (written[name] = {}));
+              const read = async (padding = 0) => ({ typed: (await aTurn(name, "typed", turns, padding)).compiled, untyped: (await aTurn(name, "untyped", turns, padding)).compiled });
+              const now = await read();
+              if (!pin) return void (written[name] = forms.every(form => Number.isFinite(now[form])) ? { turns, ...now } : {});
+              for (const padding of [8, 12, 24, 28]) {
+                if (!forms.some(form => isWorse(now[form], pin, form))) break;
+                const again = await read(padding);
+                for (const form of forms) now[form] = Math.min(now[form], again[form]);
+              }
+              if (mode === "lower" && !pin.wavers) {
+                const { owed, ...paid } = pin;
+                const stillOwed = owed?.forms.filter(form => now[form] > pin[form]!) ?? [];
+                written[name] = { ...paid, typed: Math.min(pin.typed!, now.typed), untyped: Math.min(pin.untyped!, now.untyped) };
+                if (stillOwed.length) written[name].owed = { forms: stillOwed, why: owed!.why };
+              }
+              expect(
+                forms.filter(form => isWorse(now[form], pin, form)).map(form => `${name}, ${form}: ${now[form]} instructions of compiled code a turn, pinned at ${pin[form]}`),
+              ).toEqual([]);
+            } finally {
+              for (const form of forms) remove(form, name);
             }
-            if (mode === "lower" && !pin.wavers) {
-              const { owed, ...paid } = pin;
-              const stillOwed = owed?.forms.filter(form => now[form] > pin[form]!) ?? [];
-              written[name] = { ...paid, typed: Math.min(pin.typed!, now.typed), untyped: Math.min(pin.untyped!, now.untyped) };
-              if (stillOwed.length) written[name].owed = { forms: stillOwed, why: owed!.why };
-            }
-            expect(
-              forms.filter(form => isWorse(now[form], pin, form)).map(form => `${name}, ${form}: ${now[form]} instructions of compiled code a turn, pinned at ${pin[form]}`),
-            ).toEqual([]);
           }),
         900_000,
       );

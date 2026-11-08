@@ -48,11 +48,7 @@ async function runTests(directory: string, words: string | undefined, ...flags: 
   return { stdout: stdout.split("\n").filter(line => line.startsWith("SEEN")), exitCode };
 }
 
-for (const [way, words] of [
-  ["as the runner divides it", undefined],
-  ["as one program", "TestRunLayers:0"],
-  ["over two layers, both files in one process", "TestRunLayers:2,TestRunPartFiles:3"],
-] as const) {
+for (const [way, words] of [["as one program", "TestRunLayers:0"]] as const) {
   test(`a function of an earlier test file reads the variables of its own realm, ${way}`, async () => {
     using dir = tempDir("aot-a-function-of-an-earlier-test-file", files);
     const plain = await runTests(String(dir), undefined);

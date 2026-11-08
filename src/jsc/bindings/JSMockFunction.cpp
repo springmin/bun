@@ -35,6 +35,7 @@
 #include <JavaScriptCore/CustomGetterSetter.h>
 #include "JavaScriptCore/AOTHost.h"
 #include "BunPlugin.h"
+#include "BunCompiledModules.h"
 #include "NodeVM.h"
 #include "AsyncContextFrame.h"
 #include "ErrorCode.h"
@@ -986,13 +987,19 @@ private:
             if (!original)
                 return;
             ThroughLockOfBuiltins throughLock(globalObject->vm(), isOpaque);
+#if ENABLE(AOT)
+            if (JSC::AOT::isModuleNamespace(target)) {
+                bool isBack = JSC::AOT::tryReplaceExport(target, identifier.impl(), original);
+                RETURN_IF_EXCEPTION(scope, );
+                // The spy was laid there, so the export takes a value. A spy that stays answers undefined to every later test of the process, and nobody hears of it.
+                if (!isBack)
+                    throwTypeError(globalObject, scope, makeString("Cannot restore the spy on '"_s, identifier.string(), "': the module no longer takes a value for it. This is a bug in bun test --aot"_s));
+                return;
+            }
+#endif
             scope.release();
             if (auto* moduleNamespaceObject = tryJSDynamicCast<JSModuleNamespaceObject*>(target))
                 moduleNamespaceObject->overrideExportValue(globalObject, identifier, original);
-#if ENABLE(AOT)
-            else if (JSC::AOT::isModuleNamespace(target))
-                JSC::AOT::tryReplaceExport(target, identifier.impl(), original);
-#endif
             return;
         }
 
@@ -3106,8 +3113,9 @@ __attribute__((minsize)) static JSC::EncodedJSValue spyOn(JSC::JSGlobalObject* l
     bool isFixedMember = vm.hasCompiledCode() && hasValue && slot.slotBase() == object && (slot.attributes() & fixedByLanguage) == fixedByLanguage;
     bool isLocked = object->structure()->mayHaveImmutableProperties();
     bool isFixedMemberOfLockedObject = isFixedMember && isLocked && !JSC::AOT::isMemberUnlockedForTests(object, propertyKey.impl());
+    // A constructor need not be locked for compiled code to take its `prototype` or a constant on it for what the realm was created with.
     bool isFixedMemberOfOpenObject = isFixedMember && !isLocked && JSC::AOT::isMemberTakenForConstant(object, propertyKey.impl());
-    if (vm.hasCompiledCode() && (object->structure()->isImmutableProperty(propertyKey.impl()) || isFixedMemberOfLockedObject || isFixedMemberOfOpenObject)) {
+    if (vm.hasCompiledCode() && (object->structure()->isImmutableProperty(propertyKey.impl()) || isFixedMemberOfLockedObject || isFixedMemberOfOpenObject || JSC::AOT::isNameRefusedByLibraryFunction(object, propertyKey.impl()))) {
         String message = JSC::AOT::refusedSpyMessage(globalObject, object, propertyKey.impl());
         if (message.isNull())
             message = makeString("Cannot spy on '"_s, String(propertyKey.impl()), "' because this property of a built-in object is read-only in a compiled executable. Spy on a function of your own that calls it (https://bun.com/docs/compiler/compatibility#built-in-objects-are-read-only)"_s);
@@ -3125,8 +3133,10 @@ __attribute__((minsize)) static JSC::EncodedJSValue spyOn(JSC::JSGlobalObject* l
         }
 #if ENABLE(AOT)
         if (JSC::AOT::isModuleNamespace(object)) {
-            if (!JSC::AOT::tryReplaceExport(object, propertyKey.impl(), replacement))
-                throwTypeError(globalObject, scope, JSC::AOT::refusedSpyOnExportMessage(object, propertyKey.impl()));
+            bool isReplaced = JSC::AOT::tryReplaceExport(object, propertyKey.impl(), replacement);
+            RETURN_IF_EXCEPTION(scope, true);
+            if (!isReplaced)
+                throwTypeError(globalObject, scope, JSC::AOT::refusedSpyOnExportMessage(object, propertyKey.impl(), Bun::fileOfCallerThatWasNotCompiled(vm, callframe)));
             return true;
         }
 #endif
@@ -3233,7 +3243,12 @@ __attribute__((minsize)) static JSC::EncodedJSValue spyOn(JSC::JSGlobalObject* l
     JSValue storage = getOwnPropertyStorage(globalObject, object, propertyKey, spyAttributes);
     RETURN_IF_EXCEPTION(scope, {});
     // The object itself answers for an array's `length` or a typed array's elements, so an accessor in its storage would be ignored.
-    if (storage && !isOpaque && (parseIndex(propertyKey) ? object->structure()->typeInfo().interceptsGetOwnPropertySlotByIndexEvenWhenLengthIsNotZero() : !object->getDirect(vm, propertyKey))) {
+    bool answersForItsElements = object->structure()->typeInfo().interceptsGetOwnPropertySlotByIndexEvenWhenLengthIsNotZero();
+#if ENABLE(AOT)
+    if (object->type() == CompiledObjectType)
+        answersForItsElements = false;
+#endif
+    if (storage && !isOpaque && (parseIndex(propertyKey) ? answersForItsElements : !object->getDirect(vm, propertyKey))) {
         throwTypeError(globalObject, scope, makeString("Cannot spy on the "_s, access == SpyAccess::Set ? "setter"_s : "getter"_s, " of the `"_s, propertyKeyForMessage(propertyKey), "` property because it cannot be redefined"_s));
         return {};
     }

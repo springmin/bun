@@ -8,6 +8,14 @@ import { test } from "./supported";
 const files = {
   "package.json": `{ "name": "mock-builtin-required" }`,
   "reader.cjs": `const it = require("node:child_process"); exports.read = () => typeof it.spawn;`,
+  "fetcher.cjs": `const it = require("undici"); exports.read = () => typeof it.fetch;`,
+  "a-entry.test.js": `import { mock, test } from "bun:test";
+import fetcher from "./fetcher.cjs";
+test("in the first test file: the original is what the entry of require.cache holds", async () => {
+  await mock.module("undici", async importOriginal => ({ ...(await importOriginal()), fetch: "mine" }));
+  const mocked = await import("undici");
+  console.log("OUT", mocked.fetch, typeof mocked.Agent, fetcher.read());
+});`,
   "a-original.test.mjs": `import { test, vi } from "bun:test";
 import reader from "./reader.cjs";
 test("the factory awaits the original", async () => {
@@ -45,6 +53,13 @@ test("a statement's binding follows a mock that is laid later", () => {
   mock.module("node:path", () => ({ join: () => "mine" }));
   console.log("OUT", join("a", "b"));
 });`,
+  "f-whole.test.js": `import { test, vi } from "bun:test";
+import { Database } from "bun:sqlite";
+test("require() answers exports that hold __esModule and default as they are", () => {
+  vi.doMock("bun:sqlite");
+  const all = require("bun:sqlite");
+  console.log("OUT", typeof Database, typeof all.Database, typeof all.constants, Object.keys(all).sort().join());
+});`,
 };
 
 async function run(dir: string, flags: string[], words = "") {
@@ -58,21 +73,22 @@ async function run(dir: string, flags: string[], words = "") {
   return { lines: stdout.split("\n").filter(line => line.startsWith("OUT")), exitCode };
 }
 
-test("waits for the next load, as one program and over layers", async () => {
+test("waits for the next load", async () => {
   using folder = tempDir("aot-mock-builtin-required", files);
   const dir = String(folder);
   const plain = await run(dir, []);
   expect(plain).toEqual({
     lines: [
       "OUT mine function function",
+      "OUT mine function function",
       "OUT mine a/b mine function",
       "OUT a/b a/b",
       "OUT 0",
       "OUT mock.module",
       "OUT mine",
+      "OUT function function object Database,SQLiteError,Statement,__esModule,constants,default",
     ],
     exitCode: 0,
   });
   expect(await run(dir, ["--aot"], "TestRunLayers:0")).toEqual(plain);
-  expect(await run(dir, ["--aot"], "TestRunLayers:2,TestRunPartFiles:1")).toEqual(plain);
 }, 240_000);

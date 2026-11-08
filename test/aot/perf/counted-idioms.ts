@@ -9,13 +9,13 @@
 // other form gives room may go into the run time at every call: ./stepped-idioms.ts counts compiled code alone and does not see what the run time then takes.
 // Their pins are ./idiom-counts-in-a-very-large-program.json: taken on Linux with glibc, x64 and arm64, and held there alone.
 //
-// It is a ruler, not the test of a fault. In front of a merge one idiom in four is counted, another quarter each day (../harness/ways.ts). AOT_WHOLE_GRIDS=1 counts
-// them all: the bench behind every build does, and there a count that has moved is dated to the change that moved it.
+// It is a ruler, not the test of a fault, and CI does not run it. ./counted-idioms-<part>.measure.ts and ./counted-idioms-cold-<part>.measure.ts are for the bench, which counts
+// every idiom behind every build: there a count that has moved is dated to the change that moved it.
 //
 // A pin says "at most". It only goes down: a count that has to rise is a trade, and somebody decides it.
-//   AOT_PERF=lower bun test test/aot/perf/counted-idioms-     writes every number that got better into the file
-//   AOT_PERF=cover ..                                         raises each pin to what is counted here: the same sources on another platform, where lists of free cells and tables are of other sizes
-//   AOT_PERF=update ..                                        rewrites the pins as counted: for a new idiom
+//   AOT_PERF=lower bun test ./test/aot/perf/counted-idioms-*.measure.ts     writes every number that got better into the file
+//   AOT_PERF=cover ..                                                       raises each pin to what is counted here: the same sources on another platform, where lists of free cells and tables are of other sizes
+//   AOT_PERF=update ..                                                      rewrites the pins as counted: for a new idiom
 // A row may carry "owed": { <kind>: <count>, "why": .. }: a change, named in "why", made that kind more expensive in both forms, and the pin was left where it was.
 // Until that is fixed, the kind is held to the count written there. A higher count fails. So does meeting the pin again: then the mark should be removed.
 // "raised": ".." says why a count once went up: what the change was for. The row is held like any other.
@@ -24,7 +24,6 @@ import { readFileSync, rmSync, writeFileSync } from "fs";
 import { bunExe, isArm64, isASAN, isDebug, isLinux, isMusl, tempDir } from "harness";
 import { join } from "path";
 import { slot } from "../harness/commands";
-import { partOfGrid } from "../harness/ways";
 import { describe, test } from "../supported";
 import { countedIdioms, forms, kinds, whatWasCounted, type Counted, type Counts, type Form, type Surroundings } from "./count-idioms";
 
@@ -91,10 +90,7 @@ export function countedIdiomsAgainstPins(part = 1, parts = 1, surroundings: Surr
     const written: Pins = {};
     const folder = String(tempDir("aot-counted-idioms", {}));
     let all: string[] = [];
-    // Whoever writes pins writes all of them.
-    const oneIn = mode ? 1 : 4;
-    const ofThisPart = (every: string[]) => (all = every).filter((_, index) => index % parts === part - 1);
-    const { names, count, startBuilds } = countedIdioms(bunExe(), folder, every => [...partOfGrid(`counted-idioms${suffix}`, ofThisPart(every), oneIn, name => name)], [], surroundings);
+    const { names, count, startBuilds } = countedIdioms(bunExe(), folder, every => (all = every).filter((_, index) => index % parts === part - 1), [], surroundings);
     afterAll(() => {
       rmSync(folder, { recursive: true, force: true });
       // Another part may have written since this one read.

@@ -88,7 +88,7 @@ test("behind the first load", async () => {
 `,
 };
 
-test.each(["TestRunLayers:0", "TestRunLayers:2,TestRunPartFiles:1"])(
+test.each(["TestRunLayers:0"])(
   "every line is as in plain bun test: %s",
   async words => {
     using dir = tempDir("aot-an-export-that-only-a-mock-has", files);

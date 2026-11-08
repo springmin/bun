@@ -44,16 +44,22 @@ impl ImportMetaGlobHost {
     }
 }
 
+/// A call as the parser has expanded it. `bun build --compile --aot` reads the file into a tree of its own and writes the same object there.
 pub struct ExpandedImportMetaGlob {
+    /// Where the call starts in the source.
     pub start: i32,
     pub result: Result<ImportMetaGlobFiles, InvalidImportMetaGlob>,
 }
 
 pub struct ImportMetaGlobFiles {
+    /// The argument of `Object.keys()`, which needs no values.
     pub only_keys: bool,
     pub eager: bool,
+    /// Empty means the whole namespace.
     pub import: Vec<u8>,
+    /// The `type` import attribute.
     pub import_type: Option<&'static [u8]>,
+    /// (key, import path)
     pub entries: Vec<(Vec<u8>, Vec<u8>)>,
 }
 
@@ -67,6 +73,7 @@ thread_local! {
     static LEFT_AS_WRITTEN: Cell<bool> = const { Cell::new(false) };
 }
 
+/// No parser on this thread expands a call until `parse` returns.
 pub fn leave_import_meta_globs_as_written<R>(parse: impl FnOnce() -> R) -> R {
     struct Restore(bool);
     impl Drop for Restore {
@@ -78,6 +85,7 @@ pub fn leave_import_meta_globs_as_written<R>(parse: impl FnOnce() -> R) -> R {
     parse()
 }
 
+/// Appends every call that a parser on this thread expands to `expanded` until `parse` returns.
 pub fn record_import_meta_globs<R>(
     expanded: &mut Vec<ExpandedImportMetaGlob>,
     parse: impl FnOnce() -> R,

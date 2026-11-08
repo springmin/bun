@@ -47,7 +47,6 @@ const expected = ["SAID the sources: 1 2 3 4", "SAID a package: 1 2 3 4", "SAID 
 test.concurrent.each([
   ["plain", [], ""],
   ["as one program", ["--aot"], "TestRunLayers:0"],
-  ["over two layers", ["--aot"], "TestRunLayers:2,TestRunPartFiles:1"],
 ])(
   "%s",
   async (_, flags, words) => {

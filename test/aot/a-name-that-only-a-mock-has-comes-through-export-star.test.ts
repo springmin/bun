@@ -115,19 +115,16 @@ const files = {
     });`,
 };
 
-async function printedBy(directory: string, words: string, ...flags: string[]) {
-  const env = { ...bunEnv, BUN_DEBUG_TEST_AOT_WORDS: words };
+async function printedBy(directory: string, ...flags: string[]) {
+  const env = { ...bunEnv, BUN_DEBUG_TEST_AOT_WORDS: "TestRunLayers:0" };
   const { stdout, stderr, exitCode } = await run([bunExe(), "test", "--isolate", ...flags], directory, env);
   if (exitCode !== 0) console.error(stderr);
   return { printed: stdout.replace(/^bun test .*\n/, ""), exitCode };
 }
 
-test.each([
-  ["as one program", "TestRunLayers:0"],
-  ["over two layers", "TestRunLayers:2,TestRunPartFiles:1"],
-])("%s", async (_, words) => {
+test("as one program", async () => {
   using directory = tempDir("a-name-that-only-a-mock-has-comes-through-export-star", files);
-  const plain = await printedBy(String(directory), words);
+  const plain = await printedBy(String(directory));
   expect(plain.printed).toContain(
     "one star | extra,own,v | v=mocked v:true:true extra=extra:true:true f=undefined:false:false",
   );
@@ -137,7 +134,7 @@ test.each([
   );
   // TODO(bun), row 4105: a compiled run follows plain Bun but for a name that the mock adds and a CommonJS file behind a later `export *` really has: in plain Bun the first star
   // wins, compiled the file that really has it. The list goes red once they agree.
-  const compiled = await printedBy(String(directory), words, "--aot");
+  const compiled = await printedBy(String(directory), "--aot");
   expect(compiled.exitCode).toBe(plain.exitCode);
   const printed = compiled.printed.split("\n");
   const differing = plain.printed.split("\n").filter((line, index) => line !== printed[index]);

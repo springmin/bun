@@ -4,6 +4,7 @@
 #include "helpers.h"
 #include "root.h"
 #include "headers-handwritten.h"
+#include <JavaScriptCore/ErrorInstanceInlines.h>
 #include <JavaScriptCore/JSCJSValueInlines.h>
 #if ENABLE(AOT)
 #include <JavaScriptCore/AOTPropertyWalk.h>

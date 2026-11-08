@@ -1,18 +1,15 @@
-use core::num::NonZeroU32;
-use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use core::sync::atomic::{AtomicBool, Ordering};
+use std::collections::BTreeSet;
 use std::sync::{Arc, OnceLock};
 
 use bstr::BStr;
 use bun_bundler::bundle_v2::FileMap;
 use bun_core::{Global, Output, ZBox, env_var};
 use bun_jsc::virtual_machine::VirtualMachine;
-use bun_options_types::aot_options::HeapSize;
 use bun_options_types::aot_options::ReadListener;
-use bun_options_types::aot_options::ReplacedByTests;
 use bun_options_types::context::{HotReload, TestGlobals};
 use bun_options_types::schema::api::DotEnvBehavior;
 use bun_standalone_graph::Graph;
-use bun_standalone_graph::executable_request::{FirstProgramBelow, PlaceOfProgram};
 use bun_sys::{Fd, File, Maybe, O};
 use bun_threading::Guarded;
 use bun_watcher::{ChangedFilePath, WatchEvent, WatchList, Watcher, WatcherContext};
@@ -22,22 +19,20 @@ use super::compile_command::{
     print_failure, print_log,
 };
 use crate::cli::command::{Context, ContextData};
-use crate::cli::test::memory_of_job;
 
 static IS_FROM_DESCRIPTOR: AtomicBool = AtomicBool::new(false);
-static IS_ONE_PROGRAM: AtomicBool = AtomicBool::new(false);
 static GRAPH_DESCRIPTOR: OnceLock<Fd> = OnceLock::new();
 static IS_CHECKED: AtomicBool = AtomicBool::new(false);
-static REFUSED_FILES: OnceLock<Vec<(Box<[u8]>, Box<[u8]>)>> = OnceLock::new();
-const SAID_OF_REFUSED_FILE: u8 = 1;
 static FILES_OF_CHECK: OnceLock<Vec<Box<[u8]>>> = OnceLock::new();
 static CLEARS_TERMINAL: AtomicBool = AtomicBool::new(false);
 static RUNNING_TEST_FILE: Guarded<Vec<u8>> = Guarded::new(Vec::new());
 static REFUSED_CHANGES: Guarded<Vec<Vec<u8>>> = Guarded::new(Vec::new());
+static FILES_RUN_FROM_SOURCE: Guarded<BTreeSet<Vec<u8>>> = Guarded::new(BTreeSet::new());
+/// The newest line of `REFUSED_CHANGES` that the running test file has made, without its end. It is kept also where the list is full or has the line.
 static NEWEST_REFUSAL_OF_RUNNING_TEST_FILE: Guarded<Vec<u8>> = Guarded::new(Vec::new());
 const MAX_LISTED_REFUSED_CHANGES: usize = 100;
 static CRASH_REPORT: OnceLock<&'static [u8]> = OnceLock::new();
-/// What stands in for the files that use the program and that the build does not see.
+/// The entry points that stand in for what the runner does and no file of the run spells.
 static STAND_IN: Guarded<Option<&'static FileMap>> = Guarded::new(None);
 
 pub(crate) enum NonFileTarget<'a> {
@@ -90,8 +85,7 @@ fn exit_non_file_target(target: NonFileTarget<'_>) -> ! {
     Global::exit(1)
 }
 
-/// The build reads the entry point at `path` from memory. As a file of the project it belonged to every run in the folder at once:
-/// each layer has a text of its own, and one run's build read what another run had written for another layer.
+/// The build reads the entry point at `path` from memory. A file on disk would be shared by every run in the folder.
 pub(crate) fn set_stand_in(path: &[u8], text: &[u8]) {
     // The word `TestRunShowsStandIn:1`, for tests that read it.
     if number_behind_word(b"TestRunShowsStandIn:") == Some(1) {
@@ -109,6 +103,7 @@ pub(crate) fn set_stand_in(path: &[u8], text: &[u8]) {
         }
     }
     bun_core::handle_oom(files.map.put(&key, Box::from(text)));
+    // It lives as long as the build, which is the last thing the process does.
     *STAND_IN.lock() = Some(Box::leak(Box::new(files)));
 }
 
@@ -117,10 +112,11 @@ fn key_of_stand_in(path: &[u8]) -> Vec<u8> {
     if cfg!(windows) {
         bun_paths::resolve_path::platform_to_posix_in_place::<u8>(&mut key);
     }
-    // It lives as long as the build, which is the last thing the process does.
     key
 }
 
+// No file of the run spells what the runner does for `--globals=vitest`: `Jest::define_vitest_globals()` stores the names on `globalThis` before any file runs. This file
+// stands in for that, so that a name which nothing else stores isn't taken for absent.
 fn make_stand_in_for_globals_of_vitest() -> Box<[u8]> {
     use bun_js_parser::Jest;
     let mut text = b"const value = process.argv.at(-1)!;\nif (value === \"\\0never\") {\n".to_vec();
@@ -130,6 +126,7 @@ fn make_stand_in_for_globals_of_vitest() -> Box<[u8]> {
         text.extend_from_slice(b" = JSON.parse(value);\n");
     }
     text.extend_from_slice(b"}\n");
+    // The name of the module. No file is there.
     let path = bun_paths::resolve_path::join_abs_string::<bun_paths::platform::Auto>(
         bun_resolver::fs::FileSystem::get().top_level_dir(),
         &[b"node_modules/.cache/bun-test-globals-of-vitest.ts"],
@@ -145,7 +142,7 @@ pub(crate) fn files_in_memory() -> Option<&'static FileMap> {
 
 #[cold]
 #[inline(never)]
-pub(crate) fn start(ctx: Context<'_>, entry_points: Vec<Box<[u8]>>, independent_count: usize) -> ! {
+pub(crate) fn start(ctx: Context<'_>, entry_points: Vec<Box<[u8]>>, test_file_count: usize) -> ! {
     let typed: Vec<&'static [u8]> = bun_core::argv()
         .into_iter()
         .skip(1 + bun_core::bun_options_argc())
@@ -181,20 +178,10 @@ pub(crate) fn start(ctx: Context<'_>, entry_points: Vec<Box<[u8]>>, independent_
     unsafe { ctx.log_mut() }.append_to(&mut said_before_the_build);
 
     let mut entry_points = entry_points;
-    if builds_what_test_parts_share() {
-        entry_points[..independent_count].sort_unstable();
-        if let Some(aot) = ctx.bundler_options.aot.as_mut() {
-            aot.entry_points_only_imported_from_above.sort_unstable();
-            aot.entry_points_required_from_above.sort_unstable();
-        }
-    }
     if has_globals_of_vitest {
         entry_points.push(make_stand_in_for_globals_of_vitest());
     }
-    let mut independent_count = independent_count;
-    let mut refused_count = 0;
-    let mut refused_files = Vec::new();
-    let defines = ctx.args.define.clone();
+    ctx.args.entry_points = entry_points;
     ctx.bundler_options.compile = true;
     ctx.bundler_options.inline_entrypoint_import_meta_main = true;
     ctx.bundler_options.outfile = Box::from(&b"program"[..]);
@@ -205,40 +192,14 @@ pub(crate) fn start(ctx: Context<'_>, entry_points: Vec<Box<[u8]>>, independent_
         true => CompileProduct::ReportsOnly,
         false => CompileProduct::GraphBytes,
     };
-    let outcome = loop {
-        ctx.args.entry_points.clone_from(&entry_points);
-        let failure = match compile_from_context(&mut *ctx, product) {
-            Err(error) => {
-                print_log(&said_before_the_build);
-                print_log(ctx.log_ref());
-                Output::err_generic("{}", (BStr::new(error.name()),));
-                exit_or_wait_for_change(watched)
-            }
-            Ok(Err(failure)) => failure,
-            // Each query of a file is an instance of its own, which only code from disk can be. The program is compiled once more, for that.
-            Ok(Ok(outcome)) if outcome.imports_file_with_query => {
-                if let Some(aot) = ctx.bundler_options.aot.as_mut() {
-                    aot.loads_code_from_disk = true;
-                }
-                if env_var::BUN_JSC_logAOTPhaseTimes.get() == Some(true) {
-                    bun_core::print_errorln!(
-                        "AOT files are loaded again | a file is imported with a query"
-                    );
-                }
-                // SAFETY: nothing else borrows the log between two builds.
-                unsafe { ctx.log_mut() }.reset();
-                ctx.args.define.clone_from(&defines);
-                continue;
-            }
-            Ok(Ok(outcome)) => break outcome,
-        };
-        // It names what the test files name, so it reaches whatever one of those files reaches.
-        let stand_in = (ctx.bundler_options.aot.as_ref())
-            .filter(|aot| aot.host_runs_files_from_disk)
-            .and_then(|aot| aot.stand_in_for_files_from_disk.as_deref())
-            .and_then(|path| entry_points.iter().position(|entry| **entry == *path));
-        let Some(refused) = find_refused_files(&failure, independent_count, stand_in, !checks_only)
-        else {
+    let outcome = match compile_from_context(&mut *ctx, product) {
+        Err(error) => {
+            print_log(&said_before_the_build);
+            print_log(ctx.log_ref());
+            Output::err_generic("{}", (BStr::new(error.name()),));
+            exit_or_wait_for_change(watched)
+        }
+        Ok(Err(failure)) => {
             // SAFETY: nothing else borrows the log behind a build.
             let log = unsafe { ctx.log_mut() };
             if !log.has_errors() {
@@ -248,116 +209,23 @@ pub(crate) fn start(ctx: Context<'_>, entry_points: Vec<Box<[u8]>>, independent_
             print_log(&said_before_the_build);
             print_failure(ctx.log_ref(), RequestOrigin::BuildFlag, target, &failure);
             exit_or_wait_for_change(watched)
-        };
-        if !checks_only {
-            // The next build repeats the warnings.
-            // SAFETY: nothing else borrows the log between two builds.
-            let messages = &mut unsafe { ctx.log_mut() }.msgs;
-            messages.retain(|message| message.kind == bun_ast::Kind::Err);
         }
-        print_log(ctx.log_ref());
-        if let Some(stand_in) = stand_in {
-            let refused = refused.iter().map(|&position| &*entry_points[position]);
-            leave_out_of_stand_in(&entry_points[stand_in], &refused.collect::<Vec<_>>());
-        }
-        let said = list_errors(ctx.log_ref());
-        for &position in refused.iter().rev() {
-            if says_its_form() {
-                let path = BStr::new(&entry_points[position]);
-                bun_core::print_errorln!("AOT test run | refused | {}", path);
-            }
-            refused_files.extend_from_slice(&entry_points.remove(position));
-            refused_files.push(SAID_OF_REFUSED_FILE);
-            refused_files.extend_from_slice(&said);
-            refused_files.push(0);
-        }
-        independent_count -= refused.len();
-        refused_count += refused.len();
-        // With no file left to run there is no program to build. Each file fails by itself, as under `bun test`.
-        if checks_only || independent_count == 0 {
-            let check_result = write_check_result(&refused_files, watched, &[]);
-            let handover = Handover {
-                flag: CHECKED_FLAG,
-                bytes: Some(&check_result),
-                bytes_after: &[],
-            };
-            log_what_is_handed_over(ctx, independent_count, refused_count, handover);
-            hand_over(&typed, own_count, handover, ctx.original_cwd.as_deref())
-        }
-        // The other files are compiled without them.
-        if env_var::BUN_JSC_logAOTPhaseTimes.get() == Some(true) {
-            bun_core::print_errorln!(
-                "AOT files are loaded again | without {} test files that reach an error",
-                refused.len()
-            );
-        }
-        // SAFETY: nothing else borrows the log between two builds.
-        unsafe { ctx.log_mut() }.reset();
-        ctx.args.define.clone_from(&defines);
+        Ok(Ok(outcome)) => outcome,
     };
-    // A part over the shared program reads none of the files it imports, so what it says about types is not true.
-    let aot = ctx.bundler_options.aot.as_ref();
-    if aot.is_some_and(|aot| aot.is_part_of_test_files)
-        && env_var::BUN_JSC_logAOTPhaseTimes.get() != Some(true)
-    {
+    // A program forked this process, and what goes to its stderr is the program's to read. One that reads nothing would leave it waiting in write().
+    if env_var::NODE_CHANNEL_FD.get().is_some() {
         // SAFETY: nothing else borrows the log behind a build.
         let messages = &mut unsafe { ctx.log_mut() }.msgs;
-        messages.retain(|message| !is_said_about_types(&message.data.text));
+        messages.retain(|message| message.kind == bun_ast::Kind::Err);
     }
     print_log(ctx.log_ref());
+    // A run from the sources has no image to say which names the files add to built-in objects.
     let names_added: &[(u32, Vec<u8>)] = match outcome.graph_bytes {
         Some(_) => &[],
-        None => &outcome.replaced_builtins.names_added_to_builtins,
+        None => &outcome.names_added_to_builtins,
     };
-    let mut check_result =
-        (watched.is_some() || !refused_files.is_empty() || !names_added.is_empty())
-            .then(|| write_check_result(&refused_files, watched, names_added));
-    if builds_what_test_parts_share() && outcome.graph_bytes.is_some() {
-        // The build ends with more built-ins than it was told of. The exports and modules are those that it was told of.
-        let told = ctx
-            .bundler_options
-            .aot
-            .as_ref()
-            .map(|aot| &aot.replaced_by_tests);
-        // What the programs below said about their parameters holds for whoever is built above this one too.
-        let mut parameters_that_start_workers =
-            (outcome.replaced_builtins.parameters_that_start_workers).clone();
-        if let Some(told) = told {
-            parameters_that_start_workers.extend_from_slice(&told.parameters_that_start_workers);
-        }
-        parameters_that_start_workers.sort_unstable();
-        parameters_that_start_workers.dedup();
-        // A spy of a package below may meet what a test file hands on.
-        let spies_on_unknown_objects = outcome.replaced_builtins.spies_on_unknown_objects
-            || told.is_some_and(|told| told.spies_on_unknown_objects);
-        let mut names_spied_on_unknown_objects =
-            (outcome.replaced_builtins.names_spied_on_unknown_objects).clone();
-        if let Some(told) = told {
-            names_spied_on_unknown_objects.extend_from_slice(&told.names_spied_on_unknown_objects);
-        }
-        names_spied_on_unknown_objects.sort_unstable();
-        names_spied_on_unknown_objects.dedup();
-        let replaced = ReplacedByTests {
-            builtins: outcome.replaced_builtins.builtins.clone(),
-            names_added_to_builtins: outcome.replaced_builtins.names_added_to_builtins.clone(),
-            parameters_that_start_workers,
-            stores_loader_functions: outcome.replaced_builtins.stores_loader_functions
-                || told.is_some_and(|told| told.stores_loader_functions),
-            evicts_any_module: outcome.replaced_builtins.evicts_any_module
-                || told.is_some_and(|told| told.evicts_any_module),
-            any_module: outcome.replaced_builtins.any_module
-                || told.is_some_and(|told| told.any_module),
-            spies_on_unknown_objects,
-            names_spied_on_unknown_objects,
-            spy_may_meet_module_that_no_file_spells: told.is_some_and(|told| {
-                told.spy_may_meet_module_that_no_file_spells
-                    || (spies_on_unknown_objects && told.hands_on_any_module)
-            }),
-            ..told.cloned().unwrap_or_default()
-        };
-        let after_graph = check_result.get_or_insert_default();
-        append_what_tests_replace(after_graph, &replaced);
-    }
+    let check_result = (watched.is_some() || !names_added.is_empty())
+        .then(|| write_check_result(watched, names_added));
     let handover = match &outcome.graph_bytes {
         Some(graph_bytes) => Handover {
             flag: GRAPH_FLAG,
@@ -370,213 +238,43 @@ pub(crate) fn start(ctx: Context<'_>, entry_points: Vec<Box<[u8]>>, independent_
             bytes_after: &[],
         },
     };
-    log_what_is_handed_over(ctx, independent_count, refused_count, handover);
+    log_what_is_handed_over(ctx, test_file_count, handover);
     hand_over(&typed, own_count, handover, ctx.original_cwd.as_deref())
 }
 
-fn log_what_is_handed_over(
-    ctx: &ContextData,
-    compiled: usize,
-    refused: usize,
-    handover: Handover<'_>,
-) {
+/// With a word of `BUN_DEBUG_TEST_AOT_WORDS` that begins with `TestRun`, or with `BUN_JSC_logAOTPhaseTimes`: what the build of a test
+/// run hands over, in one line. The hash tells two programs apart.
+fn log_what_is_handed_over(ctx: &ContextData, test_file_count: usize, handover: Handover<'_>) {
+    let words = env_var::BUN_DEBUG_TEST_AOT_WORDS.get_not_empty();
+    let is_asked = words.is_some_and(|words| {
+        bun_core::strings::split(words, b",").any(|word| word.starts_with(b"TestRun"))
+    });
     let aot = ctx.bundler_options.aot.as_ref();
-    if !says_its_form() || !aot.is_some_and(|aot| aot.runs_tests) {
+    if !(is_asked || env_var::BUN_JSC_logAOTPhaseTimes.get() == Some(true))
+        || !aot.is_some_and(|aot| aot.runs_tests)
+    {
         return;
     }
-    let are_test_files = !builds_what_test_parts_share()
-        && aot.is_some_and(|aot| aot.main_modules_beside_entry_points.is_empty());
-    let kind = match are_test_files {
-        true => "test files",
-        false => "files below the test files",
-    };
     let bytes = handover.bytes.unwrap_or_default();
+    if handover.flag == GRAPH_FLAG {
+        bun_core::print_errorln!(
+            "AOT test run | one program | test files {}",
+            test_file_count
+        );
+    }
     match handover.flag {
         GRAPH_FLAG => bun_core::print_errorln!(
-            "AOT test run | the program | {} compiled {} | refused {} | {} bytes | hash {:016x}",
-            kind,
-            compiled,
-            refused,
+            "AOT test run | the program | test files compiled {} | {} bytes | hash {:016x}",
+            test_file_count,
             bytes.len(),
             bun_wyhash::hash(bytes),
         ),
-        _ => bun_core::print_errorln!("AOT test run | no program | {} refused {}", kind, refused),
+        _ => bun_core::print_errorln!("AOT test run | no program"),
     }
 }
 
-/// How a process with `--aot-build-test-part` tells that it has checked the files and made no program. 0 is a program, and any other exit status a failed build.
-pub(crate) const PART_HAS_NO_PROGRAM: u32 = 3;
-/// The build began beside the build of the program below and guessed wrongly what that would hold. It is started again, above the program.
-pub(crate) const PART_IS_BUILT_AGAIN: u32 = 4;
-pub(crate) const PART_HAS_NO_ROOM: u32 = 5;
-/// Whether a program can wait in memory in place of a file of the temporary directory: `ProgramFile`.
-pub(crate) const PROGRAMS_CAN_WAIT_IN_MEMORY: bool = cfg!(any(
-    target_os = "linux",
-    target_os = "android",
-    target_os = "freebsd"
-));
-static TEST_PART_DESCRIPTOR: OnceLock<Fd> = OnceLock::new();
-/// The programs that the part is built above, the first of them first.
-static BELOW_TEST_PART: Guarded<Vec<(&'static [u8], &'static Graph)>> = Guarded::new(Vec::new());
-static ROOM_BELOW_TEST_PART: core::sync::atomic::AtomicUsize =
-    core::sync::atomic::AtomicUsize::new(0);
-static FIRST_BELOW_TEST_PART: OnceLock<(&'static [u8], Fd, u64)> = OnceLock::new();
-/// What the build of the last of them was told and found that tests replace.
-static REPLACED_BELOW_TEST_PART: Guarded<Option<ReplacedByTests>> = Guarded::new(None);
-/// The last of the programs below, while it is still being built.
-#[cfg(unix)]
-static STILL_BUILT_BELOW: Guarded<Option<StillBuiltBelow>> = Guarded::new(None);
-static BEGINS_BESIDE_BUILD_BELOW: AtomicBool = AtomicBool::new(false);
-
-#[cfg(unix)]
-struct StillBuiltBelow {
-    /// Where its build writes it.
-    program: Fd,
-    /// `bun test` writes a byte here when that build has ended: "1" with a program, "0" without. It writes none where the build failed.
-    ended: Fd,
-    /// The files that it will hold, as far as this build can tell.
-    guess: std::collections::BTreeSet<Box<[u8]>>,
-    /// What this build has asked about and no program that is there holds.
-    asked: std::collections::BTreeSet<Box<[u8]>>,
-}
-static BUILDS_WHAT_TEST_PARTS_SHARE: AtomicBool = AtomicBool::new(false);
-static BUILDS_PACKAGES_ALONE: AtomicBool = AtomicBool::new(false);
-static BUILDS_LIBRARY_ALONE: AtomicBool = AtomicBool::new(false);
-static BUILDS_REFERENCE_LIBRARY: AtomicBool = AtomicBool::new(false);
-static REFERENCE_LIBRARY_IMAGE: Guarded<Option<&'static [u8]>> = Guarded::new(None);
-/// The first of `BELOW_TEST_PART` is the library that this Bun holds compiled.
-static IS_ABOVE_LIBRARY_OF_THIS_BUN: AtomicBool = AtomicBool::new(false);
-static BUILDS_WHAT_COMPUTED_IMPORTS_REACH: AtomicBool = AtomicBool::new(false);
-/// Not 0: of what the test files share and no program below holds, the build takes the lowest files: one part in so many.
-static LOWEST_PART_IN: AtomicU32 = AtomicU32::new(0);
-static THREADS_OF_TEST_PART: AtomicU32 = AtomicU32::new(0);
-static MEGABYTES_THAT_BUILD_MAY_TAKE: AtomicU32 = AtomicU32::new(0);
-/// In the place of the descriptor of the program below.
-const SHARED_BY_TEST_PARTS: &[u8] = b"shared";
-const TEST_PART_FLAG: &[u8] = b"--aot-build-test-part=";
-
-#[inline]
-pub(crate) fn builds_test_part() -> bool {
-    TEST_PART_DESCRIPTOR.get().is_some()
-}
-
-#[cold]
-#[inline(never)]
-pub(crate) fn use_test_part_descriptor(text: &[u8]) {
-    let mut words = bun_core::strings::split(text, b",");
-    let descriptor = words.next().and_then(parse_descriptor);
-    for word in words {
-        if word == SHARED_BY_TEST_PARTS {
-            BUILDS_WHAT_TEST_PARTS_SHARE.store(true, Ordering::Relaxed);
-        } else if word == b"packages" {
-            BUILDS_PACKAGES_ALONE.store(true, Ordering::Relaxed);
-        } else if word == b"library" {
-            BUILDS_LIBRARY_ALONE.store(true, Ordering::Relaxed);
-        } else if word == b"reference-build" {
-            BUILDS_REFERENCE_LIBRARY.store(true, Ordering::Relaxed);
-        } else if word == b"computed" {
-            BUILDS_WHAT_COMPUTED_IMPORTS_REACH.store(true, Ordering::Relaxed);
-        } else if let Some(parts) = word.strip_prefix(b"lowest-in:") {
-            let parts = bun_core::fmt::parse_int::<u32>(parts, 10).unwrap_or(0);
-            LOWEST_PART_IN.store(parts, Ordering::Relaxed);
-        } else if let Some(megabytes) = word.strip_prefix(b"may-take:") {
-            let megabytes = bun_core::fmt::parse_int::<u32>(megabytes, 10).unwrap_or(0);
-            MEGABYTES_THAT_BUILD_MAY_TAKE.store(megabytes, Ordering::Relaxed);
-        } else if let Some(count) = word.strip_prefix(b"threads:") {
-            let count = bun_core::fmt::parse_int::<u32>(count, 10).unwrap_or(0);
-            THREADS_OF_TEST_PART.store(count, Ordering::Relaxed);
-        } else {
-            #[cfg(unix)]
-            {
-                if let Some(numbers) = word.strip_prefix(b"later:") {
-                    let numbers = bun_core::strings::split_once_char(numbers, b':');
-                    let descriptors = numbers.and_then(|(program, ended)| {
-                        Some((parse_descriptor(program)?, parse_descriptor(ended)?))
-                    });
-                    let Some((program, ended)) = descriptors else {
-                        Output::err_generic(
-                            "--aot-build-test-part: \"{}\" names no two file descriptors",
-                            (BStr::new(word),),
-                        );
-                        Global::exit(1)
-                    };
-                    BEGINS_BESIDE_BUILD_BELOW.store(true, Ordering::Relaxed);
-                    *STILL_BUILT_BELOW.lock() = Some(StillBuiltBelow {
-                        program,
-                        ended,
-                        guess: Default::default(),
-                        asked: Default::default(),
-                    });
-                    continue;
-                }
-                let colon = bun_core::strings::index_of_char_usize(word, b':');
-                let number = || parse_descriptor(&word[colon? + 1..]);
-                let Some((image, graph, offset)) =
-                    number().and_then(Graph::read_image_and_its_offset)
-                else {
-                    Output::err_generic(
-                        "--aot-build-test-part: the program in \"{}\" could not be read",
-                        (BStr::new(word),),
-                    );
-                    Global::exit(1)
-                };
-                if word.starts_with(b"reference:") {
-                    *REFERENCE_LIBRARY_IMAGE.lock() = Some(image);
-                    continue;
-                }
-                BELOW_TEST_PART.lock().push((image, graph));
-                note_program_below(number(), image, offset);
-                // The library that this Bun holds was built for every run, so it says nothing about this one.
-                if word.starts_with(b"library:") {
-                    IS_ABOVE_LIBRARY_OF_THIS_BUN.store(true, Ordering::Relaxed);
-                    continue;
-                }
-                let after = number().and_then(Graph::read_after_graph);
-                let (_, replaced) = split_off_what_tests_replace(&after.unwrap_or_default());
-                *REPLACED_BELOW_TEST_PART.lock() = replaced;
-            }
-        }
-    }
-    let Some(descriptor) = descriptor else {
-        Output::err_generic(
-            "--aot-build-test-part: \"{}\" is not a file descriptor",
-            (BStr::new(text),),
-        );
-        Global::exit(1)
-    };
-    let _ = TEST_PART_DESCRIPTOR.set(descriptor);
-    *BUILD_BEGAN.lock() = Some(std::time::Instant::now());
-    // A program of test files is built beside the tests, which are what the user waits for. It takes the processors that they leave:
-    // workers that have no program to run are idle, and then it has them all. The threads that come inherit this.
-    // So does a build that begins beside the build of the program below, which the run waits for first. When that has ended this
-    // one is alone.
-    #[cfg(unix)]
-    if (!builds_what_test_parts_share() && !BELOW_TEST_PART.lock().is_empty())
-        || begins_beside_build_below()
-    {
-        // SAFETY: it changes the priority of the calling thread and touches no memory.
-        unsafe { libc::nice(10) };
-    }
-}
-
-/// When this process began to build.
-static BUILD_BEGAN: Guarded<Option<std::time::Instant>> = Guarded::new(None);
-
-/// With `BUN_JSC_logAOTPhaseTimes`: how long after the process began to build it has come this far. The stages of the compiler
-/// time themselves. This is for what the process does around them.
-pub(crate) fn log_step_of_build(step: &str) {
-    if env_var::BUN_JSC_logAOTPhaseTimes.get() == Some(true) {
-        let began = *BUILD_BEGAN.lock();
-        bun_core::print_errorln!(
-            "AOT part build step | {} | at {} ms",
-            step,
-            began.map_or(0, |began| began.elapsed().as_millis()),
-        );
-    }
-}
-
-/// With `BUN_JSC_logAOTPhaseTimes`: how long after the process that runs the tests began it has come this far. The builders time
-/// themselves. This is for what lies in front of the first build, between two builds, and behind the last one up to the first result.
+/// With `BUN_JSC_logAOTPhaseTimes`: how long after the process began it has come this far. The stages of the compiler time
+/// themselves. This is for what lies in front of the build, and behind it up to the first result.
 pub(crate) fn log_step_of_test_run(step: core::fmt::Arguments<'_>) {
     if env_var::BUN_JSC_logAOTPhaseTimes.get() == Some(true) {
         let elapsed = bun_core::time::nano_timestamp() - bun_core::start_time();
@@ -603,53 +301,6 @@ pub(crate) fn log_first_time_in_test_run(step: &'static str) {
     log_step_of_test_run(format_args!("{step}"));
 }
 
-/// With `BUN_JSC_logAOTPhaseTimes`: what the build of a part took from this process, in one line.
-fn log_cost_of_build() {
-    #[cfg(unix)]
-    if env_var::BUN_JSC_logAOTPhaseTimes.get() == Some(true) {
-        let mut usage = core::mem::MaybeUninit::<libc::rusage>::zeroed();
-        // SAFETY: all zeroes is a valid `rusage`, and the kernel writes one.
-        let usage = unsafe {
-            libc::getrusage(libc::RUSAGE_SELF, usage.as_mut_ptr());
-            usage.assume_init()
-        };
-        let ms = |time: libc::timeval| time.tv_sec as i64 * 1000 + time.tv_usec as i64 / 1000;
-        let text = File::read_from(Fd::cwd(), b"/proc/self/smaps_rollup").unwrap_or_default();
-        let mut lines = bun_core::strings::split(&text, b"\n");
-        let own = lines.find(|line| line.starts_with(b"Private_Dirty:"));
-        bun_core::print_errorln!(
-            "AOT part build | {} | wall {} ms | user {} ms | system {} ms | most resident {} KB | at the end {}",
-            match (builds_what_test_parts_share(), builds_packages_alone()) {
-                (true, _) if builds_library_alone() => "Bun's own code",
-                (true, true) => "the packages that test files share",
-                (true, false) if builds_what_computed_imports_reach() =>
-                    "what computed imports reach",
-                (true, false) if percent_of_files_that_go_lowest().is_some() =>
-                    "the lowest of what test files share",
-                (true, false) => "what test files share",
-                (false, _) => "test files",
-            },
-            BUILD_BEGAN
-                .lock()
-                .map_or(0, |began| began.elapsed().as_millis()),
-            ms(usage.ru_utime),
-            ms(usage.ru_stime),
-            Bun__AOT__peakResidentMegabytesOfProcess() * 1024,
-            BStr::new(own.unwrap_or_default()),
-        );
-        let may_take = u64::from(MEGABYTES_THAT_BUILD_MAY_TAKE.load(Ordering::Relaxed));
-        if may_take != 0 {
-            let took = Bun__AOT__peakResidentMegabytesOfProcess() as u64;
-            bun_core::print_errorln!(
-                "AOT part build | the plan said that it may take {} MB | most resident {} MB: {} percent of that",
-                may_take,
-                took,
-                took * 100 / may_take,
-            );
-        }
-    }
-}
-
 /// Resetting the kernel's peak RSS loses it, so record it here first. Returns the peak so far.
 #[cfg(unix)]
 pub(crate) fn record_peak_rss_kb(kilobytes: u64) -> u64 {
@@ -662,6 +313,19 @@ pub(crate) fn record_peak_rss_kb(kilobytes: u64) -> u64 {
 
 /// `exited_mb` is what the kernel reports of exited workers. It folds in the processes that a worker waited for, and a spawned
 /// process starts from the peak of its parent, so it says something about a worker only above the peak of this process.
+pub(crate) fn peak_of_this_process_mb() -> u32 {
+    #[cfg(unix)]
+    let before_resets = record_peak_rss_kb(0) / 1024;
+    #[cfg(not(unix))]
+    let before_resets = 0;
+    let peak = (Bun__AOT__peakResidentMegabytesOfProcess() as u64).max(before_resets);
+    u32::try_from(peak).unwrap_or(u32::MAX)
+}
+
+pub(crate) fn logs_accounts() -> bool {
+    env_var::BUN_JSC_logAOTPhaseTimes.get() == Some(true)
+}
+
 pub(crate) fn log_largest_worker(reported_mb: u32, exited_mb: u32) {
     if env_var::BUN_JSC_logAOTPhaseTimes.get() == Some(true) {
         let is_inherited = exited_mb as usize <= Bun__AOT__peakResidentMegabytesOfProcess();
@@ -678,7 +342,7 @@ pub(crate) fn log_largest_worker(reported_mb: u32, exited_mb: u32) {
 /// With `BUN_JSC_logAOTPhaseTimes`: what a process of a test run has taken by its end, in one line, so that the lines of a run add
 /// up to all of its processor time. Called on the main thread: what the process took less what that thread took is the other
 /// threads'. "Waited for" is what its children took, and theirs, as far as each was waited for: for the coordinator that is every
-/// builder and every worker.
+/// worker.
 pub(crate) fn log_account_of_process(who: core::fmt::Arguments<'_>) {
     #[cfg(unix)]
     if env_var::BUN_JSC_logAOTPhaseTimes.get() == Some(true) {
@@ -711,44 +375,12 @@ pub(crate) fn log_account_of_process(who: core::fmt::Arguments<'_>) {
             own.ru_majflt,
             own.ru_nvcsw,
             own.ru_nivcsw,
-            (Bun__AOT__peakResidentMegabytesOfProcess() as u64).max(record_peak_rss_kb(0) / 1024),
+            peak_of_this_process_mb(),
         );
         Output::flush();
     }
     #[cfg(not(unix))]
     let _ = who;
-}
-
-fn exit_builder(exit_code: u32) -> ! {
-    log_cost_of_build();
-    // Which layer is in the line above.
-    log_account_of_process(format_args!(
-        "builder of {}",
-        match builds_what_test_parts_share() {
-            true => "a layer",
-            false => "test files",
-        }
-    ));
-    Global::exit(exit_code)
-}
-
-/// How many threads the process that started this one gives the build.
-pub(crate) fn threads_of_test_part() -> Option<NonZeroU32> {
-    NonZeroU32::new(THREADS_OF_TEST_PART.load(Ordering::Relaxed))
-}
-
-pub(crate) fn builds_what_test_parts_share() -> bool {
-    BUILDS_WHAT_TEST_PARTS_SHARE.load(Ordering::Relaxed)
-}
-
-/// What the test files import is built once, as programs of its own, and the test files are built above them, a few at a time.
-pub(crate) fn test_parts_share_a_program(ctx: &ContextData) -> bool {
-    let aot = ctx.bundler_options.aot.as_ref();
-    // The programs go to a worker by descriptor, and the engine has to take one image above another: it does not where images are
-    // position independent (macOS, Windows, a hardened build).
-    cfg!(unix)
-        && Bun__AOT__takesImagesAboveOthers()
-        && aot.is_some_and(|aot| !aot.test_run_is_one_program)
 }
 
 fn number_behind_word(prefix: &[u8]) -> Option<u32> {
@@ -758,853 +390,20 @@ fn number_behind_word(prefix: &[u8]) -> Option<u32> {
     bun_core::fmt::parse_int::<u32>(digits, 10).ok()
 }
 
-pub(crate) fn test_run_layers(ctx: &ContextData) -> u32 {
-    if !test_parts_share_a_program(ctx) {
-        return 0;
-    }
-    number_behind_word(b"TestRunLayers:").map_or(2, |layers| layers.max(1))
-}
-
-pub(crate) fn is_number_of_layers_given() -> bool {
-    number_behind_word(b"TestRunLayers:").is_some()
-}
-
-pub(crate) const BYTES_HELD_WHEN_MODULES_ARE_BOUND: u64 = 13;
-const BYTES_HELD_FOR_A_BYTE_COMPILED_ABOVE_PACKAGES: u64 = 9;
-const BYTES_HELD_BY_ANY_BUILD: u64 = 150 << 20;
-const PERCENT_OF_MEMORY_THAT_IS_PLANNED_FOR: u64 = 93;
-const MOST_PROGRAMS_OF_PROJECT: u32 = 4;
-
-pub(crate) fn plan_programs_of_project(memory_limit: Option<u64>, bytes_of_project: u64) -> u32 {
-    let memory = memory_of_job::find(memory_limit);
-    let planned_for = memory / 100 * PERCENT_OF_MEMORY_THAT_IS_PLANNED_FOR;
-    let estimate = |programs: u32| {
-        BYTES_HELD_BY_ANY_BUILD
-            + bytes_of_project * BYTES_HELD_WHEN_MODULES_ARE_BOUND
-            + bytes_of_project.div_ceil(u64::from(programs))
-                * BYTES_HELD_FOR_A_BYTE_COMPILED_ABOVE_PACKAGES
-    };
-    let least = estimate(MOST_PROGRAMS_OF_PROJECT);
-    let programs = (1..MOST_PROGRAMS_OF_PROJECT)
-        .find(|&programs| estimate(programs) <= planned_for.max(least + least / 20))
-        .unwrap_or(MOST_PROGRAMS_OF_PROJECT);
-    MEGABYTES_THAT_BUILD_MAY_TAKE.store((estimate(programs) >> 20) as u32, Ordering::Relaxed);
-    log_step_of_test_run(format_args!(
-        "the layers are planned: the files of the project hold {} KB | as one program they may take {} MB | the run can get {} MB and plans for {} | {} programs, each may take {} MB",
-        bytes_of_project >> 10,
-        estimate(1) >> 20,
-        memory >> 20,
-        planned_for >> 20,
-        programs,
-        estimate(programs) >> 20,
-    ));
-    programs
-}
-
-/// The files of packages that only an import with a computed name reaches, `import(`a/b/${name}.js`)`, are a program of their own,
-/// over the packages and under the files of the project. There can be thousands behind one import. The word
-/// `TestRunComputedLayer:0` leaves them to the program that holds the import.
-pub(crate) fn test_run_has_layer_of_computed_imports(ctx: &ContextData) -> bool {
-    test_run_layers(ctx) > 1 && number_behind_word(b"TestRunComputedLayer:") != Some(0)
-}
-
-/// The word `TestRunNamesPackages:1`, with BUN_AOT_TESTS_NAME_WHAT_THEY_USE.
-pub(crate) fn packages_are_told_what_is_used() -> bool {
-    number_behind_word(b"TestRunNamesPackages:") == Some(1)
-}
-
-pub(crate) fn builds_what_computed_imports_reach() -> bool {
-    BUILDS_WHAT_COMPUTED_IMPORTS_REACH.load(Ordering::Relaxed)
-}
-
-/// The build of the layer above that one begins beside it: see `begins_beside_build_below`. With the word
-/// `TestRunLayersBuiltAlone`, for measuring, every layer is built with nothing beside it.
-pub(crate) fn test_run_builds_layers_side_by_side() -> bool {
-    let words = env_var::BUN_DEBUG_TEST_AOT_WORDS.get_not_empty();
-    !words.is_some_and(|words| {
-        bun_core::strings::split(words, b",").any(|word| word == b"TestRunLayersBuiltAlone")
-    })
-}
-
-/// The build has nothing to compile. What is built above does without its program.
-pub(crate) fn exit_without_program() -> ! {
-    Output::flush();
-    exit_builder(PART_HAS_NO_PROGRAM)
-}
-
-/// For a build that takes the lowest of the files that no program below holds: how much of them, by the bytes of their texts.
-/// The word `TestRunLowestPercent:<n>` says otherwise than the number of programs that are still to come.
-pub(crate) fn percent_of_files_that_go_lowest() -> Option<u32> {
-    let parts = NonZeroU32::new(LOWEST_PART_IN.load(Ordering::Relaxed))?;
-    let even_share = 100 / parts;
-    let written = number_behind_word(b"TestRunLowestPercent:");
-    Some(written.map_or(even_share, |percent| percent.min(100)))
-}
-
-/// Of what the test files share, the files of packages are a program of their own, which is built first.
-pub(crate) fn builds_packages_alone() -> bool {
-    BUILDS_PACKAGES_ALONE.load(Ordering::Relaxed)
-}
-
-/// Bun's own code and nothing else, for every test run of this Bun: no project is known. A step of Bun's build asks for it.
-pub(crate) fn builds_library_alone() -> bool {
-    BUILDS_LIBRARY_ALONE.load(Ordering::Relaxed)
-}
-
-pub(crate) fn builds_reference_library() -> bool {
-    BUILDS_REFERENCE_LIBRARY.load(Ordering::Relaxed)
-}
-
-pub(crate) fn reference_library_image() -> Option<&'static [u8]> {
-    *REFERENCE_LIBRARY_IMAGE.lock()
-}
-
-/// Whether a program of this run lies below: one whose build knew the files of the run.
-pub(crate) fn is_above_program_of_run() -> bool {
-    let library = usize::from(is_above_library_of_this_bun());
-    BELOW_TEST_PART.lock().len() > library
-}
-
-pub(crate) fn is_above_library_of_this_bun() -> bool {
-    IS_ABOVE_LIBRARY_OF_THIS_BUN.load(Ordering::Relaxed)
-}
-
-/// Bun's own code, compiled when this Bun was built (`compiledLibrary` of scripts/build/config.ts): a section of the executable
-/// that no segment holds, compressed. Nothing reads it until a test run is built in layers: it is the lowest of them.
-/// `None`: this Bun was built without it, and the lowest layer of each run holds that code.
-#[cfg(unix)]
-fn read_library_of_this_bun(reads_bytes: bool) -> Option<Vec<u8>> {
-    use bun_exe_format::image::KnownSection;
-    use bun_exe_format::section::find_known_section;
-    let path = bun_core::self_exe_path().ok()?;
-    let read = bun_standalone_graph::with_executable_image(path, |file| {
-        let section = find_known_section(file, KnownSection::CompiledLibrary).ok()?;
-        let size = if reads_bytes { section.size } else { 0 };
-        let mut bytes = vec![0; size as usize];
-        (file.read)(section.file_offset as usize, &mut bytes).then_some(bytes)
-    });
-    read.ok()?
-}
-
-/// Whether the layers of this run stand on the library that this Bun holds compiled. That was compiled as a run without any
-/// option for the compiler compiles it.
-pub(crate) fn stands_on_library_of_this_bun(ctx: &ContextData) -> bool {
-    let Some(aot) = ctx.bundler_options.aot.as_ref() else {
-        return false;
-    };
-    let is_compiled_as_always = aot.heap == HeapSize::Standard
-        && !aot.reports_type_mismatches
-        && aot.option_words.is_empty();
-    #[cfg(unix)]
-    {
-        static HOLDS: OnceLock<bool> = OnceLock::new();
-        test_run_layers(ctx) > 0
-            && is_compiled_as_always
-            && *HOLDS.get_or_init(|| read_library_of_this_bun(false).is_some())
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = is_compiled_as_always;
-        false
-    }
-}
-
-/// In a file of its own, as a layer that the run builds is.
-#[cfg(unix)]
-pub(crate) fn unpack_library_of_this_bun() -> Option<TestPartFile> {
-    let section = read_library_of_this_bun(true)?;
-    let unpack = || {
-        // Two thirds of the program are zeros in one piece, the room for what the programs above bring. The section leaves them
-        // out: how many bytes lie in front of them, how many they are, and the rest, compressed.
-        let (before, behind) = section.split_first_chunk::<8>()?;
-        let (zeros, compressed) = behind.split_first_chunk::<8>()?;
-        let (before, zeros) = (u64::from_le_bytes(*before), u64::from_le_bytes(*zeros));
-        let rest = bun_zstd::decompress_alloc(compressed).ok()?;
-        let (first, second) = rest.split_at_checked(usize::try_from(before).ok()?)?;
-        let (descriptor, _) = create_unnamed_file(ProgramFile::Deleted).ok()?;
-        let file = TestPartFile { descriptor };
-        // A file has zeros where nothing was written.
-        let behind_zeros = i64::try_from(before.checked_add(zeros)?).ok()?;
-        bun_sys::ftruncate(descriptor, behind_zeros + second.len() as i64).ok()?;
-        let written = File::borrow(&descriptor);
-        written.pwrite_all(first, 0).ok()?;
-        written.pwrite_all(second, behind_zeros).ok()?;
-        Some(file)
-    };
-    let Some(file) = unpack() else {
-        Output::err_generic(
-            "Bun's own code, which this executable holds compiled, could not be unpacked",
-            (),
-        );
-        Global::exit(1)
-    };
-    log_step_of_build("Bun's own code is unpacked");
-    Some(file)
-}
-
-#[cfg(unix)]
-fn note_program_below(descriptor: Option<Fd>, image: &'static [u8], offset: u64) {
-    let size = descriptor.and_then(|descriptor| bun_sys::get_file_size(descriptor).ok());
-    let room = Graph::room_of_program(size.unwrap_or(0) as usize);
-    ROOM_BELOW_TEST_PART.fetch_add(room, Ordering::Relaxed);
-    if let Some(file) = descriptor {
-        let _ = FIRST_BELOW_TEST_PART.set((image, file, offset));
-    }
-}
-
-pub(crate) fn place_of_program_being_built() -> Option<PlaceOfProgram<'static>> {
-    let mapped_at = Graph::address_of_program(ROOM_BELOW_TEST_PART.load(Ordering::Relaxed))?;
-    let first_below = FIRST_BELOW_TEST_PART
-        .get()
-        .filter(|_| builds_what_test_parts_share());
-    Some(PlaceOfProgram {
-        mapped_at,
-        first_below: first_below.map(|&(image, file, offset)| FirstProgramBelow {
-            image,
-            file,
-            offset,
-        }),
-    })
-}
-
-pub(crate) fn images_below_test_part() -> Vec<&'static [u8]> {
-    let below = BELOW_TEST_PART.lock();
-    below.iter().map(|&(image, _)| image).collect()
-}
-
-pub(crate) fn is_module_below_test_part(path: &[u8]) -> bool {
-    if is_module_of_program_that_is_there(path) {
-        return true;
-    }
-    #[cfg(unix)]
-    return STILL_BUILT_BELOW
-        .lock()
-        .as_mut()
-        .is_some_and(|still_built| {
-            if !still_built.asked.contains(path) {
-                still_built.asked.insert(Box::from(path));
-            }
-            still_built.guess.contains(path)
-        });
-    #[cfg(not(unix))]
-    false
-}
-
-/// The process was started while the program right below its own was still being built. Of that program a front end needs to know
-/// which files it holds, and nothing else until it hands its work to the engine. So this build guesses them, loads and binds its
-/// files beside the other build, on processors that would idle, and waits where it would take much memory. Then it looks at the
-/// program. Where that holds what was guessed, nothing was lost, and where not, `bun test` starts this build again, no later than
-/// it would have started it.
-pub(crate) fn begins_beside_build_below() -> bool {
-    BEGINS_BESIDE_BUILD_BELOW.load(Ordering::Relaxed)
-}
-
-/// `files`: what the program that is still being built will hold. What was asked before counts for nothing.
-pub(crate) fn guess_what_program_below_holds(files: Vec<Box<[u8]>>) {
-    #[cfg(unix)]
-    if let Some(still_built) = STILL_BUILT_BELOW.lock().as_mut() {
-        still_built.guess = files.into_iter().collect();
-        still_built.asked.clear();
-    }
-    #[cfg(not(unix))]
-    drop(files);
-}
-
-/// `ImagesBelow::wait_for_all`
-pub(crate) fn wait_for_program_below() -> Vec<&'static [u8]> {
-    #[cfg(unix)]
-    if let Some(still_built) = STILL_BUILT_BELOW.lock().take() {
-        wait_for(&still_built);
-    }
-    images_below_test_part()
-}
-
-#[cfg(unix)]
-fn wait_for(still_built: &StillBuiltBelow) {
-    log_step_of_build("it waits for the program below");
-    let mut answer = [0u8; 1];
-    let has_program = loop {
-        match bun_sys::read(still_built.ended, &mut answer) {
-            Ok(1) => break answer[0] == b'1',
-            Err(error) if error.get_errno() == bun_sys::E::EINTR => {}
-            // The build below failed, or `bun test` is gone: nobody waits for this program. Or that build is started again, with
-            // another file to write to than the one that this build holds: then so is this one.
-            Ok(_) => exit_builder(PART_IS_BUILT_AGAIN),
-            Err(error) => {
-                Output::err(
-                    error,
-                    "--aot-build-test-part: how the build of the program below ended could not be read",
-                    (),
-                );
-                Output::flush();
-                exit_builder(1)
-            }
-        }
-    };
-    log_step_of_build("the program below is there");
-    let mut is_as_guessed = true;
-    if has_program {
-        let Some((image, graph, offset)) = Graph::read_image_and_its_offset(still_built.program)
-        else {
-            Output::err_generic(
-                "--aot-build-test-part: the program below could not be read",
-                (),
-            );
-            Output::flush();
-            exit_builder(1)
-        };
-        BELOW_TEST_PART.lock().push((image, graph));
-        note_program_below(Some(still_built.program), image, offset);
-        let after = Graph::read_after_graph(still_built.program).unwrap_or_default();
-        let (_, replaced) = split_off_what_tests_replace(&after);
-        // This build was told what the program under that one ends with.
-        is_as_guessed = replaced == *REPLACED_BELOW_TEST_PART.lock();
-    }
-    let differing = (still_built.asked.iter())
-        .filter(|path| {
-            is_module_of_program_that_is_there(path) != still_built.guess.contains(*path)
-        })
-        .count();
-    if env_var::BUN_JSC_logAOTPhaseTimes.get() == Some(true) {
-        Output::flush();
-        bun_core::print_errorln!(
-            "AOT part build | began beside the build below | files guessed {} | files asked about {} | answered otherwise by the program {} | it ends with what tests replace as it began {}",
-            still_built.guess.len(),
-            still_built.asked.len(),
-            differing,
-            is_as_guessed,
-        );
-        Output::flush();
-    }
-    if differing > 0 || !is_as_guessed {
-        Output::flush();
-        exit_builder(PART_IS_BUILT_AGAIN)
-    }
-}
-
-fn is_module_of_program_that_is_there(path: &[u8]) -> bool {
-    let below = BELOW_TEST_PART.lock();
-    // The graph of a program that does not run knows its entry points alone. What they import is there as well: built again above, the file would run twice.
-    let images: Vec<&'static [u8]> = below.iter().map(|&(image, _)| image).collect();
-    below.iter().any(|(_, graph)| graph.is_source_file(path))
-        || bun_jsc::compiled_program::images_hold_file(&images, path)
-}
-
-pub(crate) fn replaced_below_test_part() -> ReplacedByTests {
-    REPLACED_BELOW_TEST_PART.lock().clone().unwrap_or_default()
-}
-
-const MARK_OF_WHAT_TESTS_REPLACE: &[u8; 8] = b"replaced";
-
-/// A program that others are built above says behind its graph, and behind the check result, what its build took tests to replace.
-fn append_what_tests_replace(after_graph: &mut Vec<u8>, replaced: &ReplacedByTests) {
-    let bytes = replaced.to_bytes();
-    after_graph.extend_from_slice(&bytes);
-    after_graph.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
-    after_graph.extend_from_slice(MARK_OF_WHAT_TESTS_REPLACE);
-}
-
-fn split_off_what_tests_replace(after_graph: &[u8]) -> (&[u8], Option<ReplacedByTests>) {
-    let split = || {
-        let rest = after_graph.strip_suffix(MARK_OF_WHAT_TESTS_REPLACE)?;
-        let (rest, length) = rest.split_last_chunk::<4>()?;
-        let start = rest
-            .len()
-            .checked_sub(u32::from_le_bytes(*length) as usize)?;
-        Some((&rest[..start], ReplacedByTests::from_bytes(&rest[start..])?))
-    };
-    match split() {
-        Some((rest, replaced)) => (rest, Some(replaced)),
-        None => (after_graph, None),
-    }
-}
-
-/// How many test files a program holds, where `bun test --aot` was told to build more than one.
-pub(crate) fn test_part_files(ctx: &ContextData) -> Option<u32> {
-    // A process that runs test files starts a VM and the shared program, so it gets more than one file to run.
-    const FILES_ABOVE_SHARED_PROGRAM: u32 = 16;
-    let aot = ctx.bundler_options.aot.as_ref()?;
-    let written = aot.test_run_part_files.map(|files| files.max(1));
-    // Each program above the layers has a process of its own. Without `--parallel`, which gives every file a global object of its own,
-    // and without `--isolate` the test files share one, so they are one program. Only a word brings layers to such a run: splits_test_files().
-    let share_global_object = ctx.test_options.parallel <= 1 && !ctx.test_options.isolate;
-    let files = match share_global_object {
-        true => u32::MAX,
-        false => FILES_ABOVE_SHARED_PROGRAM,
-    };
-    written.or_else(|| test_parts_share_a_program(ctx).then_some(files))
-}
-
-/// Whether this `bun test --aot` builds a program per part.
-///
-/// `reach_more_source_than`: whether the test files and what they import hold more bytes of source. Asked last.
-pub(crate) fn splits_test_files(
-    ctx: &ContextData,
-    reach_more_source_than: impl FnOnce(u64) -> bool,
-) -> bool {
-    let Some(aot) = ctx.bundler_options.aot.as_ref() else {
-        return false;
-    };
-    // Each program above the layers runs in a worker process, under the coordinator of `--parallel`. Without that flag plain
-    // `bun test` runs every file in its own process: they share a global object unless `--isolate` is there, `process.exitCode`
-    // is the command's, and the report is another runner's. So without it the test files are one program.
-    let runs_in_workers = ctx.test_options.parallel > 0;
-    // The word `TestRunLayers:1` or `TestRunLayers:2` brings layers whatever the flags are and however small the run is.
-    let words = env_var::BUN_DEBUG_TEST_AOT_WORDS.get_not_empty();
-    let is_told_to_build_layers = test_run_layers(ctx) > 0
-        && words.is_some_and(|words| {
-            bun_core::strings::split(words, b",").any(|word| word.starts_with(b"TestRunLayers:"))
-        });
-    let is_told_to = aot.test_run_part_files.is_some() || is_told_to_build_layers;
-    !builds_test_part()
-        && !aot.checks_only
-        && (runs_in_workers || is_told_to)
-        && ctx.debug.hot_reload != HotReload::Watch
-        && env_var::BUN_AOT_TEST_FILES_FROM_DISK.get() != Some(true)
-        && test_part_files(ctx).is_some()
-        // Several programs are there for the memory that the build of one large program takes, and for nothing else: they are
-        // never sooner done, and a small run loses seconds (what the test files share has to be open to whatever they may do
-        // with it, and the lowest layer holds all of Bun's own code). So a run is one program where the build of that fits into
-        // the memory that the run can get.
-        && (is_told_to || reach_more_source_than(source_that_fits_in_memory(ctx)))
-}
-
-/// How many bytes of source a program may hold for its build to fit into the memory that this `bun test --aot` can get.
-pub(crate) fn source_that_fits_in_memory(ctx: &ContextData) -> u64 {
-    memory_of_job::find(ctx.test_options.aot_memory_limit) / BYTES_HELD_FOR_A_BYTE_OF_SOURCE
-}
-
-/// What a build holds at its highest for each byte of source that it compiles: the most that was measured, since a guess that is
-/// too low ends with the system killing the build. On a large application (10-30): its packages 40 (4.09 GB for 102 MB), its own
-/// files 24, everything with the test files as one program 31 (10.3 GB for 334 MB). It falls as the compiler's memory does.
-pub(crate) const BYTES_HELD_FOR_A_BYTE_OF_SOURCE: u64 = 40;
-
-fn says_its_form() -> bool {
-    let words = env_var::BUN_DEBUG_TEST_AOT_WORDS.get_not_empty();
-    let is_asked = words.is_some_and(|words| {
-        bun_core::strings::split(words, b",").any(|word| word.starts_with(b"TestRun"))
-    });
-    is_asked || env_var::BUN_JSC_logAOTPhaseTimes.get() == Some(true)
-}
-
-/// With a word of `BUN_DEBUG_TEST_AOT_WORDS` that begins with `TestRun`, or with `BUN_JSC_logAOTPhaseTimes`: how this
-/// `bun test --aot` is built, in one line. A test that means to test layers looks for it: the flags, the size of the project and
-/// the platform all have a say in the form, and a run in another form passes as well.
-pub(crate) fn log_form_of_test_run(ctx: &ContextData, file_count: usize, splits_files: bool) {
-    if builds_test_part() || !says_its_form() {
-        return;
-    }
-    let files_to_a_program = test_part_files(ctx).unwrap_or(0).min(file_count as u32);
-    match (splits_files, test_run_layers(ctx)) {
-        (false, _) if !cfg!(unix) || !Bun__AOT__takesImagesAboveOthers() => {
-            bun_core::print_errorln!(
-                "AOT test run | one program: this Bun loads one program a realm | test files {}",
-                file_count,
-            );
-        }
-        (false, _) => {
-            bun_core::print_errorln!("AOT test run | one program | test files {}", file_count);
-        }
-        (true, 0) => bun_core::print_errorln!(
-            "AOT test run | programs without layers: this Bun loads one program a realm | test files {} | to a program {}",
-            file_count,
-            files_to_a_program,
-        ),
-        (true, layers) => bun_core::print_errorln!(
-            "AOT test run | layers {} | test files {} | to a program {}{}{}",
-            layers,
-            file_count,
-            files_to_a_program,
-            match test_run_has_layer_of_computed_imports(ctx) {
-                true => " | and a layer for what computed imports reach",
-                false => "",
-            },
-            match stands_on_library_of_this_bun(ctx) {
-                true => " | over Bun's own code as this Bun holds it",
-                false => "",
-            },
-        ),
-    }
-}
-
-static LISTS_FOR_BUILDS_OF_LAYERS: Guarded<Vec<u8>> = Guarded::new(Vec::new());
-static LISTS_HANDED_BY_RUN: Guarded<Option<Vec<Vec<Box<[u8]>>>>> = Guarded::new(None);
-
-pub(crate) fn hand_lists_to_builds_of_layers(lists: &[&[Box<[u8]>]]) {
-    let mut written = Vec::new();
-    for list in lists {
-        for entry in *list {
-            written.extend_from_slice(entry);
-            written.push(0);
-        }
-        written.push(0);
-    }
-    *LISTS_FOR_BUILDS_OF_LAYERS.lock() = written;
-}
-
-pub(crate) fn take_lists_handed_by_run() -> Option<Vec<Vec<Box<[u8]>>>> {
-    let words = env_var::BUN_DEBUG_TEST_AOT_WORDS.get_not_empty();
-    let reads_itself = words.is_some_and(|words| {
-        bun_core::strings::split(words, b",").any(|word| word == b"TestRunBuildsReadTheProject")
-    });
-    LISTS_HANDED_BY_RUN.lock().take().filter(|_| !reads_itself)
-}
-
-pub(crate) fn read_test_part() -> Vec<Box<[u8]>> {
-    let descriptor = *TEST_PART_DESCRIPTOR.get().expect("builds a part");
-    let mut list = Vec::new();
-    let mut chunk = [0u8; 64 * 1024];
-    loop {
-        match bun_sys::pread(descriptor, &mut chunk, list.len() as i64) {
-            Ok(0) => break,
-            Ok(count) => list.extend_from_slice(&chunk[..count]),
-            Err(error) => exit_write_failed(&error),
-        }
-    }
-    let mut lists: Vec<Vec<Box<[u8]>>> = vec![Vec::new()];
-    let mut rest = &list[..];
-    while let Some(end) = bun_core::strings::index_of_char_usize(rest, 0) {
-        match end {
-            0 => lists.push(Vec::new()),
-            _ => lists
-                .last_mut()
-                .expect("never empty")
-                .push(Box::from(&rest[..end])),
-        }
-        rest = &rest[end + 1..];
-    }
-    let test_files = lists.remove(0);
-    if !lists.is_empty() {
-        lists.pop();
-        *LISTS_HANDED_BY_RUN.lock() = Some(lists);
-    }
-    test_files
-}
-
 fn hand_over(
     typed: &[&'static [u8]],
     own_count: usize,
     handover: Handover<'_>,
     original_cwd: Option<&[u8]>,
 ) -> ! {
-    let Some(&descriptor) = TEST_PART_DESCRIPTOR.get() else {
-        if let Some(loader) =
-            bun_dotenv::instance().filter(|_| !HAS_HANDED_ON_ENVIRONMENT.load(Ordering::Relaxed))
-        {
-            // SAFETY: this is the main thread, the only one that has the loader.
-            hand_on_environment(unsafe { &(*loader).map });
-        }
-        start_second_process(typed, own_count, handover, original_cwd)
-    };
-    log_step_of_build("the program is made");
-    if env_var::BUN_JSC_logAOTPhaseTimes.get() == Some(true) {
-        let bytes = handover.bytes.unwrap_or_default();
-        bun_core::print_errorln!(
-            "AOT part build | the program | {} bytes | hash {:016x}",
-            bytes.len(),
-            bun_wyhash::hash(bytes),
-        );
-    }
-    let written = bun_sys::ftruncate(descriptor, 0).and_then(|()| {
-        write_to_empty_file(
-            descriptor,
-            [handover.bytes.unwrap_or_default(), handover.bytes_after],
-        )
-    });
-    if let Err(error) = written {
-        exit_write_failed(&error)
-    }
-    log_step_of_build("the program is written");
-    Output::flush();
-    exit_builder(match handover.flag {
-        GRAPH_FLAG => 0,
-        _ => PART_HAS_NO_PROGRAM,
-    })
-}
-
-/// The file that a part's program is written to.
-pub(crate) struct TestPartFile {
-    pub(crate) descriptor: Fd,
-    /// Windows has no unnamed files.
-    #[cfg(windows)]
-    path: ZBox,
-}
-
-impl TestPartFile {
-    /// Holds the paths of the part's test files, until the process that builds it replaces them with the program.
-    /// `in_memory`: the temporary directory has had no room for a program of this run.
-    pub(crate) fn create<'p>(
-        paths: impl Iterator<Item = &'p [u8]>,
-        kind: TestPartKind,
-        in_memory: bool,
-    ) -> Maybe<TestPartFile> {
-        let mut list = Vec::new();
-        for path in paths {
-            list.extend_from_slice(path);
-            list.push(0);
-        }
-        if !matches!(kind, TestPartKind::TestFiles | TestPartKind::SharedPackages) {
-            let lists = LISTS_FOR_BUILDS_OF_LAYERS.lock();
-            if !lists.is_empty() {
-                list.push(0);
-                list.extend_from_slice(&lists);
-            }
-        }
-        #[cfg(unix)]
-        return Ok(TestPartFile {
-            descriptor: write_to_unnamed_file(
-                &list,
-                &[],
-                match kind {
-                    _ if in_memory => ProgramFile::Memfd,
-                    // Every process of the run maps it, to the end of the run, and reads some of it. Of a file on disk the system
-                    // drops the pages that nobody reads when memory is short. Memory that stands in for a file it cannot drop.
-                    TestPartKind::Shared
-                    | TestPartKind::SharedLowest { .. }
-                    | TestPartKind::SharedComputed
-                    | TestPartKind::SharedPackages => ProgramFile::Deleted,
-                    TestPartKind::TestFiles => ProgramFile::Deleted,
-                },
-            )?,
-        });
-        #[cfg(windows)]
-        {
-            let _ = (kind, in_memory);
-            let path = temporary_path(bun_resolver::fs::RealFS::tmpdir_path());
-            let descriptor = write_to_named_file(&path, &list, &[])?;
-            // SAFETY: `descriptor` is the open handle this function just made.
-            unsafe {
-                SetHandleInformation(
-                    descriptor.native(),
-                    HANDLE_FLAG_INHERIT,
-                    HANDLE_FLAG_INHERIT,
-                )
-            };
-            Ok(TestPartFile { descriptor, path })
-        }
-    }
-
-    pub(crate) fn number_in_child(&self, on_unix: u32) -> usize {
-        #[cfg(unix)]
-        return on_unix as usize;
-        #[cfg(windows)]
-        {
-            let _ = on_unix;
-            self.descriptor.native() as usize
-        }
-    }
-}
-
-impl Drop for TestPartFile {
-    fn drop(&mut self) {
-        let _ = bun_sys::close(self.descriptor);
-        #[cfg(windows)]
-        let _ = bun_sys::unlinkat(Fd::cwd(), &self.path);
-    }
-}
-
-pub(crate) struct TestPartMessages {
-    #[cfg(unix)]
-    pub(crate) descriptor: Fd,
-    #[cfg(windows)]
-    pub(crate) path: ZBox,
-}
-
-impl TestPartMessages {
-    pub(crate) fn create() -> Maybe<TestPartMessages> {
-        #[cfg(unix)]
-        return Ok(TestPartMessages {
-            descriptor: create_unnamed_file(ProgramFile::Memfd)?.0,
-        });
-        #[cfg(windows)]
-        Ok(TestPartMessages {
-            path: temporary_path(bun_resolver::fs::RealFS::tmpdir_path()),
-        })
-    }
-
-    pub(crate) fn read(&self) -> Vec<u8> {
-        #[cfg(unix)]
-        {
-            let mut messages = Vec::new();
-            let mut chunk = [0u8; 4096];
-            loop {
-                match bun_sys::pread(self.descriptor, &mut chunk, messages.len() as i64) {
-                    Ok(0) => break,
-                    Ok(count) => messages.extend_from_slice(&chunk[..count]),
-                    Err(error) if error.get_errno() == bun_sys::E::EINTR => {}
-                    Err(_) => break,
-                }
-            }
-            messages
-        }
-        #[cfg(windows)]
-        File::read_from(Fd::cwd(), self.path.as_bytes()).unwrap_or_default()
-    }
-}
-
-impl Drop for TestPartMessages {
-    fn drop(&mut self) {
-        #[cfg(unix)]
-        let _ = bun_sys::close(self.descriptor);
-        #[cfg(windows)]
-        let _ = bun_sys::unlinkat(Fd::cwd(), &self.path);
-    }
-}
-
-/// What a process with `--aot-build-test-part` builds.
-#[derive(Copy, Clone, PartialEq, Eq)]
-pub(crate) enum TestPartKind {
-    TestFiles,
-    /// What the test files import, or what is left of it above the programs below.
-    Shared,
-    /// Of what is left of it above the programs below, the lowest files: one part in so many. Other programs with what test files
-    /// import are built above it.
-    SharedLowest {
-        part_in: u32,
-    },
-    /// The files that only imports with computed names reach.
-    SharedComputed,
-    /// Of what the test files import, the files of packages, with all of Bun's own code unless this Bun holds that compiled.
-    SharedPackages,
-}
-
-impl TestPartKind {
-    /// As the build itself says it in `log_cost_of_build`.
-    pub(crate) fn name(self) -> &'static str {
-        match self {
-            TestPartKind::TestFiles => "test files",
-            TestPartKind::Shared => "what test files share",
-            TestPartKind::SharedLowest { .. } => "the lowest of what test files share",
-            TestPartKind::SharedComputed => "what computed imports reach",
-            TestPartKind::SharedPackages => "the packages that test files share",
-        }
-    }
-}
-
-struct WordsThatNameTestFiles {
-    paths_and_filters: Vec<&'static [u8]>,
-    lists: Vec<&'static [u8]>,
-}
-
-static WORDS_THAT_NAME_TEST_FILES: Guarded<WordsThatNameTestFiles> =
-    Guarded::new(WordsThatNameTestFiles {
-        paths_and_filters: Vec::new(),
-        lists: Vec::new(),
-    });
-
-pub(crate) fn note_words_that_name_test_files(
-    positionals: &[&'static [u8]],
-    lists: &[&'static [u8]],
-) {
-    *WORDS_THAT_NAME_TEST_FILES.lock() = WordsThatNameTestFiles {
-        paths_and_filters: positionals.iter().skip(1).copied().collect(),
-        lists: lists.to_vec(),
-    };
-}
-
-fn leave_out_words_that_name_test_files(
-    typed: impl Iterator<Item = &'static [u8]>,
-    words: &WordsThatNameTestFiles,
-) -> Vec<&'static [u8]> {
-    let mut paths_and_filters = words.paths_and_filters.iter().peekable();
-    let mut kept: Vec<&'static [u8]> = Vec::new();
-    for word in typed {
-        if paths_and_filters
-            .next_if(|it| core::ptr::eq(it.as_ptr(), word.as_ptr()))
-            .is_some()
-        {
-            continue;
-        }
-        let place = word.as_ptr_range();
-        let Some(list) = words
-            .lists
-            .iter()
-            .find(|list| place.contains(&list.as_ptr()))
-        else {
-            kept.push(word);
-            continue;
-        };
-        if core::ptr::eq(list.as_ptr(), word.as_ptr()) {
-            kept.pop();
-        }
-    }
-    kept
-}
-
-/// `below`: the numbers, in the process that builds, of the descriptors of the programs that it is built above, the lowest first.
-/// `is_above_library`: the first of them is the library that this Bun holds compiled.
-/// `threads`: how many the build may use, unless it may use every processor.
-/// `told_of_last_below`: the last of `below` is still being built. The number of the descriptor that says when it is there.
-pub(crate) fn test_part_arguments(
-    descriptor: usize,
-    kind: TestPartKind,
-    below: core::ops::Range<usize>,
-    is_above_library: bool,
-    threads: Option<u32>,
-    told_of_last_below: Option<usize>,
-) -> Vec<Vec<u8>> {
-    let typed = bun_core::argv()
-        .into_iter()
-        .skip(1 + bun_core::bun_options_argc());
-    let typed = leave_out_words_that_name_test_files(typed, &WORDS_THAT_NAME_TEST_FILES.lock());
-    let mut flag = [TEST_PART_FLAG, descriptor.to_string().as_bytes()].concat();
-    if kind != TestPartKind::TestFiles {
-        flag.extend([b",", SHARED_BY_TEST_PARTS].concat());
-    }
-    if kind == TestPartKind::SharedPackages {
-        flag.extend_from_slice(b",packages");
-    }
-    if kind == TestPartKind::SharedComputed {
-        flag.extend_from_slice(b",computed");
-    }
-    if let TestPartKind::SharedLowest { part_in } = kind {
-        flag.extend(format!(",lowest-in:{part_in}").into_bytes());
-    }
-    let may_take = MEGABYTES_THAT_BUILD_MAY_TAKE.load(Ordering::Relaxed);
-    if may_take != 0
-        && matches!(
-            kind,
-            TestPartKind::Shared | TestPartKind::SharedLowest { .. }
-        )
+    // `bun run`: the one loader of the process has read the files, for the run command where it looked for a script, else for the build.
+    if let Some(loader) =
+        bun_dotenv::instance().filter(|_| !HAS_HANDED_ON_ENVIRONMENT.load(Ordering::Relaxed))
     {
-        flag.extend(format!(",may-take:{may_take}").into_bytes());
+        // SAFETY: this is the main thread, the only one that has the loader.
+        hand_on_environment(unsafe { &(*loader).map });
     }
-    if let Some(threads) = threads {
-        flag.extend(format!(",threads:{threads}").into_bytes());
-    }
-    let library = below.start..below.start + usize::from(is_above_library);
-    let last = below.end.wrapping_sub(1);
-    for number in below {
-        if let Some(told) = told_of_last_below.filter(|_| number == last) {
-            flag.extend(format!(",later:{number}:{told}").into_bytes());
-            continue;
-        }
-        let word = match library.contains(&number) {
-            true => "library",
-            false => "below",
-        };
-        flag.extend(format!(",{word}:{number}").into_bytes());
-    }
-    let mut arguments = vec![flag];
-    arguments.extend(typed.into_iter().map(<[u8]>::to_vec));
-    arguments
-}
-
-/// `below`: the numbers of the descriptors of the programs that the part's was built above, the lowest first.
-pub(crate) fn image_flag_of_test_worker(
-    has_program: bool,
-    descriptor: usize,
-    below: core::ops::Range<usize>,
-) -> Vec<u8> {
-    if !has_program {
-        return [CHECKED_FLAG, descriptor.to_string().as_bytes()].concat();
-    }
-    // In the order in which they were built.
-    let numbers: Vec<String> = below
-        .chain([descriptor])
-        .map(|number| number.to_string())
-        .collect();
-    [GRAPH_FLAG, numbers.join(",").as_bytes()].concat()
+    start_second_process(typed, own_count, handover, original_cwd)
 }
 
 struct WatchedFiles {
@@ -1707,7 +506,7 @@ fn decide_whether_to_clear_terminal() {
 
 fn exit_or_wait_for_change(watched: Option<&'static WatchedFiles>) -> ! {
     if watched.is_none() {
-        exit_builder(1)
+        Global::exit(1)
     }
     decide_whether_to_clear_terminal();
     Output::flush();
@@ -1716,118 +515,26 @@ fn exit_or_wait_for_change(watched: Option<&'static WatchedFiles>) -> ! {
     }
 }
 
-fn is_said_about_types(text: &[u8]) -> bool {
-    let Some(rest) = text.strip_prefix(b"TS") else {
-        return false;
-    };
-    let digits = rest.iter().take_while(|byte| byte.is_ascii_digit()).count();
-    let number = rest[..digits].iter().fold(0u32, |number, digit| {
-        number.saturating_mul(10) + u32::from(digit - b'0')
-    });
-    number < 100_000 || matches!(number, 100_009 | 100_010 | 100_066 | 100_075)
-}
-
-fn list_errors(log: &bun_ast::Log) -> Vec<u8> {
-    let mut said = Vec::new();
-    for message in log.msgs.iter().filter(|it| it.kind == bun_ast::Kind::Err) {
-        if said.is_empty() {
-            said.extend_from_slice(&message.data.text);
-        }
-        said.push(b'\n');
-        if let Some(location) = message.data.location.as_ref().filter(|it| it.line > 0) {
-            said.extend_from_slice(&location.file);
-            said.extend_from_slice(format!(":{}:{}: ", location.line, location.column).as_bytes());
-        }
-        said.extend_from_slice(&message.data.text);
-    }
-    said.retain(|&byte| byte != 0 && byte != SAID_OF_REFUSED_FILE);
-    said
-}
-
-fn write_check_result(
-    refused_files: &[u8],
-    watched: Option<&WatchedFiles>,
-    names_added: &[(u32, Vec<u8>)],
-) -> Vec<u8> {
-    let mut result = refused_files.to_vec();
-    result.push(0);
+/// The files that the build has read, each with a zero byte behind it, and one more zero byte. Then the names: the holder and the
+/// length of the name, four bytes each, and the name, which may hold any byte.
+fn write_check_result(watched: Option<&WatchedFiles>, names_added: &[(u32, Vec<u8>)]) -> Vec<u8> {
     let mut paths = watched.map_or_else(Vec::new, |watched| {
         core::mem::take(&mut *watched.paths.lock())
     });
     paths.sort_unstable();
     paths.dedup();
+    let mut result = Vec::new();
     for path in paths {
         result.extend_from_slice(&path);
         result.push(0);
     }
     result.push(0);
     for (holder, name) in names_added {
-        result.extend_from_slice(holder.to_string().as_bytes());
-        result.push(b' ');
+        result.extend_from_slice(&holder.to_ne_bytes());
+        result.extend_from_slice(&(name.len() as u32).to_ne_bytes());
         result.extend_from_slice(name);
-        result.push(0);
     }
     result
-}
-
-/// The stand-in no longer names the files, so nothing of them is in the program: whoever loads one gets what the loader says of it.
-/// A line of the stand-in is about one module: `import * as n7 from "<path>";`, `  sink(n7.a, n7.b);`, `  spyOn(n7, "a");`.
-fn leave_out_of_stand_in(stand_in: &[u8], files: &[&[u8]]) {
-    let key = key_of_stand_in(stand_in);
-    let Some(text) = files_in_memory().and_then(|held| held.map.get(key.as_slice())) else {
-        return;
-    };
-    let name_imported = |line: &[u8]| -> Option<Vec<u8>> {
-        let rest = line.strip_prefix(b"import * as ")?;
-        let (name, path) = rest.split_at(bun_core::strings::index_of_char_usize(rest, b' ')?);
-        let path = path.strip_prefix(b" from \"")?.strip_suffix(b"\";")?;
-        files.contains(&path).then(|| name.to_vec())
-    };
-    let lines = || bun_core::strings::split(text, b"\n");
-    let names: Vec<Vec<u8>> = lines().filter_map(name_imported).collect();
-    let is_about = |line: &[u8], name: &[u8]| {
-        [&b"import * as "[..], b"  sink(", b"  spyOn("]
-            .iter()
-            .any(|start| {
-                let rest = line
-                    .strip_prefix(*start)
-                    .and_then(|rest| rest.strip_prefix(name));
-                rest.is_some_and(|rest| !rest.first().is_some_and(u8::is_ascii_digit))
-            })
-    };
-    let kept: Vec<&[u8]> = lines()
-        .filter(|line| !names.iter().any(|name| is_about(line, name)))
-        .collect();
-    set_stand_in(stand_in, &kept.join(&b'\n'));
-}
-
-/// The positions, in ascending order, of the entry points that the others can run without.
-fn find_refused_files(
-    failure: &CompileFailure,
-    independent_count: usize,
-    stand_in: Option<usize>,
-    may_refuse_all: bool,
-) -> Option<Vec<usize>> {
-    let CompileFailure::Build {
-        refused_entry_points: Some(refused),
-        ..
-    } = failure
-    else {
-        return None;
-    };
-    let mut refused: Vec<usize> = refused.iter().map(|&position| position as usize).collect();
-    refused.retain(|&position| Some(position) != stand_in);
-    refused.sort_unstable();
-    refused.dedup();
-    if may_refuse_all
-        && refused
-            .last()
-            .is_some_and(|&last| last >= independent_count)
-    {
-        return Some((0..independent_count).collect());
-    }
-    let are_independent = refused.last().is_some_and(|&last| last < independent_count);
-    (are_independent && (may_refuse_all || refused.len() < independent_count)).then_some(refused)
 }
 
 #[derive(Copy, Clone)]
@@ -1965,6 +672,7 @@ fn write_to_unnamed_file(bytes: &[u8], bytes_after: &[u8], first: ProgramFile) -
 }
 
 /// `parts`, one behind the other.
+#[cfg(unix)]
 fn write_to_empty_file(descriptor: Fd, parts: [&[u8]; 2]) -> Maybe<()> {
     #[cfg(target_os = "linux")]
     if copy_into_mapping_of_empty_file(descriptor, parts) {
@@ -2055,15 +763,6 @@ fn exit_write_failed(error: &bun_sys::Error) -> ! {
         "--aot could not write the compiled program to a temporary file: {}",
         (error,),
     );
-    use bun_sys::E;
-    let errno = error.get_errno();
-    let has_no_room = matches!(errno, E::ENOSPC | E::EFBIG | E::ENOMEM);
-    #[cfg(unix)]
-    let has_no_room = has_no_room || errno == E::EDQUOT;
-    if has_no_room && TEST_PART_DESCRIPTOR.get().is_some() {
-        Output::flush();
-        exit_builder(PART_HAS_NO_ROOM)
-    }
     Global::exit(1)
 }
 
@@ -2307,45 +1006,18 @@ pub(crate) fn use_graph_descriptor(text: &[u8]) {
     if Graph::get().is_some() {
         return;
     }
-    let descriptors: Option<Vec<Fd>> = bun_core::strings::split(text, b",")
-        .map(parse_descriptor)
-        .collect();
-    let Some(&[descriptor, ..]) = descriptors.as_deref() else {
+    let Some(descriptor) = parse_descriptor(text) else {
         Output::err_generic(
             "--aot-graph-fd: \"{}\" is not a file descriptor",
             (BStr::new(text),),
         );
         Global::exit(1)
     };
-    #[cfg(unix)]
-    let loaded = match descriptors.as_deref() {
-        Some(all @ [_, _, ..]) => Graph::from_descriptors(all),
-        _ => Graph::from_descriptor(descriptor),
-    };
-    #[cfg(not(unix))]
-    let loaded = Graph::from_descriptor(descriptor);
-    let failure = match loaded {
+    let failure = match Graph::from_descriptor(descriptor) {
         Ok(Some(_)) => {
             IS_FROM_DESCRIPTOR.store(true, Ordering::Relaxed);
-            let is_one_program = descriptors.as_deref().is_some_and(|all| all.len() == 1);
-            IS_ONE_PROGRAM.store(is_one_program, Ordering::Relaxed);
             let _ = GRAPH_DESCRIPTOR.set(descriptor);
-            // Behind each program: the refused files, an empty path, the files of the check.
-            let (mut refused, mut checked) = (Vec::new(), Vec::new());
-            for &descriptor in descriptors.as_deref().unwrap_or_default() {
-                let after_graph = Graph::read_after_graph(descriptor).unwrap_or_default();
-                let result = split_off_what_tests_replace(&after_graph).0;
-                let mut paths = bun_core::strings::split(result, b"\0");
-                for path in paths.by_ref().take_while(|path| !path.is_empty()) {
-                    refused.extend_from_slice(path);
-                    refused.push(0);
-                }
-                for path in paths.filter(|path| !path.is_empty()) {
-                    checked.extend_from_slice(path);
-                    checked.push(0);
-                }
-            }
-            remember_check_result(&[refused, vec![0], checked].concat());
+            remember_check_result(&Graph::read_after_graph(descriptor).unwrap_or_default());
             return;
         }
         Ok(None) => "empty",
@@ -2356,6 +1028,146 @@ pub(crate) fn use_graph_descriptor(text: &[u8]) {
         (failure,),
     );
     Global::exit(1)
+}
+
+#[cfg(not(bun_locked_environment))]
+pub(crate) fn writes_program_alone() -> bool {
+    bun_core::getenv_z(bun_core::zstr!("BUN_FEATURE_FLAG_INTERNAL_FOR_TESTING")).is_some()
+        && env_var::BUN_AOT_WRITES_PROGRAM_ALONE.get() == Some(true)
+}
+
+#[cfg(bun_locked_environment)]
+pub(crate) fn writes_program_alone() -> bool {
+    false
+}
+
+/// The program begins behind it, at the head of a page of any machine.
+const ROOM_OF_LAUNCHER: usize = 64 * 1024;
+
+/// The file can be started as the executable could: a shell script at its head starts this Bun with the file.
+#[cfg(unix)]
+pub(crate) fn write_program_alone(
+    directory: Fd,
+    path: &[u8],
+    program: &[u8],
+    build_id: &[u8; 16],
+) -> Maybe<()> {
+    let bun = bun_core::self_exe_path().unwrap_or(bun_core::zstr!("bun"));
+    let parts: Vec<&[u8]> = bun_core::strings::split(bun.as_bytes(), b"'").collect();
+    let quoted = parts.join(&b"'\\''"[..]);
+    let mut launcher = [
+        &b"#!/bin/sh\ncase \"$0\" in /*) file=\"$0\";; *) file=\"$PWD/$0\";; esac\n"[..],
+        b"export BUN_FEATURE_FLAG_INTERNAL_FOR_TESTING=\"${BUN_FEATURE_FLAG_INTERNAL_FOR_TESTING-launcher}\"\n",
+        b"exec '",
+        &quoted,
+        b"' --aot-program-file=\"$file\" --aot-program-argv0=\"$0\" \"$@\"\n",
+    ]
+    .concat();
+    launcher.resize(ROOM_OF_LAUNCHER - build_id.len(), b'\n');
+    launcher.extend_from_slice(build_id);
+    let flags = O::WRONLY | O::CREAT | O::TRUNC | O::CLOEXEC;
+    let path = ZBox::from_bytes(path);
+    let file = File::from_fd(bun_sys::openat(directory, &path, flags, 0o755)?);
+    let written = file
+        .write_all(&launcher)
+        .and_then(|()| file.write_all(program));
+    let _ = bun_sys::close(file.into_raw());
+    written
+}
+
+#[cfg(not(unix))]
+pub(crate) fn write_program_alone(
+    directory: Fd,
+    path: &[u8],
+    program: &[u8],
+    _build_id: &[u8; 16],
+) -> Maybe<()> {
+    File::write_file(directory, &ZBox::from_bytes(path), program)
+}
+
+/// The first word of the command line, with the path of the file. Behind it may stand `--aot-program-argv0=` with what was typed to start the file.
+#[cfg(not(bun_locked_environment))]
+pub(crate) const PROGRAM_FILE_FLAG: &[u8] = b"--aot-program-file=";
+
+/// The caller has seen `PROGRAM_FILE_FLAG`.
+#[cfg(not(bun_locked_environment))]
+#[cold]
+#[inline(never)]
+pub(crate) fn load_program_file() -> bun_standalone_graph::Result<Option<*mut Graph>> {
+    use bun_paths::resolve_path::{join_abs_string, platform};
+    use bun_resolver::compiled_program::{FILE_IN_PLACE_OF_EXECUTABLE, FileInPlaceOfExecutable};
+
+    if bun_core::getenv_z(bun_core::zstr!("BUN_FEATURE_FLAG_INTERNAL_FOR_TESTING")).is_none() {
+        return Ok(None);
+    }
+    let mut argv = bun_core::argv().to_vec();
+    let place = 1 + bun_core::bun_options_argc();
+    let path = &argv.remove(place).as_bytes()[PROGRAM_FILE_FLAG.len()..];
+    let typed =
+        (argv.get(place)).and_then(|next| next.as_bytes().strip_prefix(b"--aot-program-argv0="));
+    if typed.is_some() {
+        argv.remove(place);
+    }
+    let flags = O::RDONLY | O::CLOEXEC;
+    let Ok(descriptor) = bun_sys::openat(Fd::cwd(), &ZBox::from_bytes(path), flags, 0) else {
+        Output::err_generic(
+            "--aot-program-file: {} can't be opened",
+            (bun_core::fmt::quote(path),),
+        );
+        Global::exit(1)
+    };
+    let mut head = [0u8; 2];
+    let has_launcher = matches!(bun_sys::pread(descriptor, &mut head, 0), Ok(2)) && head == *b"#!";
+    let offset = if has_launcher { ROOM_OF_LAUNCHER } else { 0 };
+    // As an executable is Bun there.
+    let graph = match env_var::feature_flag::BUN_BE_BUN::get().unwrap_or(false) {
+        true => None,
+        false => match Graph::from_descriptor_at(descriptor, offset)? {
+            Some(graph) => Some(graph),
+            None => Graph::exit_without_program(),
+        },
+    };
+
+    let mut build_id = [0u8; 16];
+    let place = (ROOM_OF_LAUNCHER - build_id.len()) as i64;
+    if has_launcher
+        && graph.is_some()
+        && matches!(bun_sys::pread(descriptor, &mut build_id, place), Ok(16))
+    {
+        bun_crash_handler::build_id::set_name_of_program_file(&build_id);
+    }
+
+    let file = match bun_sys::getcwd_alloc() {
+        Ok(cwd) => join_abs_string::<platform::Auto>(cwd.as_bytes(), &[path]).to_vec(),
+        Err(_) => path.to_vec(),
+    };
+    argv[0] = Box::leak(Box::new(ZBox::from_bytes(typed.unwrap_or(&file)))).as_zstr();
+    // SAFETY: no other thread has started.
+    unsafe { bun_core::set_argv(Vec::leak(argv)) };
+    // The program finds the environment that the launcher found.
+    #[cfg(unix)]
+    if has_launcher {
+        let is_of_launcher =
+            |variable: &[u8]| variable == b"BUN_FEATURE_FLAG_INTERNAL_FOR_TESTING=launcher";
+        let mut from = bun_core::c_environ().cast_mut();
+        let mut to = from;
+        // SAFETY: the block ends with a null pointer, its texts end with NUL, and no other thread has started.
+        unsafe {
+            while !(*from).is_null() {
+                if !is_of_launcher(bun_core::ffi::cstr(*from).to_bytes()) {
+                    *to = *from;
+                    to = to.add(1);
+                }
+                from = from.add(1);
+            }
+            *to = core::ptr::null();
+        }
+    }
+    let _ = FILE_IN_PLACE_OF_EXECUTABLE.set(FileInPlaceOfExecutable {
+        path: file.into_boxed_slice(),
+        can_be_started: has_launcher,
+    });
+    Ok(graph)
 }
 
 pub(crate) fn graph() -> Option<&'static dyn bun_resolver::StandaloneModuleGraph> {
@@ -2387,8 +1199,11 @@ pub(crate) fn runs_compiled_code() -> bool {
     IS_FROM_DESCRIPTOR.load(Ordering::Relaxed)
 }
 
+/// `--isolate=modules`: a module graph for each test file in one global object, whose properties are put back between files. What puts them back is a
+/// module of Bun's own code that the runner loads for itself. A compiled program holds what its files name and refuses the text of the rest: there
+/// each file gets a global object of its own, as under `--isolate`.
 pub(crate) fn test_files_share_global(ctx: &ContextData) -> bool {
-    ctx.test_options.isolate_modules && !IS_ONE_PROGRAM.load(Ordering::Relaxed)
+    ctx.test_options.isolate_modules && !runs_compiled_code()
 }
 
 #[cold]
@@ -2412,30 +1227,32 @@ pub(crate) fn use_check_result(text: &[u8]) {
     remember_check_result(&list);
 }
 
-fn remember_check_result(list: &[u8]) {
-    let mut paths = bun_core::strings::split(list, b"\0");
-    let refused = paths.by_ref().take_while(|path| !path.is_empty());
-    let refused = refused.map(|refused| {
-        let end = bun_core::strings::index_of_char_usize(refused, SAID_OF_REFUSED_FILE);
-        let (path, said) = refused.split_at(end.unwrap_or(refused.len()));
-        (
-            Box::from(path),
-            Box::from(said.get(1..).unwrap_or_default()),
-        )
-    });
-    let _ = REFUSED_FILES.set(refused.collect());
-    let watched = paths.by_ref().take_while(|path| !path.is_empty());
-    let _ = FILES_OF_CHECK.set(watched.map(Box::from).collect());
-    for added in paths.filter(|added| !added.is_empty()) {
-        let Some(space) = bun_core::strings::index_of_char_usize(added, b' ') else {
-            continue;
-        };
-        let holder = core::str::from_utf8(&added[..space]).ok();
-        if let Some(holder) = holder.and_then(|holder| holder.parse().ok()) {
-            let name = &added[space + 1..];
-            // SAFETY: the bytes are copied before the call returns.
-            unsafe { Bun__AOT__openNameWithoutImage(holder, name.as_ptr(), name.len()) };
+fn take_number(bytes: &mut &[u8]) -> Option<u32> {
+    let (number, rest) = bytes.split_first_chunk::<4>()?;
+    *bytes = rest;
+    Some(u32::from_ne_bytes(*number))
+}
+
+/// `result`: `write_check_result`, or nothing.
+fn remember_check_result(result: &[u8]) {
+    let mut rest = result;
+    let mut files: Vec<Box<[u8]>> = Vec::new();
+    while let Some(end) = bun_core::strings::index_of_char_usize(rest, 0) {
+        let path = &rest[..end];
+        rest = &rest[end + 1..];
+        if path.is_empty() {
+            break;
         }
+        files.push(Box::from(path));
+    }
+    let _ = FILES_OF_CHECK.set(files);
+    while let (Some(holder), Some(length)) = (take_number(&mut rest), take_number(&mut rest)) {
+        let Some((name, behind)) = rest.split_at_checked(length as usize) else {
+            break;
+        };
+        rest = behind;
+        // SAFETY: the bytes are copied before the call returns.
+        unsafe { Bun__AOT__openNameWithoutImage(holder, name.as_ptr(), name.len()) };
     }
 }
 
@@ -2458,18 +1275,6 @@ fn read_whole_file(descriptor: Fd) -> Maybe<Vec<u8>> {
     Ok(bytes)
 }
 
-pub(crate) fn is_refused(path: &[u8]) -> bool {
-    find_what_build_said_of_refused_file(path).is_some()
-}
-
-pub(crate) fn find_what_build_said_of_refused_file(path: &[u8]) -> Option<&'static [u8]> {
-    let files = REFUSED_FILES.get()?.iter();
-    files
-        .into_iter()
-        .find(|file| &*file.0 == path)
-        .map(|file| &*file.1)
-}
-
 #[inline]
 pub(crate) fn is_checked() -> bool {
     IS_CHECKED.load(Ordering::Relaxed)
@@ -2478,7 +1283,6 @@ pub(crate) fn is_checked() -> bool {
 unsafe extern "C" {
     safe fn Bun__AOT__listRefusedChanges();
     fn Bun__AOT__openNameWithoutImage(holder: u32, name: *const u8, length: usize);
-    safe fn Bun__AOT__takesImagesAboveOthers() -> bool;
     safe fn Bun__AOT__peakResidentMegabytesOfProcess() -> usize;
 }
 
@@ -2496,9 +1300,13 @@ pub(crate) fn will_run_test_file(title: &[u8]) {
 }
 
 pub(crate) fn refused_changes() -> Vec<Vec<u8>> {
-    core::mem::take(&mut *REFUSED_CHANGES.lock())
+    let mut refused = REFUSED_CHANGES.lock();
+    FILES_RUN_FROM_SOURCE.lock().clear();
+    core::mem::take(&mut *refused)
 }
 
+/// BunCompiledModules.cpp. The runner has a test file whose load has settled and whose `describe` callbacks it has yet to call. It turns the
+/// event loop once in between.
 #[unsafe(no_mangle)]
 pub(crate) extern "C" fn Bun__AOT__isBetweenLoadOfTestFileAndItsCallbacks(
     global: &bun_jsc::JSGlobalObject,
@@ -2526,6 +1334,11 @@ pub(crate) extern "C" fn Bun__AOT__recordRefusedChange(
     line: u32,
     column: u32,
 ) {
+    let said = refusal.to_owned_slice();
+    if let Some(file_and_why) = said.strip_prefix(RAN_FROM_SOURCE) {
+        return add_file_run_from_source(file_and_why);
+    }
+    // Code from a string bears the URL of the file that evaluated it, and its lines are the string's.
     let place = if source_url.to_owned_slice().starts_with(b"file://") {
         let file = path_below_project(&bun_url::path_from_file_url(source_url));
         format!("in code from a string, in {}", BStr::new(&file))
@@ -2537,6 +1350,34 @@ pub(crate) extern "C" fn Bun__AOT__recordRefusedChange(
     add_refusal_of_running_test_file(refusal.into_bytes());
 }
 
+/// `file_and_why`: "'<path>': <why>".
+fn add_file_run_from_source(file_and_why: &[u8]) {
+    let Some(end) = bun_core::strings::index_of(file_and_why, b"': ") else {
+        return;
+    };
+    let path = bun_core::String::clone_utf8(&file_and_why[1..end]);
+    let file = RUNNING_TEST_FILE.lock().clone();
+    add_refused_change(
+        [
+            RAN_FROM_SOURCE,
+            &path_below_project(&path)[..],
+            &file_and_why[end + 1..],
+            b", while ",
+            &file[..],
+            b" ran",
+        ]
+        .concat(),
+    );
+}
+
+/// "Ran from source <path>[?<query>]: <why>, while <test file> ran": the path.
+fn file_run_from_source(line: &[u8]) -> Option<&[u8]> {
+    let rest = line.strip_prefix(RAN_FROM_SOURCE)?;
+    let path = &rest[..bun_core::strings::index_of(rest, b": ")?];
+    let end = bun_core::strings::index_of_char(path, b'?').map_or(path.len(), |at| at as usize);
+    Some(&path[..end])
+}
+
 fn add_refusal_of_running_test_file(refusal: Vec<u8>) {
     let file = RUNNING_TEST_FILE.lock().clone();
     add_refused_change([&refusal[..], b", while ", &file[..], b" ran"].concat());
@@ -2545,6 +1386,7 @@ fn add_refusal_of_running_test_file(refusal: Vec<u8>) {
     }
 }
 
+/// Under the line of a test that failed. What was refused may have been caught, and the list at the end of the run stands far from the test.
 pub(crate) fn write_note_on_refusal(writer: &mut impl bun_io::Write) {
     if !runs_compiled_code() {
         return;
@@ -2579,10 +1421,10 @@ pub(crate) fn write_note_on_refusal(writer: &mut impl bun_io::Write) {
     );
 }
 
+/// `refusals`: "Cannot load '<path>', at <file>:<line>:<column>, while <test file> ran". Each file that asked, once, with the file on disk that makes it the product's.
 pub(crate) fn find_why_askers_are_of_product(refusals: &[Vec<u8>]) -> Vec<(Vec<u8>, Vec<u8>)> {
     let top = bun_resolver::fs::FileSystem::get().top_level_dir();
     let top = top.strip_suffix(&[bun_paths::SEP]).unwrap_or(top);
-    let top = bun_core::strings::replace_owned(top, &[bun_paths::SEP], b"/");
     let mut askers: Vec<&[u8]> = (refusals.iter())
         .filter_map(|refusal| {
             let place = &refusal[bun_core::strings::index_of(refusal, b"', at ")? + 6..];
@@ -2594,12 +1436,14 @@ pub(crate) fn find_why_askers_are_of_product(refusals: &[Vec<u8>]) -> Vec<(Vec<u
     askers.dedup();
     (askers.into_iter())
         .filter_map(|asker| {
-            let file = [&top[..], b"/", asker].concat();
-            let importer = bun_aot::builtins::find_importer_outside_tests(&top, &file)?;
+            let below = bun_core::strings::replace_owned(asker, b"/", &[bun_paths::SEP]);
+            let file = [top, &[bun_paths::SEP], &below[..]].concat();
+            let is_compiled = |path: &[u8]| bun_jsc::compiled_program::is_compiled_module(path);
+            let importer = bun_aot::builtins::find_importer_outside_run(top, &file, &is_compiled)?;
             let importer = importer
-                .strip_prefix(&top[..])?
-                .strip_prefix(b"/")?
-                .to_vec();
+                .strip_prefix(top)?
+                .strip_prefix(&[bun_paths::SEP])?;
+            let importer = bun_core::strings::replace_owned(importer, &[bun_paths::SEP], b"/");
             Some((asker.to_vec(), importer))
         })
         .collect()
@@ -2618,6 +1462,7 @@ pub(crate) const MISSING_EXPORT: &[u8] = b"Missing ";
 pub(crate) const REFUSED_LOAD: &[u8] = b"Cannot load ";
 pub(crate) const LOADED_ADDON: &[u8] = b"Loaded ";
 pub(crate) const UNREACHED_FILE: &[u8] = b"Cannot reach ";
+pub(crate) const RAN_FROM_SOURCE: &[u8] = b"Ran from source ";
 
 #[unsafe(no_mangle)]
 pub(crate) extern "C" fn Bun__AOT__recordMissingExport(
@@ -2638,18 +1483,27 @@ pub(crate) extern "C" fn Bun__AOT__recordMissingExport(
 /// In the process that prints the summary, and in a worker until the file is done.
 pub(crate) fn add_refused_change(line: Vec<u8>) {
     let mut refused = REFUSED_CHANGES.lock();
-    if refused.len() < MAX_LISTED_REFUSED_CHANGES && !refused.contains(&line) {
+    // Each file once, with the test file under which it first ran so.
+    if let Some(file) = file_run_from_source(&line) {
+        if FILES_RUN_FROM_SOURCE.lock().insert(file.to_vec()) {
+            refused.push(line);
+        }
+        return;
+    }
+    let listed = refused.len() - FILES_RUN_FROM_SOURCE.lock().len();
+    if listed < MAX_LISTED_REFUSED_CHANGES && !refused.contains(&line) {
         refused.push(line);
     }
 }
 
 #[inline]
 pub(crate) fn is_second_process() -> bool {
-    runs_compiled_code() || is_checked() || builds_test_part()
+    runs_compiled_code() || is_checked()
 }
 
 static NAMES_ENVIRONMENT_FILE_THAT_IS_NO_FILE: AtomicBool = AtomicBool::new(false);
 
+/// Asked where the flags are read, so every process of a run has the same answer.
 pub(crate) fn note_environment_files(paths: &[&[u8]]) {
     #[cfg(unix)]
     let is_file = |path: &&[u8]| {
@@ -2662,6 +1516,8 @@ pub(crate) fn note_environment_files(paths: &[&[u8]]) {
     let _ = paths;
 }
 
+/// `--env-file` may name a pipe, which can be read once, and the first process has read it. Then the process that it starts finds the values in its
+/// environment and reads no file, as a worker of `--parallel` does. Files are read by each process: an environment has a limit.
 #[inline]
 pub(crate) fn has_environment_of_first_process() -> bool {
     is_second_process() && NAMES_ENVIRONMENT_FILE_THAT_IS_NO_FILE.load(Ordering::Relaxed)
@@ -2689,6 +1545,7 @@ pub(crate) fn hand_on_environment(map: &bun_dotenv::Map) {
     let _ = map;
 }
 
+/// What is set stays. One new block, since `setenv` looks through the whole block for each name.
 #[cfg(unix)]
 fn add_to_environment(map: &bun_dotenv::Map) {
     use core::ffi::{CStr, c_char};

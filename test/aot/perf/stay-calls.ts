@@ -1,33 +1,47 @@
-// For ./stay-calls-<part>.test.ts: 300 programs take one process six minutes in CI, so each file has a share of them.
+// For ./stay-calls-<part>.measure.ts, which the bench runs and CI does not: 300 programs take one process six minutes, so each file has a share of them.
 // ./operations.measure.ts takes a site's cost as the function with 12 sites less the one with 4, over 8. That holds while the two loops that call them are the same code.
 import { expect } from "bun:test";
 import { readFileSync, rmSync } from "fs";
 import { bunEnv, bunExe, isASAN, isDebug, tempDir } from "harness";
 import { join } from "path";
+import { testaot, toolEnv, whyNoTestaot } from "../engine/testaot";
 import { built, slot, spawned } from "../harness/commands";
 import { afterAll } from "../harness/default-timeout";
-import { compileCommand, withProgramOutput } from "../harness/flags";
-import { describe, test } from "../harness/printed-ir";
-import { python, testaot, toolEnv } from "../shell/tools";
+import { compileCommand, withProgramOutput, wordsOfAPlainBuild } from "../harness/flags";
+import { describe, test } from "../supported";
 
+const python = Bun.which("python3");
 const skipped =
   isDebug || isASAN
     ? "a debug or ASAN build takes too long over 300 programs"
     : python
-      ? undefined
+      ? whyNoTestaot
       : "python3 is not installed";
 if (skipped) console.error(`SKIPPED: test/aot/perf/stay-calls.ts: ${skipped}`);
 
-// Only the function with 4 sites promises the type of its result, so the loop round the other one tests it. This list only gets shorter.
-const differToday = new Set(["opened: direct_call_string"]);
+async function printedByTestaot(root: string, ...words: string[]) {
+  const { stdout, stderr, exitCode } = await spawned([testaot!, ...words], root, toolEnv);
+  expect({ words, stderr, exitCode }).toEqual({ words, stderr: expect.any(String), exitCode: 0 });
+  return stdout.replaceAll("\r\n", "\n");
+}
 
-function operationsOf(printed: string, name: string) {
-  const copies = printed.split(/^function /m).filter(text => text.split("\n", 1)[0].includes(` name="${name}" `));
-  return copies.map(text => {
-    const [heading, ...lines] = text.split("\n");
-    const operations = lines.flatMap(line => /^    (?:v\d+: .+? = )?([A-Z]\w*)/.exec(line)?.[1] ?? []);
-    return { role: / role=(\w+)/.exec(heading)?.[1], operations };
-  });
+/** The units that hold the code of a function as written. `testaot walk` stops at a unit that the plan lacks, and the loop of a coroutine stands in its CoroutineBody. */
+function unitsOf(printed: string, name: string) {
+  const heading = new RegExp(`^function (f\\d+) name="${name}" .*$`, "m").exec(printed);
+  if (!heading) throw new Error(`testaot print shows no function ${name}`);
+  const isCoroutine = /\bflags=\[[^\]]*\bIs(?:Async|Generator)\b/.test(heading[0]);
+  return (isCoroutine ? ["Body", "CoroutineBody"] : ["Body"]).map(role => `${heading[1]}:${role}`);
+}
+
+// A line that is not read stands for itself, so nothing is left out of the comparison.
+function operationsOf(codes: string[], unit: string) {
+  const code = codes.find(text => text.startsWith(`code ${unit} `));
+  if (!code) throw new Error(`testaot walk shows no code of ${unit}`);
+  const operations = code
+    .split("\n")
+    .filter(line => /^ {4}[^ #]/.test(line))
+    .map(line => /^ {4}(?:v\d+(?:: .+?)? @\w+ = )?([A-Z]\w*)/.exec(line)?.[1] ?? line);
+  return { role: unit.split(":")[1], hasLoop: / isLoopHead=true\b/.test(code), operations };
 }
 
 /** Every `parts`-th program, from the `part`-th on. */
@@ -75,25 +89,21 @@ export const bothFunctionsStayCalls = (part: number, parts: number) =>
                 bunEnv,
               ),
             );
-            const loops = [`drive_${name}_4`, `drive_${name}_12`];
-            const printed = await spawned(
-              [testaot!, "print", program, "--until=InlineHeads", `--aotFunctionToDump=${loops.join("|")}`],
-              root,
-              toolEnv,
-            );
-            rmSync(program, { force: true });
-            expect({ stderr: printed.stderr, exitCode: printed.exitCode }).toEqual({
-              stderr: expect.any(String),
-              exitCode: 0,
-            });
-            const [few, many] = loops.map(loop => operationsOf(printed.stdout.replaceAll("\r\n", "\n"), loop));
-            expect(few.flatMap(copy => copy.operations)).toContain("LoopHint");
-            if (differToday.has(`${column}: ${name}`)) expect(few).not.toEqual(many);
-            else
+            try {
+              const printed = await printedByTestaot(root, "print", program);
+              const loops = [`drive_${name}_4`, `drive_${name}_12`].map(loop => unitsOf(printed, loop));
+              // The file of a program holds no options.
+              const walked = await printedByTestaot(root, "walk", program, ...loops.flat(), ...wordsOfAPlainBuild);
+              const codes = walked.split(/^(?=code )/m);
+              const [few, many] = loops.map(units => units.map(unit => operationsOf(codes, unit)));
+              expect(few.map(unit => unit.hasLoop)).toContain(true);
               expect({ name, loopRoundTheFunctionWith4Sites: few }).toEqual({
                 name,
                 loopRoundTheFunctionWith4Sites: many,
               });
+            } finally {
+              rmSync(program, { force: true });
+            }
           }),
         300_000,
       );

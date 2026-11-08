@@ -2,8 +2,6 @@ import { expect } from "bun:test";
 import { bunEnv, bunExe, tempDir } from "harness";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { without } from "./harness/capabilities";
-import "./harness/registry";
 import { run } from "./harness/run";
 import { test } from "./supported";
 
@@ -28,13 +26,16 @@ test("passes behind the load", () => {});
 test("times out behind the load", () => new Promise(() => {}), 50);`,
   "tests/b.test.js": `import { expect, test } from "bun:test";
 test("fails in a file that loads nothing", () => expect(1).toBe(2));`,
+  "tests/c.test.js": `import { expect, test } from "bun:test";
+import { load } from "../src/load.js";
+test("gets a second instance by a query", async () => expect((await import("../src/load.js?" + Date.now())).load).not.toBe(load));`,
 };
 const note =
   /^ +\^ while this file ran, --aot refused to load code that wasn't compiled: Cannot load '[^']+m\.mjs', at src\/load\.js:1:\d+\. See the end of the run, or add --aot-allow-code-from-disk$/;
 
 /** Of each test file, where the run first names it: the lines of its tests, each with the lines that stand under it. */
-async function linesOfTests(directory: string, flags: string[], words = "") {
-  const { stdout, stderr } = await run([bunExe(), "test", ...flags], directory, { ...bunEnv, BUN_DEBUG_TEST_AOT_WORDS: words }); // prettier-ignore
+async function linesOfTests(directory: string, flags: string[]) {
+  const { stdout, stderr } = await run([bunExe(), "test", ...flags], directory, { ...bunEnv, BUN_DEBUG_TEST_AOT_WORDS: "" }); // prettier-ignore
   const lines = (stdout + "\n" + stderr).split("\n");
   const shown: Record<string, string[]> = {};
   let file: string[] | undefined;
@@ -59,20 +60,22 @@ const withNotes = {
     "  the note",
   ],
   b: ["(fail) fails in a file that loads nothing"],
+  c: ["(pass) gets a second instance by a query"],
 };
 const failuresWithNotes = { a: withNotes.a.filter(line => !line.startsWith("(pass)")), b: withNotes.b };
 
 test.each([
-  ["as one program", [], "TestRunLayers:0"],
-  ["in two layers", [], "TestRunLayers:2,TestRunPartFiles:1"],
-  ["in a worker", ["--parallel=1"], ""],
+  ["as one program", []],
+  ["in a worker", ["--parallel=1"]],
 ])(
   "a failing test says what --aot refused while its file ran, %s",
-  async (_, flags, words) => {
+  async (_, flags) => {
     using dir = tempDir("aot-refusal-note", files);
-    const { shown, all } = await linesOfTests(String(dir), ["--aot", ...flags], words);
+    const { shown, all } = await linesOfTests(String(dir), ["--aot", ...flags]);
     expect(shown).toEqual(withNotes);
     expect(all).toContain("1 load of code that wasn't compiled failed during this run");
+    expect(all).toContain("1 compiled file ran from source in the interpreter during this run");
+    expect(all).toMatch(/^  src\/load\.js\?\d+: it was imported under a query, while tests\/c\.test\.js ran$/m);
   },
   300000,
 );
@@ -93,7 +96,59 @@ test("nothing is refused and nothing is said with --aot-allow-code-from-disk, no
     const { shown, all } = await linesOfTests(String(dir), flags);
     expect(shown.a.slice(0, 2)).toEqual(["(pass) passes ahead of the load", "(pass) fails behind the load"]);
     expect(all).not.toContain("while this file ran");
+    expect(all.includes("ran from source")).toBe(flags.length > 0);
   }
+}, 300000);
+
+test("a compiled file that the loader links for the sake of a plugin is named at the end of the run", async () => {
+  using dir = tempDir("aot-refusal-note", {
+    "package.json": `{ "name": "p", "type": "module" }`,
+    "node_modules/dep/package.json": `{ "name": "dep", "type": "module", "main": "index.js" }`,
+    "node_modules/dep/index.js": `export default "the real dep";`,
+    "src/user.js": `import dep from "dep";\nexport const seen = () => dep;`,
+    "src/other.js": `import { leaf } from "./leaf.js";\nexport const seen = () => leaf;`,
+    "src/leaf.js": `export const leaf = "leaf";`,
+    "tests/a.test.js": `import { plugin } from "bun";
+import { expect, test } from "bun:test";
+test("the plugin answers for a package that exists", async () => {
+  plugin({
+    name: "swap",
+    setup(build) {
+      build.onResolve({ filter: /^dep$/ }, () => ({ path: "dep", namespace: "swapped" }));
+      build.onLoad({ filter: /.*/, namespace: "swapped" }, () => ({ contents: 'export default "dep of the plugin";', loader: "js" }));
+    },
+  });
+  expect((await import("../src/user.js")).seen()).toBe("dep of the plugin");
+  expect((await import("../src/other.js")).seen()).toBe("leaf");
+});`,
+  });
+  const { shown, all } = await linesOfTests(String(dir), ["--aot"]);
+  expect(shown).toEqual({ a: ["(pass) the plugin answers for a package that exists"] });
+  expect(all).toContain("1 compiled file ran from source in the interpreter during this run");
+  expect(all).toMatch(/^  src\/user\.js: a plugin answers for a name that it imports, while tests\/a\.test\.js ran$/m);
+}, 300000);
+
+test("a plugin whose filter takes a name and whose callback declines leaves the file compiled, and is asked as often as without --aot", async () => {
+  using dir = tempDir("aot-refusal-note", {
+    "package.json": `{ "name": "p", "type": "module" }`,
+    "src/work.js": `import { step } from "./step.js";\nexport const sum = () => step(1);`,
+    "src/step.js": `export const step = n => n + 1;`,
+    "tests/a.test.js": `import { plugin } from "bun";
+import { expect, test } from "bun:test";
+test("the callback declines", async () => {
+  const asked = [];
+  plugin({ name: "declines", setup(build) { build.onResolve({ filter: /^\\.\\.?\\/.*\\.js$/ }, args => void asked.push(args.path)); } });
+  expect((await import("../src/work.js")).sum()).toBe(2);
+  console.log("asked", asked.join(" "));
+});`,
+  });
+  const asked = (all: string) => all.split("\n").filter(line => line.startsWith("asked"));
+  const plain = await linesOfTests(String(dir), []);
+  expect(asked(plain.all)).toEqual(["asked ../src/work.js ./step.js"]);
+  const compiled = await linesOfTests(String(dir), ["--aot"]);
+  expect(compiled.shown).toEqual({ a: ["(pass) the callback declines"] });
+  expect(asked(compiled.all)).toEqual(asked(plain.all));
+  expect(compiled.all).not.toContain("ran from source");
 }, 300000);
 
 const underFailingTest = (name: string, said: string) => [
@@ -125,7 +180,7 @@ test("passes behind the write", () => {});`,
   const said = "--aot refused a write to a read-only built-in: Cannot assign to Promise.prototype[Symbol(Symbol.toStringTag)], at src/patch.js:1:44"; // prettier-ignore
   // An executable refuses it too, and so does `bun build --compile` without --aot.
   const saidOfPath = "--aot refused a computed path that the build didn't see: Cannot reach '<src>lib.js', in code from a string, in src/find.js"; // prettier-ignore
-  const compiled = await linesOfTests(String(dir), ["--aot"], "TestRunLayers:0");
+  const compiled = await linesOfTests(String(dir), ["--aot"]);
   expect(compiled.shown.a).toEqual(underFailingTest("the write", said));
   expect(compiled.shown.b).toEqual(underFailingTest("the path", saidOfPath));
   expect(compiled.all).toContain("1 load of a compiled file by a computed path failed during this run");
@@ -137,32 +192,3 @@ test("passes behind the write", () => {});`,
   expect(plain.shown.a).toEqual(underFailingTest("the write", said).toSpliced(2, 1));
   expect(plain.shown.b[1]).toBe("(pass) fails behind the path");
 }, 300000);
-
-// `sabotage=CopiesNameNoFile`: the build forgets which files the copies from disk name: test/aot/missing-export-note.test.ts.
-test.skipIf(!!without("the words that break a build on purpose"))(
-  "a name that the build left out",
-  async () => {
-    using dir = tempDir("aot-refusal-note", {
-      "package.json": `{ "name": "p", "type": "module" }`,
-      "tests/helper.ts": `export const helper = () => "helper";`,
-      "tests/imports.ts": `import { helper } from "./helper.ts";
-export const who = () => "real " + helper();`,
-      "tests/a.test.js": `import { expect, mock, test, vi } from "bun:test";
-import { helper } from "./helper.ts";
-test("passes ahead of the import", () => void helper());
-test("fails behind the import", async () => {
-  mock.module("./imports.ts", () => ({ who: () => "mocked" }));
-  let seen; try { seen = (await vi.importActual("./imports.ts")).who(); } catch { seen = "setup failed"; }
-  expect(seen).toBe("real helper");
-});
-test("passes behind the import", () => {});`,
-    });
-    const said = "code from disk imported a name that the build left out: 'helper' in tests/helper.ts, asked for by tests/imports.ts?actual"; // prettier-ignore
-    const sabotaged = await linesOfTests(String(dir), ["--aot"], "TestRunLayers:0,sabotage=CopiesNameNoFile");
-    expect(sabotaged.shown.a).toEqual(underFailingTest("the import", said));
-    expect((await linesOfTests(String(dir), ["--aot"], "TestRunLayers:0")).shown.a[1]).toBe(
-      "(pass) fails behind the import",
-    );
-  },
-  300000,
-);

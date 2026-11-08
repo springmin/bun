@@ -4,7 +4,6 @@ use crate::elf_program_headers::read_header;
 use crate::macho_types::MH_MAGIC_64;
 use crate::section::find_known_section;
 use crate::{Error, elf_ranges, macho_ranges, pe_ranges};
-use bun_sort_by_number::SortByNumber;
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub struct AddressRange {
@@ -70,8 +69,6 @@ pub enum KnownSection {
     RemovableFeatureState,
     BuildId,
     RuntimeDescription,
-    /// Bun's own code, compiled when Bun was built. No segment holds it: nothing loads it until a test run asks for it.
-    CompiledLibrary,
 }
 
 #[derive(Copy, Clone)]
@@ -121,12 +118,6 @@ impl KnownSection {
                 macho_section: b"__bun_aot",
                 pe: *b".bunaot\0",
             },
-            KnownSection::CompiledLibrary => SectionNames {
-                elf: b".bun_library",
-                macho_segment: b"__BUN",
-                macho_section: b"__bun_library",
-                pe: *b".bunlib\0",
-            },
         }
     }
 }
@@ -174,7 +165,7 @@ pub enum ImageError {
 
 pub(crate) fn merge_ranges(mut ranges: Vec<AddressRange>) -> Vec<AddressRange> {
     ranges.retain(|range| !range.is_empty());
-    ranges.sort_by_u64(|range| range.start);
+    ranges.sort_unstable_by_key(|range| range.start);
     ranges.dedup_by(|next, previous| {
         let is_joined = next.start <= previous.end;
         if is_joined {

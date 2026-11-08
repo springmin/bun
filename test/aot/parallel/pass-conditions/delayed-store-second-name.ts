@@ -1,5 +1,3 @@
-// Alone: what a loop keeps in a register goes by which bodies are copied into it, and that by all that the executable holds
-// STATISTIC: StoresLeftInLoopsForOthers >= 1
 const turns: number = JSON.parse("6");
 class Box {
   v = 1.5;

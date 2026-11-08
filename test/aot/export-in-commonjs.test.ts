@@ -10,12 +10,6 @@ const verbatim = JSON.stringify({
 });
 const pool = `export function getPool(): string { return "pool"; }\n`;
 
-const forms: [string, string, string[]][] = [
-  ["as the run is built by itself", "", []],
-  ["one program", "TestRunLayers:0", []],
-  ["three layers", "TestRunLayers:3", ["--isolate"]],
-];
-
 const projects: [string, Record<string, string>][] = [
   [
     "the project's own file",
@@ -48,23 +42,21 @@ test("uses the pool", () => { expect(getPool()).toBe("pool"); });
 ];
 
 for (const [whose, files] of projects) {
-  for (const [form, words, flags] of forms) {
-    test.concurrent(`${whose} is compiled for a test run, ${form}`, async () => {
-      using dir = tempDir("export-in-commonjs", files);
-      await using run = Bun.spawn({
-        cmd: [bunExe(), "test", "--aot", ...flags],
-        env: { ...bunEnv, BUN_DEBUG_TEST_AOT_WORDS: words, BUN_JSC_logAOTPhaseTimes: "1" },
-        cwd: String(dir),
-        stdout: "ignore",
-        stderr: "pipe",
-      });
-      const [stderr, exitCode] = await Promise.all([run.stderr.text(), run.exited]);
-      expect(stderr.split("\n").filter(line => line.startsWith("error"))).toEqual([]);
-      expect(stderr).not.toContain("files left to the loader added");
-      expect(stderr).toContain(" 1 pass");
-      expect(exitCode).toBe(0);
+  test.concurrent(`${whose} is compiled for a test run, one program`, async () => {
+    using dir = tempDir("export-in-commonjs", files);
+    await using run = Bun.spawn({
+      cmd: [bunExe(), "test", "--aot"],
+      env: { ...bunEnv, BUN_DEBUG_TEST_AOT_WORDS: "TestRunLayers:0", BUN_JSC_logAOTPhaseTimes: "1" },
+      cwd: String(dir),
+      stdout: "ignore",
+      stderr: "pipe",
     });
-  }
+    const [stderr, exitCode] = await Promise.all([run.stderr.text(), run.exited]);
+    expect(stderr.split("\n").filter(line => line.startsWith("error"))).toEqual([]);
+    expect(stderr).not.toContain("files left to the loader added");
+    expect(stderr).toContain(" 1 pass");
+    expect(exitCode).toBe(0);
+  });
 }
 
 test.concurrent("an executable is built over such a dependency", async () => {

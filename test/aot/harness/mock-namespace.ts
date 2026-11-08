@@ -1,7 +1,6 @@
 import { expect } from "bun:test";
 import { bunEnv, bunExe, tempDir } from "harness";
 import { test } from "../supported";
-import { expectLayers } from "./layers";
 import { run } from "./run";
 
 // `vi.doMock()` over a module that has run leaves the module alone. From then on the module has two namespace objects: its own, which whoever was linked to it before keeps,
@@ -176,33 +175,21 @@ test("t", async () => {
   },
 };
 
-export function mockNamespace(part: number, of: number) {
-  const mine = Object.entries(cases).filter((_, index) => index % of === part);
-  for (const [name, { files, plain: expected }] of mine) {
+export function mockNamespace() {
+  for (const [name, { files, plain: expected }] of Object.entries(cases)) {
     test(
       name,
       async () => {
         using dir = tempDir("aot-mock-namespace", { "package.json": `{ "type": "module" }`, "dep.js": dep, ...files });
         const seenWith = async (...flags: string[]) => {
-          const environment = { ...bunEnv, BUN_DEBUG_TEST_AOT_WORDS: "TestRunSaysItsForm" };
-          const { stdout, stderr, exitCode } = await run([bunExe(), "test", ...flags], String(dir), environment);
-          // A parallel run prints what its test files log to stderr, in the order in which they end.
-          const lines = (stdout + "\n" + stderr).split("\n").filter(line => line.startsWith("seen: "));
+          const { stdout, stderr, exitCode } = await run([bunExe(), "test", ...flags], String(dir), bunEnv);
+          const lines = stdout.split("\n").filter(line => line.startsWith("seen: "));
           const failed = stderr.split("\n").filter(line => /^\(fail\)|^✗|^panic|^error: /.test(line));
-          return { seen: { lines: lines.map(line => line.slice("seen: ".length)), failed, exitCode }, stderr };
+          return { lines: lines.map(line => line.slice("seen: ".length)), failed, exitCode };
         };
-        const sorted = (seen: { lines: string[] }) => ({ ...seen, lines: seen.lines.toSorted() });
-        const [plain, oneProgram, plainInParallel, layers] = await Promise.all([
-          seenWith(),
-          seenWith("--aot"),
-          seenWith("--parallel=2"),
-          // More source than fits the memory as one program: the run is built in layers.
-          seenWith("--aot", "--parallel=2", "--aot-memory-limit=1KB"),
-        ]);
-        expect(plain.seen).toEqual({ lines: expected, failed: [], exitCode: 0 });
-        expect(oneProgram.seen).toEqual(plain.seen);
-        expectLayers(layers.stderr);
-        expect(sorted(layers.seen)).toEqual(sorted(plainInParallel.seen));
+        const [plain, compiled] = await Promise.all([seenWith(), seenWith("--aot")]);
+        expect(plain).toEqual({ lines: expected, failed: [], exitCode: 0 });
+        expect(compiled).toEqual(plain);
       },
       180_000,
     );

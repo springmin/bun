@@ -1,7 +1,5 @@
 use bun_sema::bind::CommonJsVariable;
-use bun_sema::check::aot::{
-    ClassDeclaration, ClassRef, FunctionRef, ObjectOrigin, TypeIdentity, TypeParameterRef,
-};
+use bun_sema::check::aot::{ClassDeclaration, ClassRef, FunctionRef, ObjectOrigin, TypeIdentity};
 use bun_sema::hir::MemberId;
 use bun_sema::program::{FileId, Sym};
 
@@ -11,37 +9,25 @@ use crate::modules::SyntheticExportId;
 #[derive(Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Debug)]
 pub enum FunctionKey {
     ModuleBody(FileId),
-    /// The text of a CommonJS file as a function of `this` and the five names, for a file that stores to one of them or shows them to `eval`.
     WrappedModuleBody(FileId),
-    /// The body of the module that ES modules request in place of a CommonJS file.
     FaceBody(FileId),
-    /// The body of the module that throws for a name that the ES graph below a file imports and no CommonJS file stores.
     CheckBody(FileId),
+    Instantiation(FileId),
     Source(FunctionRef),
     Signature(FunctionRef),
     ClassSignature(ClassRef),
     ImplicitConstructor(ClassRef),
     InstanceInitializer(ClassRef),
     StaticInitializer(ClassRef),
-    AccessorGetter {
-        file: FileId,
-        member: MemberId,
-    },
-    AccessorSetter {
-        file: FileId,
-        member: MemberId,
-    },
-    PrivateNameTest {
-        file: FileId,
-        member: MemberId,
-    },
+    AccessorGetter { file: FileId, member: MemberId },
+    AccessorSetter { file: FileId, member: MemberId },
+    PrivateNameTest { file: FileId, member: MemberId },
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Debug)]
 pub enum LayoutKey {
     Class(ClassRef),
     ConstructorFunction(FunctionRef),
-    /// A class or a constructor function of Bun's own modules, as a file of the application names it.
     Library(ClassDeclaration),
     ObjectType {
         origin: ObjectOrigin,
@@ -51,8 +37,11 @@ pub enum LayoutKey {
         file: FileId,
         members: TypeIdentity,
     },
+    CreatedObject {
+        file: FileId,
+        call: u32,
+    },
     Container(Sym),
-    TypeParameter(TypeParameterRef),
     Environment {
         file: FileId,
         environment: u32,
@@ -78,37 +67,29 @@ pub enum PrivateStatePart {
 #[derive(Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Debug)]
 pub enum VariableKey {
     Symbol(Sym),
-    /// A name of a CommonJS module, which its body stores, or of a library module, which the loader fills.
     SyntheticExport(SyntheticExportId),
-    /// What ES importers hold of a name of a CommonJS module. The face of the module stores it.
     Copy(SyntheticExportId),
-    /// `module.exports` of a CommonJS file whose exports are one value.
     ModuleExports(FileId),
-    /// The same for the callback of `__commonJS(cb)`.
     InnerModuleExports(FunctionRef),
     ClassSlot {
         class: ClassRef,
         slot: ClassSlot,
     },
-    /// `__filename` or `__dirname` of an ES module that stores to it.
     ModulePath {
         file: FileId,
         variable: CommonJsVariable,
     },
-    /// What the program keeps for a variable whose `WeakMap` or `WeakSet` is private state of a class.
     PrivateState {
         state: Sym,
         part: PrivateStatePart,
     },
-    /// What `require` answered in the initializer of a name that holds it in place of the copy that a bundler's helper makes. Nothing is stored where the helper made the copy.
     RequiredAnswer(Sym),
-    /// What `createRequire` made in the initializer of a name, where it was given the file itself. Nothing where it was given something else.
-    RequireMadeForOwnFile(Sym),
-    /// The mock that stands in place of a file whose body has not run, and nothing while none does. Of a file that a test may mock: the host stores its
-    /// object there, and every import from the file asks the object while it stands.
     MockOf(FileId),
-    /// The same for a module of Bun's own that a test may mock.
+    InstantiationState(FileId),
+    EnvironmentMadeAhead(FileId),
     MockOfRuntimeModule(RuntimeModule),
+    RequiresMadeForOwnFile(FileId),
+    RequiresMadeForOtherFolders(FileId),
 }
 
 impl FunctionKey {
@@ -118,6 +99,7 @@ impl FunctionKey {
             | FunctionKey::WrappedModuleBody(file)
             | FunctionKey::FaceBody(file)
             | FunctionKey::CheckBody(file)
+            | FunctionKey::Instantiation(file)
             | FunctionKey::AccessorGetter { file, .. }
             | FunctionKey::AccessorSetter { file, .. }
             | FunctionKey::PrivateNameTest { file, .. } => file,
@@ -131,7 +113,6 @@ impl FunctionKey {
 }
 
 impl LayoutKey {
-    // The layout of a plain object belongs to no file: each file that lists the same names defines it.
     pub fn has_united_definitions(&self) -> bool {
         matches!(
             self,
@@ -154,11 +135,10 @@ impl LayoutKey {
                 | ObjectOrigin::ObjectLiteral { file, .. } => Some(file),
                 ObjectOrigin::Computed => None,
             },
-            LayoutKey::UntypedLiteral { file, .. } | LayoutKey::Environment { file, .. } => {
-                Some(file)
-            }
+            LayoutKey::UntypedLiteral { file, .. }
+            | LayoutKey::CreatedObject { file, .. }
+            | LayoutKey::Environment { file, .. } => Some(file),
             LayoutKey::Container(symbol) => Some(symbol.file),
-            LayoutKey::TypeParameter(parameter) => Some(parameter.file),
         }
     }
 }
@@ -170,12 +150,14 @@ impl VariableKey {
             VariableKey::ClassSlot { class, .. } => Some(class.file),
             VariableKey::ModuleExports(file)
             | VariableKey::ModulePath { file, .. }
-            | VariableKey::MockOf(file) => Some(file),
+            | VariableKey::MockOf(file)
+            | VariableKey::InstantiationState(file)
+            | VariableKey::RequiresMadeForOwnFile(file)
+            | VariableKey::RequiresMadeForOtherFolders(file)
+            | VariableKey::EnvironmentMadeAhead(file) => Some(file),
             VariableKey::InnerModuleExports(callback) => Some(callback.file),
             VariableKey::PrivateState { state, .. } => Some(state.file),
-            VariableKey::RequiredAnswer(holder) | VariableKey::RequireMadeForOwnFile(holder) => {
-                Some(holder.file)
-            }
+            VariableKey::RequiredAnswer(holder) => Some(holder.file),
             VariableKey::SyntheticExport(_)
             | VariableKey::Copy(_)
             | VariableKey::MockOfRuntimeModule(_) => None,
@@ -186,7 +168,7 @@ impl VariableKey {
 #[cfg(test)]
 mod tests {
     use bun_sema::bind::SymbolId;
-    use bun_sema::hir::{ClassId, ExprId, FnId, TypeNodeId, TypeParamId};
+    use bun_sema::hir::{ClassId, ExprId, FnId, TypeNodeId};
 
     use super::*;
 
@@ -213,6 +195,7 @@ mod tests {
             FunctionKey::WrappedModuleBody(FILE),
             FunctionKey::FaceBody(FILE),
             FunctionKey::CheckBody(FILE),
+            FunctionKey::Instantiation(FILE),
             FunctionKey::Source(FUNCTION),
             FunctionKey::Signature(FUNCTION),
             FunctionKey::ClassSignature(CLASS),
@@ -262,10 +245,6 @@ mod tests {
                 members: IDENTITY,
             },
             LayoutKey::Container(SYMBOL),
-            LayoutKey::TypeParameter(TypeParameterRef {
-                file: FILE,
-                parameter: TypeParamId(3),
-            }),
             LayoutKey::Environment {
                 file: FILE,
                 environment: 0,
@@ -305,6 +284,12 @@ mod tests {
             VariableKey::InnerModuleExports(FUNCTION).home_file(),
             Some(FILE)
         );
+        assert_eq!(VariableKey::RequiredAnswer(SYMBOL).home_file(), Some(FILE));
+        for part in [PrivateStatePart::Collection, PrivateStatePart::Token] {
+            let state = SYMBOL;
+            let key = VariableKey::PrivateState { state, part };
+            assert_eq!(key.home_file(), Some(FILE), "{key:?}");
+        }
         let synthetic_export = VariableKey::SyntheticExport(SyntheticExportId(9));
         assert_eq!(synthetic_export.home_file(), None);
         assert_eq!(VariableKey::Copy(SyntheticExportId(9)).home_file(), None);

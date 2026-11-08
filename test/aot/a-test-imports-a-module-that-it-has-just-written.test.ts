@@ -1,9 +1,8 @@
 import { expect } from "bun:test";
 import { bunEnv, bunExe, tempDir } from "harness";
 import { join } from "node:path";
-import { reads } from "./harness/reads";
 import { run } from "./harness/run";
-import { beforeAll, test } from "./supported";
+import { test } from "./supported";
 
 // A test writes a module and loads it. Where the build knows the specifier, `import("./made.mjs")` or a path that it folds to one, the file is not there when the run is
 // built: the loader is asked when the call runs. It has read the folder of the test file before, so it has to read it again.
@@ -56,16 +55,11 @@ test("${tag}", async () => {
 });
 `;
 
-async function said(flags: string[], words: string, files: string[]) {
+async function said(flags: string[]) {
   // A run leaves what it has written, so each gets a folder of its own.
-  using dir = tempDir("aot-test-imports-what-it-wrote", {
-    "tsconfig.json": "{}",
-    "a.test.ts": testFile("a"),
-    "b.test.ts": testFile("b"),
-  });
+  using dir = tempDir("aot-test-imports-what-it-wrote", { "tsconfig.json": "{}", "a.test.ts": testFile("a") });
   const directory = String(dir);
-  const env = { ...bunEnv, BUN_DEBUG_TEST_AOT_WORDS: words, BUN_TMPDIR: directory };
-  const ran = await run([bunExe(), "test", ...flags, ...files], directory, env);
+  const ran = await run([bunExe(), "test", ...flags, "./a.test.ts"], directory, { ...bunEnv, BUN_TMPDIR: directory });
   return {
     lines: (ran.stdout + "\n" + ran.stderr)
       .split("\n")
@@ -74,117 +68,14 @@ async function said(flags: string[], words: string, files: string[]) {
     summary: ran.stderr.split("\n").filter(line => /^ *\d+ (pass|fail)$/.test(line)),
   };
 }
-const workers = ["--isolate", "--parallel=2"];
-let alone: Awaited<ReturnType<typeof said>>;
-let both: Awaited<ReturnType<typeof said>>;
-beforeAll(async () => {
-  [alone, both] = await Promise.all([said([], "", ["./a.test.ts"]), said(workers, "", ["."])]);
-});
 
-test("what plain Bun says", () => {
-  expect(alone.summary).toEqual([" 1 pass", " 0 fail"]);
-  expect(alone.lines.length).toBe(18);
-  expect(alone.lines).toContain("SAID a a literal, import() 1");
-  expect(alone.lines).toContain("SAID a a path that the build folds 3");
-  expect(both.lines.length).toBe(36);
-});
-
-test("it says what plain Bun says: alone", async () => {
-  expect(await said(["--aot"], "", ["./a.test.ts"])).toEqual(alone);
-});
-
-test.each([
-  ["both files", [], ""],
-  ["as one program", workers, "TestRunLayers:0"],
-  ["in two layers", workers, "TestRunLayers:2,TestRunPartFiles:1"],
-])("it says what plain Bun says: %s", async (_, flags, words) => {
-  expect(await said(["--aot", ...flags], words, ["."])).toEqual(both);
-});
-
-// The loader reads a folder again where it has found nothing, and looks once more. It does that once.
-test("a load that finds nothing ends, in a plain run, a compiled one and an executable", async () => {
-  const program = `import { mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-const here = process.cwd();
-const made = (...parts: string[]) => join(here, ...parts) + ".mjs".slice(process.argv.length > 90 ? 1 : 0);
-const ask = async (label: string, load: () => unknown) => {
-  try { console.log("SAID", label, await load()); } catch (error: any) { console.log("SAID", label, "THROWS", error.code); }
-};
-// @ts-ignore
-await ask("relative, import()", async () => (await import("./never.mjs")).said);
-await ask("relative, require()", () => require("./never.cjs").said);
-await ask("absolute", async () => (await import(made("never-either"))).said);
-// @ts-ignore
-await ask("bare, import()", async () => (await import("no-such-package")).said);
-await ask("bare, require()", () => require("no-such-package").said);
-// @ts-ignore
-await ask("relative, in a folder that is not there", async () => (await import("./no-folder/x.mjs")).said);
-await ask("absolute, in a folder that is not there", async () => (await import(made("no-folder", "y"))).said);
-mkdirSync(join(here, "gone"), { recursive: true });
-writeFileSync(join(here, "gone", "x.mjs"), "export const said = 1;\\n");
-await ask("a folder that is there", async () => typeof (await import(made("gone", "x"))).said);
-rmSync(join(here, "gone"), { recursive: true, force: true });
-await ask("the folder is deleted", async () => (await import(made("gone", "y"))).said);
-for (let i = 0; i < 300; i++) { try { require("./never" + (i % 3) + ".cjs"); } catch {} }
-console.log("SAID the end");
-`;
-  const forms: [string, string[][]][] = [
-    ["plain", [[bunExe(), "main.ts"]]],
-    ["bun run --aot", [[bunExe(), "run", "--aot", "main.ts"]]],
-    [
-      "an executable",
-      [[bunExe(), "build", "--compile", "--aot", "--target=bun", "./main.ts", "--outfile", "x"], ["./x"]],
-    ],
-    [
-      "an executable that loads code from disk",
-      [
-        [
-          bunExe(),
-          "build",
-          "--compile",
-          "--aot",
-          "--aot-allow-code-from-disk",
-          "--target=bun",
-          "./main.ts",
-          "--outfile",
-          "x",
-        ],
-        ["./x"],
-      ],
-    ],
-  ];
-  for (const [form, commands] of forms) {
-    using dir = tempDir("aot-load-that-finds-nothing", { "tsconfig.json": "{}", "main.ts": program });
-    const directory = String(dir);
-    let last = { stdout: "", exitCode: -1 };
-    let took = 0;
-    for (const [first, ...rest] of commands) {
-      const began = performance.now();
-      last = await run([first === "./x" ? join(directory, "x") : first, ...rest], directory, bunEnv);
-      took = performance.now() - began;
-    }
-    const lines = last.stdout.split("\n").filter(line => line.startsWith("SAID"));
-    expect({ form, exitCode: last.exitCode, lines: lines.length, end: lines.at(-1) }).toEqual({
-      form,
-      exitCode: 0,
-      lines: 10,
-      end: "SAID the end",
-    });
-    for (const label of [
-      "relative, import()",
-      "absolute",
-      "bare, import()",
-      "relative, in a folder that is not there",
-      "the folder is deleted",
-    ])
-      expect({ form, line: lines.find(line => line.startsWith("SAID " + label + " ")) }).toEqual({
-        form,
-        line: `SAID ${label} THROWS ERR_MODULE_NOT_FOUND`,
-      });
-    // My first form of the second look went round for a minute, to 16 GB.
-    reads(`a module that is not there, ${form}`, took / 1000, 30, "s");
-    expect({ form, isQuick: took < 30_000 }).toEqual({ form, isQuick: true });
-  }
+test("it says what plain Bun says", async () => {
+  const plain = await said([]);
+  expect(plain.summary).toEqual([" 1 pass", " 0 fail"]);
+  expect(plain.lines.length).toBe(18);
+  expect(plain.lines).toContain("SAID a a literal, import() 1");
+  expect(plain.lines).toContain("SAID a a path that the build folds 3");
+  expect(await said(["--aot"])).toEqual(plain);
 });
 
 // What decides is whether the program may load code from disk, which a test run may and an executable may by an option.

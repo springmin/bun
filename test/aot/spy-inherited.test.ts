@@ -1,7 +1,6 @@
 import { expect } from "bun:test";
 import { bunEnv, bunExe, tempDir } from "harness";
 import { raiseDefaultTimeout } from "./harness/default-timeout";
-import { expectLayers } from "./harness/layers";
 import { run } from "./harness/run";
 import { test } from "./supported";
 
@@ -94,43 +93,6 @@ test("what stands in front of the member answers in its place, until it is taken
   });
 });
 
-test("over layers", async () => {
-  using dir = tempDir("spy-inherited", {
-    ...app,
-    "one.test.ts": `${imports}
-      test("one", () => {
-        const set = spyOn(Uint8Array.prototype, "set"), text = spyOn(Map.prototype, "toString");
-        console.log("one", fill(new Uint8Array(2), [7, 8]), fillAny(Buffer.alloc(2), [4], 2), fillAny(new Int8Array(2), [3], 2), set.mock.calls.length, shown(new Map()), text.mock.calls.length);
-        set.mockRestore(); text.mockRestore();
-      });`,
-    "two.test.ts": `${imports}
-      test("two", () => { console.log("two", fill(new Uint8Array(2), [1, 2]), shown(new Map()), Object.hasOwn(Uint8Array.prototype, "set")); });`,
-  });
-  const linesOf = async (...flags: string[]) => {
-    const environment = { ...bunEnv, BUN_DEBUG_TEST_AOT_WORDS: "TestRunSaysItsForm" };
-    const { stderr, exitCode } = await run(
-      [bunExe(), "test", "--timeout=60000", "--parallel=2", ...flags],
-      String(dir),
-      environment,
-    );
-    // A parallel run prints there what its test files log.
-    return {
-      lines: stderr
-        .split("\n")
-        .filter(line => /^(one|two) /.test(line))
-        .sort(),
-      exitCode,
-      stderr,
-    };
-  };
-  const { stderr: _, ...plain } = await linesOf();
-  expect(plain.lines.length).toBe(2);
-  // More source than fits the memory as one program: the run is built in layers.
-  const { stderr, ...compiled } = await linesOf("--aot", "--aot-memory-limit=1KB");
-  expectLayers(stderr);
-  expect(compiled).toEqual(plain);
-});
-
 test("what is read without a lookup stays closed, and says so", async () => {
   using dir = tempDir("spy-inherited", {
     "one.test.ts": `
@@ -140,6 +102,10 @@ test("what is read without a lookup stays closed, and says so", async () => {
         expect(() => { (Uint8Array.prototype as any).then = () => 1; }).toThrow("a test can't add this one");
         expect(() => spyOn(Uint8Array.prototype as any, "constructor")).toThrow("a test can't replace this one");
         expect(() => spyOn(Array.prototype.push as any, "apply")).toThrow("'apply' of a built-in function");
+        // Written in JavaScript, so in a compiled run they are functions of the compiled library.
+        for (const inLibrary of [Array.from, Array.prototype.map, Map.groupBy, Buffer.from, Uint8Array.prototype.fill] as any[])
+          for (const name of ["call", "apply", "bind"])
+            expect(() => spyOn(inLibrary, name)).toThrow(\`'\${name}' of a built-in function\`);
       });`,
   });
   expect((await runTests(String(dir), "--aot")).results).toEqual(["pass refused"]);

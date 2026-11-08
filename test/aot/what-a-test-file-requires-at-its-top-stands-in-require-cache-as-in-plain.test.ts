@@ -69,3 +69,20 @@ test("two files that require each other", async () => {
       test("keys", () => { console.log(a.b.keys, "|", keys(), a.b.seen); });`,
   });
 });
+
+// The loader asks for everything that the ES modules of one level import before any of it runs. What stands for beside.cjs in the loader, for the name that is imported, is no file.
+test("what an ES module imports stands there from when the loader asks for it", async () => {
+  const lists = (name: string) =>
+    `console.log("${name}", Object.keys(require.cache).map(key => key.replace(/.*[\\\\/]/, "")).join());`;
+  await expectCompiledToRunAsPlain({
+    "graph.mjs": `import "./first.cjs";\nimport beside from "./beside.cjs";\nimport "./deeper.mjs";\nconsole.log(beside);`,
+    "deeper.mjs": `import "./below.cjs";`,
+    "first.cjs": `${lists("first")}\nrequire("./own.cjs");`,
+    "own.cjs": lists("own"),
+    "beside.cjs": `${lists("beside")}\nmodule.exports = 2;`,
+    "below.cjs": lists("below"),
+    "one.test.cjs": `${head}
+      require("./graph.mjs");
+      test("keys", () => { console.log(keys()); });`,
+  });
+});

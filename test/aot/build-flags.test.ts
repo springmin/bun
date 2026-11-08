@@ -57,6 +57,55 @@ const honored: Record<string, { flags: string[]; files: Record<string, string>; 
     },
     prints: "42 named true number staging\n",
   },
+  "--define of a name in place of a name": {
+    flags: ["--define=MODE=mode", "--define=CALC=Math", "--define=load=require"],
+    files: {
+      "main.js": `globalThis.mode = "global";
+const mode = "module";
+function pick(mode) { return MODE; }
+function later(mode) { return () => MODE; }
+function store(mode) { MODE = "stored"; return mode; }
+function own() { const MODE = "own"; return MODE; }
+function local(Math) { return CALC.max(1, 2); }
+console.log(MODE, pick("parameter"), later("captured")(), store("parameter"), globalThis.mode, own(), typeof MODE);
+let said; try { said = typeof load("node:os").platform; } catch (e) { said = e.message; }
+console.log(local({ max: () => "local" }), CALC.max(1, 2), said);`,
+    },
+    prints: "module parameter captured stored global own string\nlocal 2 require is not defined\n",
+  },
+  "--define of a name in place of a path, and of a path in place of a name": {
+    flags: [
+      "--define=config.mode=mode",
+      "--define=import.meta.env.MODE=mode",
+      "--define=DEPTH=settings.depth",
+      "--define=LOADER_AT_HAND=require",
+    ],
+    files: {
+      "main.mjs": `globalThis.mode = "global";
+globalThis.settings = { depth: "global" };
+const mode = "module";
+const settings = { depth: "module" };
+function pick(mode) { return config.mode; }
+function later(mode) { return () => import.meta.env.MODE; }
+function own(config) { return config.mode; }
+function depth(settings) { return DEPTH; }
+function loader(require) { return LOADER_AT_HAND; }
+function put() { const settings = { depth: "local" }; DEPTH = "stored"; return settings.depth; }
+console.log(config.mode, import.meta.env.MODE, pick("parameter"), later("captured")(), own({ mode: "own" }), typeof config.mode);
+console.log(DEPTH, depth({ depth: "parameter" }), loader("parameter"), put());`,
+    },
+    prints: "module module parameter captured own string\nglobal parameter parameter stored\n",
+  },
+  "--define of a name in place of a path, under typeof": {
+    flags: ["--define=config.flag=absent", "--define=FLAG=absent", "--define=config.there=present"],
+    files: {
+      "main.ts": `declare const config: { flag: unknown; there: unknown }; declare const FLAG: unknown;
+(globalThis as any).present = 1;
+const kind = (read: () => string) => { try { return read(); } catch (e) { return (e as Error).name; } };
+console.log(kind(() => typeof config.flag), kind(() => typeof (config.flag)), kind(() => typeof FLAG), kind(() => typeof config.there));`,
+    },
+    prints: "ReferenceError ReferenceError undefined number\n",
+  },
   "--define and --drop of a path that the program ends in brackets": {
     ...pathsThatEndInBrackets,
     prints:

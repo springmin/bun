@@ -7,23 +7,27 @@
 import { expect } from "bun:test";
 import { bunEnv, bunExe, isASAN, isDebug, tempDir } from "harness";
 import { join } from "path";
-import { countsInstructions, measureCommand } from "../analysis-scaling/measure-check";
+import { measureCommand } from "../analysis-scaling/measure-check";
+import { without } from "../harness/capabilities";
 import { built, spawned, withoutDebugInformation } from "../harness/commands";
-import { withSteadyCollections } from "../harness/counted-run";
 import { beforeAll, describe, test } from "../supported";
+
+// Otherwise what the collector's threads get done beside the program differs by some percent from run to run.
+const withSteadyCollections = {
+  BUN_GC_TIMER_DISABLE: "1",
+  BUN_JSC_percentCPUPerMBForEdenTimer: "0",
+  BUN_JSC_percentCPUPerMBForFullTimer: "0",
+  BUN_JSC_useConcurrentGC: "0",
+  BUN_JSC_numberOfGCMarkers: "1",
+};
 
 const root = join(import.meta.dir, "apply-arguments-cost");
 
 const rows: [loop: string, instructions: number][] = [["mapped", 450]];
 const [few, many] = [100_000, 400_000];
 
-const skipped =
-  isDebug || isASAN
-    ? "a debug or ASAN build counts other instructions"
-    : !countsInstructions()
-      ? "instructions are not counted here"
-      : undefined;
-if (skipped) console.error(`SKIPPED: test/aot/perf/apply-arguments-cost.test.ts: the costs: ${skipped}`);
+// A debug or ASAN build counts other instructions.
+const isSlowBuild = isDebug || isASAN;
 
 describe("compile/aot/perf/apply-arguments-cost", () => {
   const folder = String(tempDir("aot-apply-arguments-cost", {}));
@@ -63,7 +67,7 @@ describe("compile/aot/perf/apply-arguments-cost", () => {
   }
 
   for (const [loop, instructions] of rows) {
-    test.skipIf(!!skipped)(
+    test.skipIf(isSlowBuild || !!without("a counter of instructions"))(
       `${loop}: at most ${instructions} instructions more than an array`,
       async () => {
         const [array, list] = [await costOf("arrays"), await costOf(loop)];

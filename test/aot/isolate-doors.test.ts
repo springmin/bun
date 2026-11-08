@@ -70,9 +70,8 @@ async function doorsOf(dir: string, flags: string[], words?: string) {
 }
 
 const modes = [
-  { isolate: "--isolate", openDoors: 1, forms: ["TestRunLayers:0", "TestRunLayers:2"] },
+  { isolate: "--isolate", openDoors: 1, forms: ["TestRunLayers:0"] },
   // TODO(4271): as one program a compiled run with --isolate=modules gives each file a global object of its own: five of the six doors are shut.
-  { isolate: "--isolate=modules", openDoors: 6, forms: ["TestRunLayers:2"] },
 ];
 
 test.each(modes)(

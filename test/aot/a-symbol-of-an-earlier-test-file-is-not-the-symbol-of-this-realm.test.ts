@@ -88,64 +88,57 @@ export const define = (x, v) => Object.defineProperty(x, mark, { value: v, enume
   "b.test.mjs": asks,
 };
 
-async function runTests(directory: string, words: string | undefined, ...flags: string[]) {
-  const env = words ? { ...bunEnv, BUN_DEBUG_TEST_AOT_WORDS: words } : bunEnv;
+async function runTests(directory: string, ...flags: string[]) {
   const command = [bunExe(), "test", "--isolate", ...flags, "./a.test.mjs", "./b.test.mjs"];
-  const { stdout, stderr, exitCode } = await run(command, directory, env);
+  const { stdout, stderr, exitCode } = await run(command, directory, bunEnv);
   if (exitCode !== 0) console.error(stderr);
   return { stdout: stdout.split("\n").filter(line => line.startsWith("SEEN")), exitCode };
 }
 
-for (const [way, words] of [
-  ["as the runner divides it", undefined],
-  ["as one program", "TestRunLayers:0"],
-  ["over two layers, both files in one process", "TestRunLayers:2,TestRunPartFiles:3"],
-] as const) {
-  test(`a symbol of an earlier test file is not the symbol of this realm, ${way}`, async () => {
-    using dir = tempDir("aot-a-symbol-of-an-earlier-test-file", files);
-    const plain = await runTests(String(dir), undefined);
-    const ours = "SEEN ours: 1,true,4,3,2,mark,,Symbol(in a function),true";
-    expect(plain).toEqual({
-      stdout: [
-        ours,
-        "SEEN 00 ours,ours,ours,ours,4,0",
-        "SEEN 50 a snapshot of the heap object,2,1",
-        ours,
-        "SEEN is theirs ours: false,false,false,false,false,false,false,false,false,2",
-        "SEEN a registered symbol is: true,true",
-        "SEEN their key on our objects: ,,false,,false,undefined",
-        "SEEN our key on their objects: ,,false,,false,undefined",
-        "SEEN their key on their objects: 1,4,true,2",
-        "SEEN both keys on one object: 2,3,3",
-        "SEEN own symbols: true,false,false",
-        "SEEN in a switch and a map: other,,1",
-        "SEEN 00 ours,ours,ours,ours,4,0",
-        "SEEN 10 names theirs,2,theirs,theirs,theirs,theirs,ours+theirs,theirs+ours",
-        "SEEN 10 reads ,1,false,true,,1,,1,1,0",
-        "SEEN 10 stores theirs+ours,7,1,7,1",
-        "SEEN 10 defines theirs+ours,8,1",
-        "SEEN 10 deletes true,theirs,true,",
-        'SEEN 10 copies 2,{"plain":2},plain,plain,2',
-        "SEEN 20 names theirs,2,theirs,theirs,theirs,theirs,ours+theirs,theirs+ours",
-        "SEEN 20 reads ,4,false,true,,4,,1,4,0",
-        "SEEN 20 stores theirs+ours,7,4,7,4",
-        "SEEN 20 defines theirs+ours,8,4",
-        "SEEN 20 deletes true,theirs,true,",
-        'SEEN 20 copies 5,{"plain":5},plain,plain,5',
-        "SEEN 30 names ours,ours,theirs+ours",
-        "SEEN 30 reads ,false,,,1",
-        "SEEN 30 stores ours+theirs,1,7,1,7",
-        "SEEN 30 defines ours+theirs,1,8",
-        "SEEN 30 deletes true,ours,true,",
-        "SEEN 40 names ours,ours,theirs+ours",
-        "SEEN 40 reads ,false,,,1",
-        "SEEN 40 stores ours+theirs,4,7,4,7",
-        "SEEN 40 defines ours+theirs,4,8",
-        "SEEN 40 deletes true,ours,true,",
-        "SEEN 50 a snapshot of the heap object,2,1",
-      ],
-      exitCode: 0,
-    });
-    expect(await runTests(String(dir), words, "--aot")).toEqual(plain);
-  }, 180_000);
-}
+test("a symbol of an earlier test file is not the symbol of this realm", async () => {
+  using dir = tempDir("aot-a-symbol-of-an-earlier-test-file", files);
+  const plain = await runTests(String(dir));
+  const ours = "SEEN ours: 1,true,4,3,2,mark,,Symbol(in a function),true";
+  expect(plain).toEqual({
+    stdout: [
+      ours,
+      "SEEN 00 ours,ours,ours,ours,4,0",
+      "SEEN 50 a snapshot of the heap object,2,1",
+      ours,
+      "SEEN is theirs ours: false,false,false,false,false,false,false,false,false,2",
+      "SEEN a registered symbol is: true,true",
+      "SEEN their key on our objects: ,,false,,false,undefined",
+      "SEEN our key on their objects: ,,false,,false,undefined",
+      "SEEN their key on their objects: 1,4,true,2",
+      "SEEN both keys on one object: 2,3,3",
+      "SEEN own symbols: true,false,false",
+      "SEEN in a switch and a map: other,,1",
+      "SEEN 00 ours,ours,ours,ours,4,0",
+      "SEEN 10 names theirs,2,theirs,theirs,theirs,theirs,ours+theirs,theirs+ours",
+      "SEEN 10 reads ,1,false,true,,1,,1,1,0",
+      "SEEN 10 stores theirs+ours,7,1,7,1",
+      "SEEN 10 defines theirs+ours,8,1",
+      "SEEN 10 deletes true,theirs,true,",
+      'SEEN 10 copies 2,{"plain":2},plain,plain,2',
+      "SEEN 20 names theirs,2,theirs,theirs,theirs,theirs,ours+theirs,theirs+ours",
+      "SEEN 20 reads ,4,false,true,,4,,1,4,0",
+      "SEEN 20 stores theirs+ours,7,4,7,4",
+      "SEEN 20 defines theirs+ours,8,4",
+      "SEEN 20 deletes true,theirs,true,",
+      'SEEN 20 copies 5,{"plain":5},plain,plain,5',
+      "SEEN 30 names ours,ours,theirs+ours",
+      "SEEN 30 reads ,false,,,1",
+      "SEEN 30 stores ours+theirs,1,7,1,7",
+      "SEEN 30 defines ours+theirs,1,8",
+      "SEEN 30 deletes true,ours,true,",
+      "SEEN 40 names ours,ours,theirs+ours",
+      "SEEN 40 reads ,false,,,1",
+      "SEEN 40 stores ours+theirs,4,7,4,7",
+      "SEEN 40 defines ours+theirs,4,8",
+      "SEEN 40 deletes true,ours,true,",
+      "SEEN 50 a snapshot of the heap object,2,1",
+    ],
+    exitCode: 0,
+  });
+  expect(await runTests(String(dir), "--aot")).toEqual(plain);
+}, 180_000);

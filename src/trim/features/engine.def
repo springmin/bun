@@ -128,9 +128,6 @@ feature OperationsOnProxies "what compiled code calls for proxies"
 feature OperationsOfJSONParse "what compiled code calls for JSON.parse of a text whose shape the compiler knows"
   entered-from compiled-code
 
-feature OperationsOfJSONStringify "what compiled code calls for JSON.stringify"
-  entered-from compiled-code
-
 feature OperationsOnStringBuilders "what compiled code calls for strings that are built piece by piece"
   entered-from compiled-code
 
@@ -174,9 +171,6 @@ feature OperationsOfAwait "what compiled code calls for await"
   entered-from compiled-code
 
 feature OperationsOnPromises "what compiled code calls for promises"
-  entered-from compiled-code
-
-feature OperationsOnKeysOfParts "what compiled code calls for maps and sets whose keys are made of parts"
   entered-from compiled-code
 
 feature OperationsOnMapsAndSets "what compiled code calls for Map, Set and WeakMap"

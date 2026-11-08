@@ -16,7 +16,11 @@ const behindDeadCode = `import { spawnJob } from "./spawn.mjs";
   export function run() { if (OFF) { throw new Error("no job in this build"); } else { return spawnJob(); } }
   console.log("main");`;
 
-const count = (held: Buffer, sought: string) => held.toString("latin1").split(sought).length - 1;
+function count(held: Buffer, sought: string) {
+  let found = 0;
+  for (let at = held.indexOf(sought); at >= 0; at = held.indexOf(sought, at + sought.length)) found++;
+  return found;
+}
 
 async function build(files: Record<string, string>, entry: string) {
   const dir = tempDir("aot-worker-behind-dead-code", { ...job, ...files });

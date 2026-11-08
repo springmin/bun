@@ -29,10 +29,9 @@ for (const [name, files] of Object.entries(forms)) {
     const ran = await run([bunExe(), "test", "--aot", "./main.test.mjs"], String(dir), {
       ...bunEnv,
       NO_COLOR: "1",
-      BUN_DEBUG_TEST_AOT_WORDS: "validate",
     });
     expect({
-      output: (ran.stdout + ran.stderr).match(/AOT validation[^\n]*|\d+ (?:pass|fail)/g),
+      output: (ran.stdout + ran.stderr).match(/\d+ (?:pass|fail)/g),
       exitCode: ran.exitCode,
     }).toEqual({
       output: ["1 pass", "0 fail"],
@@ -41,29 +40,25 @@ for (const [name, files] of Object.entries(forms)) {
   }, 240_000);
 }
 
-test.each(["TestRunLayers:2", "TestRunLayers:3"])(
-  "a package that a preload imports adds matchers: %s",
-  async words => {
-    using dir = tempDir("aot-custom-matcher-name", {
-      "package.json": `{ "name": "p" }`,
-      "bunfig.toml": `[test]\npreload = ["./setup.js"]\n`,
-      "setup.js": `import "more-matchers";\n`,
-      "node_modules/more-matchers/package.json": `{ "name": "more-matchers", "type": "module", "main": "index.js" }`,
-      "node_modules/more-matchers/index.js": `import { expect } from "bun:test";\nimport * as matchers from "./matchers.js";\nexpect.extend(matchers);\n`,
-      "node_modules/more-matchers/matchers.js": `export function ${matcher}\nexport function ${other}\n`,
-      "a.test.js": `import { expect, test } from "bun:test";\n${uses}`,
-      "b.test.js": `import { test } from "bun:test";\ntest("second", () => {});\n`,
-    });
-    const ran = await run([bunExe(), "test", "--aot"], String(dir), {
-      ...bunEnv,
-      NO_COLOR: "1",
-      BUN_DEBUG_TEST_AOT_WORDS: words,
-      BUN_JSC_logAOTPhaseTimes: "1",
-    });
-    expect({
-      startsOver: ran.stderr.split("\n").filter(line => line.startsWith("AOT build starts over")),
-      exitCode: ran.exitCode,
-    }).toEqual({ startsOver: [], exitCode: 0 });
-  },
-  240_000,
-);
+test("a package that a preload imports adds matchers: nothing is built twice", async () => {
+  using dir = tempDir("aot-custom-matcher-name", {
+    "package.json": `{ "name": "p" }`,
+    "bunfig.toml": `[test]\npreload = ["./setup.js"]\n`,
+    "setup.js": `import "more-matchers";\n`,
+    "node_modules/more-matchers/package.json": `{ "name": "more-matchers", "type": "module", "main": "index.js" }`,
+    "node_modules/more-matchers/index.js": `import { expect } from "bun:test";\nimport * as matchers from "./matchers.js";\nexpect.extend(matchers);\n`,
+    "node_modules/more-matchers/matchers.js": `export function ${matcher}\nexport function ${other}\n`,
+    "a.test.js": `import { expect, test } from "bun:test";\n${uses}`,
+    "b.test.js": `import { test } from "bun:test";\ntest("second", () => {});\n`,
+  });
+  const ran = await run([bunExe(), "test", "--aot"], String(dir), {
+    ...bunEnv,
+    NO_COLOR: "1",
+    BUN_DEBUG_TEST_AOT_WORDS: "TestRunLayers:0",
+    BUN_JSC_logAOTPhaseTimes: "1",
+  });
+  expect({
+    startsOver: ran.stderr.split("\n").filter(line => line.startsWith("AOT build starts over")),
+    exitCode: ran.exitCode,
+  }).toEqual({ startsOver: [], exitCode: 0 });
+}, 240_000);

@@ -9,17 +9,17 @@ const ttyFunctions = "%BunTTYFunctions%";
 // The bytes of a view or of the views in a list, or the elements of an array, before the call returns or once the operation has ended.
 const filledWithBytes = [...handedOver, b.writesContents()];
 
-const method = (path: b.BuiltinPath, uses: readonly b.UseSpec[]) =>
+const method = (path: b.BuiltinPath, uses: readonly b.UseSpec[], returns: b.TableType = b.any) =>
   b.method(path, {
     args: { operands: b.any.rest },
-    returns: b.any,
+    returns,
     capability: "js",
     throws: true,
     uses: { this: objectHandedOver, operands: uses },
     implementation: b.hostCall,
   });
 
-const fillsOperands = (path: b.BuiltinPath) => method(path, filledWithBytes);
+const fillsOperands = (path: b.BuiltinPath, returns?: b.TableType) => method(path, filledWithBytes, returns);
 
 // With an object in another position nothing is known of the call.
 const positionsDescribed = 6;
@@ -36,6 +36,7 @@ const takingObjects = (taken: readonly number[], returns: b.TableType = b.any) =
     implementation: b.hostCall,
   } satisfies b.FunctionField;
 };
+// There only the answer is known, where the code of the function has been read.
 const otherwiseAnswering = (returns: b.TableType | undefined) =>
   returns === undefined
     ? b.otherwiseBy(b.hostCall)
@@ -48,6 +49,7 @@ const otherwiseAnswering = (returns: b.TableType | undefined) =>
         uses: { this: [b.everything], operand0: [b.everything], others: [b.everything] },
         implementation: b.hostCall,
       } satisfies b.FunctionField);
+// What the code of the method answers. set_any_flag() in src/runtime/socket/udp_socket.rs: the operand as it came.
 const resultsOfMembersChangingNothing: Readonly<Record<b.BuiltinPath, b.TableType>> = {
   "%UDPSocket%.prototype.setBroadcast": b.union(b.operand("operand0"), b.undefined),
   "%UDPSocket%.prototype.setMulticastLoopback": b.union(b.operand("operand0"), b.undefined),
@@ -59,10 +61,11 @@ const methodTakingObjects = (path: b.BuiltinPath, taken: readonly number[]) => {
 };
 // What the code of the function answers.
 const resultsOfBindingsChangingNothing: Readonly<Record<b.BuiltinPath, b.TableType>> = {
+  "native:Cpp:NodeURL.cpp:Bun::createNodeURLBinding": b.string,
+  // JSEventTargetNode.cpp: a new list of the functions that the program has registered.
+  "native:NewCppFunction:JSEventTargetNode.cpp:jsFunctionNodeEventsGetEventListeners": b.instance("Array"),
   "native:NewCppFunction:NodeTLS.cpp:loadExtraCACertificates": b.undefined,
   "native:NewCppFunction:NodeTLS.cpp:parseCACertificates": b.instance("Array").holding({ element: b.string }).fresh,
-  "native:NewCppFunction:NodeUtilTypesModule.cpp:jsFunctionIsDeepStrictEqual": b.bool,
-  "native:NewCppFunction:NodeUtilTypesModule.cpp:jsFunctionPartialDeepStrictEqual": b.bool,
   "native:NewCppFunction:decodeURIComponentSIMD.cpp:jsFunctionDecodeURIComponentSIMD": b.union(b.string, b.undefined),
   "native:NewCppFunction:stringWidth.cpp:jsFunctionBunStringWidth": b.f64,
 };
@@ -182,7 +185,12 @@ const keptValue = (path: b.BuiltinPath) =>
     },
   });
 
-const readingMethods = ["read", "readSync", "readCb", "readv", "readvSync", "readvCb"];
+// They fill the views once the call has returned. readSync and readvSync are done with them by then: node_fs_binding.bind.ts.
+// `FsCompletion::value` in node_fs.rs: a promise of its own for the number of bytes, or undefined where a callback is handed over.
+const bytesReadLater = b
+  .instance("Promise")
+  .holding({ value: b.f64, reason: b.union(b.instance("Error"), b.instance("RangeError")) }).fresh;
+const readingMethods = { read: bytesReadLater, readCb: b.undefined, readv: bytesReadLater, readvCb: b.undefined };
 const compressors = ["NativeZlib", "NativeBrotli", "NativeZstd"];
 // init is handed the two words that every later write fills in.
 const compressorMethods = ["init", "write", "writeSync"];
@@ -220,7 +228,7 @@ const responseHandler = (name: string, call: HandlerCall) =>
 const handlerOf = (path: b.BuiltinPath, call: HandlerCall) => keptHandler(path, keptHandlerCell(path), call);
 
 export default b.declarations(
-  readingMethods.flatMap(name => fillsOperands(`%NodeJSFS%.prototype.${name}`)),
+  Object.entries(readingMethods).flatMap(([name, returns]) => fillsOperands(`%NodeJSFS%.prototype.${name}`, returns)),
   compressors.flatMap(className =>
     compressorMethods.flatMap(name => fillsOperands(`%${className}%.prototype.${name}`)),
   ),
@@ -263,10 +271,11 @@ export default b.declarations(
   ),
   // markAsUncloneable and markAsUntransferable put a mark on the object under a private name.
   binding("native:Cpp:Worker.cpp:createNodeWorkerThreadsBinding", [...handedOver, b.definesName(b.anyKey, b.bool)]),
-  // An error that is reported gets its stack, and with it the position before the source map.
+  // An error that is reported gets its stack, and with it the position before the source map: a string or what Error.prepareStackTrace of the program has answered, and two numbers.
+  // No test holds those kinds, so the row says only that native code makes no object for them.
   binding(
     "native:NewCppFunction:BunProcess.cpp:jsFunctionReportUncaughtException",
-    [...handedOver, b.definesName(["stack", "originalLine", "originalColumn"], b.any)],
+    [...handedOver, b.definesName(["stack", "originalLine", "originalColumn"], b.nativeMemory)],
     b.undefined,
   ),
   Object.entries(bindingsChangingNothing).flatMap(([path, { taken, refused }]) =>
@@ -276,12 +285,21 @@ export default b.declarations(
   ["BuildMessage.prototype.message", "ResolveMessage.prototype.message", "ResolveMessage.prototype.stack"].flatMap(
     keptValue,
   ),
+  // The members of the source are called with the controller, which native code makes with the stream.
   b.construction("ReadableStream", {
     args: { source: b.any.optional, strategy: b.any.optional },
     returns: b.instance("ReadableStream").fresh,
     capability: "js",
     throws: true,
-    uses: { source: handedOver, strategy: handedOver },
+    uses: {
+      source: [
+        ...handedOver,
+        ...["ReadableStreamDefaultController", "ReadableByteStreamController"].map(controller =>
+          b.createdIn(b.instance(controller), b.nativeMemory),
+        ),
+      ],
+      strategy: handedOver,
+    },
     implementation: b.hostCall,
   }),
   Object.entries(membersChangingNothing).flatMap(([holder, { methods, getters, accessors }]) => [
@@ -291,9 +309,6 @@ export default b.declarations(
     ...Object.keys(getters).flatMap(name => getter(`${holder}.prototype.${name}`, false)),
     ...Object.keys(accessors).flatMap(name => getter(`${holder}.prototype.${name}`, true)),
   ]),
-  // The methods of %NodeJSFS%, of which the reading ones fill the views they are handed.
-  bindingAnswering("native:Bindgen:node_fs_binding.bind.ts:binding", b.instance("NodeJSFS").fresh, filledWithBytes),
-
   // `data` of the options is `data` of the new socket.
   ...["TCPSocket", "TLSSocket"].map(className =>
     b.method(`%${className}%.prototype.upgradeTLS`, {
@@ -353,6 +368,7 @@ export default b.declarations(
     implementation: b.hostCall,
   }),
 
+  // Expect::extend() in src/runtime/test_runner/expect.rs puts a function of its own under each name of `matchers` on the constructor too.
   b.fn("%Expect%.extend", {
     args: { matchers: b.any.optional, others: b.any.rest },
     returns: b.undefined,

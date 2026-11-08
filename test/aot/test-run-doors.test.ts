@@ -21,7 +21,13 @@ const doors: [name: string, head: string, statement: string, says: string | unde
   ],
   ["a key that is spelled", withRequire, `delete require.cache[require.resolve("./other.ts")];`, undefined],
   ["Bun.plugin", "", `Bun.plugin({ name: "p", setup() {} });`, "This names Bun.plugin."],
-  ["a file under a query", "", `await import("./other.ts?again");`, "This loads a file under a query."],
+  ["a file that is spelled, under a query", "", `await import("./other.ts?again");`, undefined],
+  [
+    "a file that nobody spells, under a query",
+    "",
+    `await import("./" + process.argv[99] + ".ts?again");`,
+    "This loads a file under a query.",
+  ],
   [
     "a key that nobody spells",
     withRequire,
@@ -36,32 +42,46 @@ const doors: [name: string, head: string, statement: string, says: string | unde
   ],
 ];
 
-for (const [name, head, statement, says] of doors) {
-  test.concurrent(`${name}: ${says ? "the build names the line" : "no notice"}`, async () => {
-    using dir = tempDir("test-run-doors", {
-      "package.json": `{}`,
-      "other.ts": `export const mark: number = 1;`,
-      "a.test.ts": `import { test } from "bun:test";\n${head}\nimport { mark } from "./other.ts";\ntest("t", async () => { ${never(statement)} console.log("SEEN", mark); });\n`,
-    });
-    const { stdout, stderr, exitCode } = await run([bunExe(), "test", "--aot"], String(dir), bunEnv);
-    const lines = stderr.split("\n");
-    const notices = lines.flatMap((line, index) =>
-      line.includes("TS100079")
-        ? [
-            [
-              line.replace(/^.*TS100079: /, "").replace(/ After that any file .*$/, ""),
-              lines[index + 1]
-                .trim()
-                .replace(/^at .*[\\/]/, "")
-                .replace(/:\d+$/, ""),
-            ],
-          ]
-        : [],
-    );
-    expect({ notices, seen: stdout.includes("SEEN 1"), exitCode }).toEqual({
-      notices: says ? [[says, "a.test.ts:4"]] : [],
-      seen: true,
-      exitCode: 0,
-    });
-  });
+// Each door is a test file of its own. Those that open nothing share a run, which gets no notice; the others share one, and each is named with its file.
+for (const opens of [false, true]) {
+  const together = doors.filter(([, , , says]) => !!says === opens);
+  test.concurrent(
+    `${together.map(([name]) => name).join(" | ")}: ${opens ? "the build names each line" : "no notice"}`,
+    async () => {
+      using dir = tempDir("test-run-doors", {
+        "package.json": `{}`,
+        "other.ts": `export const mark: number = 1;`,
+        ...Object.fromEntries(
+          together.map(([, head, statement], index) => [
+            `${index}.test.ts`,
+            `import { test } from "bun:test";\n${head}\nimport { mark } from "./other.ts";\ntest("t", async () => { ${never(statement)} console.log("SEEN", mark); });\n`,
+          ]),
+        ),
+      });
+      const { stdout, stderr, exitCode } = await run([bunExe(), "test", "--aot"], String(dir), bunEnv);
+      const lines = stderr.split("\n");
+      const notices = lines.flatMap((line, index) =>
+        line.includes("TS100079")
+          ? [
+              [
+                line.replace(/^.*TS100079: /, "").replace(/ After that any file .*$/, ""),
+                lines[index + 1]
+                  .trim()
+                  .replace(/^at .*[\\/]/, "")
+                  .replace(/:\d+$/, ""),
+              ],
+            ]
+          : [],
+      );
+      expect({
+        notices: notices.sort((a, b) => a[1].localeCompare(b[1])),
+        seen: stdout.split("SEEN 1").length - 1,
+        exitCode,
+      }).toEqual({
+        notices: opens ? together.map(([, , , says], index) => [says, `${index}.test.ts:4`]) : [],
+        seen: together.length,
+        exitCode: 0,
+      });
+    },
+  );
 }

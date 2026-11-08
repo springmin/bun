@@ -417,7 +417,10 @@ impl Checker<'_, '_> {
                 }
                 _ => continue,
             };
-            let class = self.strict_mode_error_class(file, hir.node(id));
+            let class = match self.names_member_of_container(file, operand) {
+                true => DiagnosticClass::TypeScriptGrammar,
+                false => self.strict_mode_error_class(file, hir.node(id)),
+            };
             self.error_at(at, 1102, &[]).class = class;
         }
     }

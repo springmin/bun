@@ -1,6 +1,3 @@
-import { unsupported } from "../harness/compiler";
-import { test } from "../listed";
-import { testServers } from "./one-server";
+import { testFramework } from "./each-framework";
 
-if (unsupported) test.skip(unsupported, () => {});
-else await testServers("budgets", "hono");
+testFramework("hono");

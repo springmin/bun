@@ -1,14 +1,24 @@
+//! Sorts a list by a number that each element has: an id, a position, an address, or two or three of them side by side.
+//!
+//! `slice::sort*` is compiled anew for every element type and every key: five to seventeen kilobytes each time.
+//! `bun_collections::index_sort` is compiled once, and makes a call for every comparison. Here the code that sorts is compiled
+//! once too, and makes none: the number of each element is asked for once, the numbers are sorted with the indices beside
+//! them, and then the elements are moved to their places as bytes. A caller adds a loop that asks for the numbers.
+//!
+//! The sorts are stable.
 use core::mem::MaybeUninit;
 
 pub trait SortByNumber<T> {
     fn sort_by_u32(&mut self, number: impl FnMut(&T) -> u32);
     fn sort_by_u64(&mut self, number: impl FnMut(&T) -> u64);
-    fn sort_by_u128(&mut self, number: impl FnMut(&T) -> u128);
 }
 
+/// A list of up to this many elements is sorted where it lies: most lists are that short, and a call would cost more than the sort.
 const VERY_SHORT: usize = 8;
+/// A list of up to this many elements is sorted without memory from the heap.
 const SHORT: usize = 16;
 
+/// A number and the index of the element that has it, ordered by the number and then by the index.
 trait Numbered: Copy + Ord {
     const ZERO: Self;
     fn index(self) -> u32;
@@ -43,7 +53,6 @@ macro_rules! pair_is_numbered {
     };
 }
 pair_is_numbered!(u64);
-pair_is_numbered!(u128);
 
 macro_rules! sort {
     ($list:ident, $number:ident, $numbered:ty, $join:expr, $sort_and_move:ident) => {{
@@ -88,28 +97,15 @@ impl<T> SortByNumber<T> for [T] {
             sort_and_move_by_u64
         )
     }
-
-    fn sort_by_u128(&mut self, mut number: impl FnMut(&T) -> u128) {
-        sort!(
-            self,
-            number,
-            (u128, u32),
-            |number, index| (number, index),
-            sort_and_move_by_u128
-        )
-    }
 }
 
+/// The number by which `(high, low)` is ordered.
 #[inline]
 pub const fn number_of_pair(high: u32, low: u32) -> u64 {
     (high as u64) << 32 | low as u64
 }
 
-#[inline]
-pub const fn wide_number_of_pair(high: u64, low: u64) -> u128 {
-    (high as u128) << 64 | low as u128
-}
-
+/// The unsigned number that is ordered as `value` is.
 #[inline]
 pub const fn number_of_signed(value: i64) -> u64 {
     value as u64 ^ 1 << 63
@@ -117,6 +113,8 @@ pub const fn number_of_signed(value: i64) -> u64 {
 
 macro_rules! sort_and_move {
     ($name:ident, $numbered:ty) => {
+        /// # Safety
+        /// See [`move_to_places`].
         #[inline(never)]
         unsafe fn $name(numbered: &mut [$numbered], first: *mut MaybeUninit<u8>, size: usize) {
             assert!(u32::try_from(numbered.len()).is_ok());
@@ -128,8 +126,11 @@ macro_rules! sort_and_move {
 }
 sort_and_move!(sort_and_move_by_u32, u64);
 sort_and_move!(sort_and_move_by_u64, (u64, u32));
-sort_and_move!(sort_and_move_by_u128, (u128, u32));
 
+/// At each place `order` has the index of the element that belongs there.
+///
+/// # Safety
+/// `first` points to `order.len()` values of `size` bytes, and `order` has each of their indices once.
 unsafe fn move_to_places<N: Numbered>(order: &mut [N], first: *mut MaybeUninit<u8>, size: usize) {
     // SAFETY: the caller's. An array of bytes has the size of the value and needs no alignment.
     unsafe {
@@ -144,6 +145,10 @@ unsafe fn move_to_places<N: Numbered>(order: &mut [N], first: *mut MaybeUninit<u
     }
 }
 
+/// Follows each cycle of the permutation once.
+///
+/// # Safety
+/// `first` points to `order.len()` values of `count` parts, and `order` has each of their indices once.
 #[inline(always)]
 unsafe fn follow_cycles<N: Numbered, Part>(order: &mut [N], first: *mut Part, count: usize) {
     for start in 0..order.len() {
@@ -192,12 +197,9 @@ mod tests {
             let mut by_u32 = list.clone();
             by_u32.sort_by_u32(&number);
             assert_eq!(by_u32, expected);
-            let mut by_u64 = list.clone();
+            let mut by_u64 = list;
             by_u64.sort_by_u64(|element| u64::from(number(element)) << 20);
             assert_eq!(by_u64, expected);
-            let mut by_u128 = list;
-            by_u128.sort_by_u128(|element| u128::from(number(element)) << 70);
-            assert_eq!(by_u128, expected);
         }
     }
 
@@ -252,7 +254,6 @@ mod tests {
         [(); 20].sort_by_u32(|()| 0);
         assert!(number_of_pair(1, 0) > number_of_pair(0, u32::MAX));
         assert!(number_of_pair(7, 2) > number_of_pair(7, 1));
-        assert!(wide_number_of_pair(1, 0) > wide_number_of_pair(0, u64::MAX));
         assert!(number_of_signed(i64::MIN) < number_of_signed(-1));
         assert!(number_of_signed(-1) < number_of_signed(0));
         assert!(number_of_signed(0) < number_of_signed(i64::MAX));

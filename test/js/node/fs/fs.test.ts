@@ -4,6 +4,7 @@ import {
   bunExe,
   gc,
   getMaxFD,
+  isASAN,
   isBroken,
   isDebug,
   isFreeBSD,
@@ -11,7 +12,6 @@ import {
   isIntelMacOS,
   isLinux,
   isMacOS,
-  isOhos,
   isPosix,
   isWindows,
   tempDir,
@@ -838,7 +838,7 @@ describe("appendFile honors an explicit 'w' flag", () => {
 // and Linux's generic_write_checks() then clamps the write to the limit and fails
 // the next one with EFBIG. Linux-only: BSD kernels reject the whole write instead,
 // so the byte split is not portable.
-describe.skipIf(!isLinux || isOhos)("writeFileSync when the write fails partway", () => {
+describe.skipIf(!isLinux)("writeFileSync when the write fails partway", () => {
   const fixture = join(import.meta.dir, "fs-writeFile-write-error-fixture.js");
 
   async function runUnderFileSizeLimit(path: string, flag: string) {
@@ -2767,7 +2767,7 @@ describe("readFileSync", () => {
     expect(text).toBe("File read successfully");
   });
 
-  it.skipIf(isWindows || isOhos)("works with special posix files in the filesystem", () => {
+  it.skipIf(isWindows)("works with special posix files in the filesystem", () => {
     const text = readFileSync("/dev/null", "utf8");
     gc();
     expect(text).toBe("");
@@ -3515,8 +3515,7 @@ it.if(isPosix)("realpath reads its path the way Node does", async () => {
   expect(exitCode).toBe(0);
 });
 
-// OHOS: getcwd() keeps the removed directory's path instead of failing with ENOENT.
-it.if(isLinux && !isOhos)("realpath.native throws ENOENT for a working directory that was removed", async () => {
+it.if(isLinux)("realpath.native throws ENOENT for a working directory that was removed", async () => {
   using dir = tempDir("fs-realpath-removed-cwd", {});
 
   const script = `
@@ -4814,7 +4813,7 @@ describe("createWriteStream", () => {
     });
   });
 
-  it.skipIf(!isLinux || isOhos)("surfaces EFBIG when RLIMIT_FSIZE truncates a write", async () => {
+  it.skipIf(!isLinux)("surfaces EFBIG when RLIMIT_FSIZE truncates a write", async () => {
     using dir = tempDir("cws-efbig", {});
     const out = join(String(dir), "out.bin");
     const script = `
@@ -5153,11 +5152,11 @@ describe("fs/promises", () => {
 
     if (withFileTypes) {
       describe("withFileTypes", () => {
-        it.skipIf(isOhos)("readdir(path, {recursive: true} should work x 100", doIt, 10_000);
+        it("readdir(path, {recursive: true} should work x 100", doIt, 10_000);
         it("readdir(path, {recursive: true} should fail x 100", fail, 10_000);
       });
     } else {
-      it.skipIf(isOhos)("readdir(path, {recursive: true} should work x 100", doIt, 10_000);
+      it("readdir(path, {recursive: true} should work x 100", doIt, 10_000);
       it("readdir(path, {recursive: true} should fail x 100", fail, 10_000);
     }
   }
@@ -5165,6 +5164,8 @@ describe("fs/promises", () => {
   for (let withFileTypes of [false, true] as const) {
     const warmup = 1;
     const iterCount = isDebug ? 4 : 200;
+    // Sorting the 200 lists of some 7,000 names takes 12 of 14 seconds where ASAN sees the allocations of strings.
+    const timeout = isASAN ? 30_000 : 10_000;
     const full = resolve(import.meta.dir, "../");
 
     const doIt = async () => {
@@ -5198,9 +5199,9 @@ describe("fs/promises", () => {
     };
 
     if (withFileTypes) {
-      it.skipIf(isOhos)("readdirSync(path, {recursive: true, withFileTypes: true} should work x 100", doIt, 10_000);
+      it("readdirSync(path, {recursive: true, withFileTypes: true} should work x 100", doIt, timeout);
     } else {
-      it.skipIf(isOhos)("readdirSync(path, {recursive: true} should work x 100", doIt, 10_000);
+      it("readdirSync(path, {recursive: true} should work x 100", doIt, timeout);
     }
   }
 
@@ -5606,7 +5607,7 @@ describe("utimesSync", () => {
   });
 
   // Windows wraps pre-epoch times through u32, matching Node (see Stat.rs)
-  it.skipIf(isWindows || isOhos)("sets pre-epoch times from negative fractional string timestamps", () => {
+  it.skipIf(isWindows)("sets pre-epoch times from negative fractional string timestamps", () => {
     const tmp = join(tmpdir(), "utimesSync-test-file-" + Math.random().toString(36).slice(2));
     writeFileSync(tmp, "test");
 
@@ -6104,7 +6105,7 @@ it("new Stats", () => {
 
 // On Windows, Node.js deliberately reinterprets stat times via `unsigned long` (see
 // libuv Y2038 note), so pre-epoch semantics there are not "negative ns".
-it.skipIf(isWindows || isOhos)("BigIntStats *Ns fields are negative for pre-epoch timestamps", () => {
+it.skipIf(isWindows)("BigIntStats *Ns fields are negative for pre-epoch timestamps", () => {
   using dir = tempDir("bigintstats-pre-epoch", { "f.txt": "x" });
   const f = join(String(dir), "f.txt");
 
@@ -7073,7 +7074,7 @@ describe("synchronous I/O string flags", () => {
   });
 });
 
-describe.skipIf(isWindows || isOhos)("readFileSync on a FIFO larger than the stat size", () => {
+describe.skipIf(isWindows)("readFileSync on a FIFO larger than the stat size", () => {
   it("does not balloon the read buffer", async () => {
     using dir = tempDir("fs-readfile-fifo", {});
     await using proc = Bun.spawn({

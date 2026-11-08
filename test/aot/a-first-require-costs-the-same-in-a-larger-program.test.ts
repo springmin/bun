@@ -4,15 +4,11 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { runtimeEnvironment } from "./harness/flags";
 import { run } from "./harness/run";
-import { runsWholeGrids } from "./harness/ways";
 import { test } from "./measures";
 
-// A walk through the whole program at each require() shows between the first two sizes.
-const sizes = runsWholeGrids ? [250, 1_000, 4_000] : [250, 1_000];
-const ways = [
-  { way: "as one program", words: "TestRunLayers:0" },
-  { way: "over two layers", words: "TestRunLayers:2,TestRunPartFiles:1" },
-];
+// A walk through the whole program at each require() shows between the two sizes.
+const sizes = [250, 1_000];
+const ways = [{ way: "as one program", words: "TestRunLayers:0" }];
 
 function project(modules: number) {
   const numbers = Array.from({ length: modules }, (_, index) => index);
@@ -80,8 +76,7 @@ test.concurrent.each(ways.flatMap(way => sizes.map(modules => ({ ...way, modules
 );
 
 test.each(ways)("$way: a require looks at as many modules in a larger program", ({ way }) => {
-  const [small, middle, large] = sizes.map(modules => sought.get(`${way} ${modules}`)! / modules);
+  const [small, middle] = sizes.map(modules => sought.get(`${way} ${modules}`)! / modules);
   expect(small).toBeGreaterThan(0);
   expect(middle).toBeLessThanOrEqual(1.5 * small);
-  if (large !== undefined) expect(large).toBeLessThanOrEqual(1.5 * small);
 });

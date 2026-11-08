@@ -33,7 +33,7 @@ const wraps = (name: string) => `vi.mock("${name}", async importOriginal => {
 const packages = ["core", "confirm", "select", "testing", "prompts"];
 
 test.each(Object.keys(shared))(
-  "%s: as plain Bun, as one program and in two layers",
+  "%s: as plain Bun",
   async name => {
     using dir = tempDir("aot-mock-originals-share-file", {
       "package.json": `{ "name": "p", "type": "module" }`,
@@ -75,7 +75,6 @@ test("t", () => { console.log("SAID", demo()); });`,
     expect(plain).toContain("SAID wrapped confirm true | wrapped select true");
     expect(plain).toContain("RUNS core/index.ts");
     expect(await seen(["--aot"], "TestRunLayers:0")).toEqual(plain);
-    expect(await seen(["--aot"], "TestRunLayers:2,TestRunPartFiles:1")).toEqual(plain);
   },
   600000,
 );

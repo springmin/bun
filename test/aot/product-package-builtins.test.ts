@@ -47,19 +47,14 @@ const products = {
   },
 };
 
-const forms = [
-  ["as one program", "TestRunLayers:0"],
-  ["over two layers", "TestRunLayers:2,TestRunPartFiles:1"],
-];
-
 describe.skipIf(isWindows)("a package meets in a test run what it meets in the executable", () => {
   for (const [title, files] of Object.entries(products)) {
     test(title, async () => {
       const folder = String(
         tempDir("aot-package-writes", { ...writes, ...files, "entry.ts": `import "./product/main.ts";\n` }),
       );
-      const answerOf = async (words: string, ...cmd: string[]) => {
-        const env = { ...bunEnv, BUN_DEBUG_TEST_AOT_WORDS: words, BUN_JSC_logAOTPhaseTimes: "1" };
+      const answerOf = async (...cmd: string[]) => {
+        const env = { ...bunEnv, BUN_JSC_logAOTPhaseTimes: "1" };
         await using child = Bun.spawn({ cmd, cwd: folder, env, stdout: "pipe", stderr: "pipe" });
         const [out, err, exitCode] = await Promise.all([child.stdout.text(), child.stderr.text(), child.exited]);
         expect({ err: exitCode ? err : "", exitCode }).toEqual({ err: "", exitCode: 0 });
@@ -67,15 +62,10 @@ describe.skipIf(isWindows)("a package meets in a test run what it meets in the e
         expect(err).not.toContain("AOT build starts over | replaced built-ins added");
         return out.split("\n").filter(line => line.startsWith("ANSWER"));
       };
-      await answerOf("", bunExe(), "build", "--compile", "--aot", "./entry.ts", "--outfile", "program");
-      const executable = await answerOf("", join(folder, "program"));
+      await answerOf(bunExe(), "build", "--compile", "--aot", "./entry.ts", "--outfile", "program");
+      const executable = await answerOf(join(folder, "program"));
       expect(executable).toEqual([expect.stringContaining("TypeError: Cannot assign to Buffer.isEncoding")]);
-      for (const [form, words] of forms) {
-        expect({ form, answers: await answerOf(words, bunExe(), "test", "--aot") }).toEqual({
-          form,
-          answers: executable,
-        });
-      }
+      expect(await answerOf(bunExe(), "test", "--aot")).toEqual(executable);
     });
   }
 });

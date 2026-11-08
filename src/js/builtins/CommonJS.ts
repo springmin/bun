@@ -198,10 +198,12 @@ export function internalRequire(id: string, parent: JSCommonJSModule, requireMap
   $assert(filename.endsWith(".node"));
 
   const module = $createCommonJSModule(id, {}, true, requireMap === $requireMap ? parent : undefined);
-  // Resolving the name has thrown in an executable that refuses native addons.
-  if (CAN_LOAD_ADDONS_AT_RUN_TIME) {
-    process.dlopen(module, filename);
-  }
+  // Resolving the name has thrown in an executable that refuses native addons, unless the file lies in the executable. Where the build has not seen that it does, nothing is loaded, aloud.
+  if (!CAN_LOAD_ADDONS_AT_RUN_TIME)
+    throw new TypeError(
+      `Cannot load '${filename}': the build didn't see that this executable loads the native addon that it holds. Use process.dlopen() or a constant path.`,
+    );
+  process.dlopen(module, filename);
   $requireMap.$set(id, module);
   if (requireMap !== $requireMap) requireMap.$set(id, module);
   return module.exports;

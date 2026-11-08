@@ -1,18 +1,24 @@
 // `test`, `describe` and `beforeAll` of bun:test for a file whose tests all need `--aot`. Where the Bun under test refuses the
 // flag (harness/compiler.ts asks it, and says so on stderr) every test is skipped, whatever is chained to it, and `beforeAll` does
-// nothing. Where CI leaves the file out (harness/every-build.ts) they declare nothing.
+// nothing.
 import { describe as describeAnywhere } from "bun:test";
 import { isASAN } from "harness";
 import { unsupported } from "./harness/compiler";
-import { raiseDefaultTimeout, raisingLimits, whereverTheFileRuns } from "./harness/default-timeout";
-import { boundTo, isThisFileLeftOut, unlessLeftOut } from "./harness/left-out";
+import {
+  beforeAll as beforeAllAnywhere,
+  raiseDefaultTimeout,
+  raisingLimits,
+  test as testAnywhere,
+} from "./harness/default-timeout";
 
 export { unsupported };
 
 // One build takes about as long as the whole default limit of bun:test.
 raiseDefaultTimeout(120_000);
 
-const { test: testAnywhere, beforeAll: beforeAllAnywhere } = whereverTheFileRuns;
+// In a Bun with assertions what is read from `test` is a proxy of harness/default-timeout.ts, which calls it on the object that it was read from, whatever `this` is. Its own
+// `bind` would be read through that proxy and bind what lies behind it to the wrong object.
+const boundTo = (owner: object, method: Function) => Function.prototype.bind.call(method, owner);
 
 // bun:test refuses `.skipIf()`, `.todo` and the like on what is skipped already.
 export function alwaysSkipped<T extends object>(skipped: T): T {
@@ -42,13 +48,11 @@ const atOnce = process.env.AOT_CASES_AT_ONCE ? process.env.AOT_CASES_AT_ONCE ===
 const declared = atOnce ? besideOneAnother(testAnywhere) : testAnywhere;
 const skippedTest = alwaysSkipped(testAnywhere.skip);
 const skippedDescribe = alwaysSkipped(describeAnywhere.skip);
-export const test = unsupported ? skippedTest : unlessLeftOut(declared);
+export const test = unsupported ? skippedTest : declared;
 /** `test` for a file whose cases never run beside one another. The file says why. */
-export const testOneByOne = unsupported ? skippedTest : unlessLeftOut(testAnywhere);
-export const describe = unsupported ? skippedDescribe : unlessLeftOut(describeAnywhere);
-export const beforeAll: typeof beforeAllAnywhere = unsupported
-  ? () => {}
-  : (...operands) => (isThisFileLeftOut() ? undefined : beforeAllAnywhere(...operands));
+export const testOneByOne = unsupported ? skippedTest : testAnywhere;
+export const describe = unsupported ? skippedDescribe : describeAnywhere;
+export const beforeAll: typeof beforeAllAnywhere = unsupported ? () => {} : beforeAllAnywhere;
 
 const rowsNotMetYet = new WeakSet<object>();
 

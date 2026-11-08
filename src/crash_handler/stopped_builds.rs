@@ -101,6 +101,7 @@ pub fn report_stopped_builds(describers: BuildDescribers) -> impl Drop {
         fn drop(&mut self) {
             if BUILDS_UNDER_WAY.fetch_sub(1, Ordering::SeqCst) == 1 {
                 set_reports_interruptions(false);
+                let _ = std::alloc::take_alloc_error_hook();
             }
         }
     }
@@ -112,8 +113,23 @@ pub fn report_stopped_builds(describers: BuildDescribers) -> impl Drop {
     if BUILDS_UNDER_WAY.fetch_add(1, Ordering::SeqCst) == 0 {
         report_what_the_sanitizer_leaves();
         set_reports_interruptions(true);
+        std::alloc::set_alloc_error_hook(end_build_where_allocation_fails);
     }
     BuildUnderWay
+}
+
+/// `Vec`, `Box` and the like call this where the global allocator hands back null, and abort when it returns.
+/// On a thread that is at work for a build that is the build's error, as where the build's own arenas get no memory.
+/// On any other thread it says what std says.
+fn end_build_where_allocation_fails(layout: core::alloc::Layout) {
+    if place_of_this_thread().is_some() {
+        crate::out_of_memory();
+    }
+    let _ = writeln!(
+        stderr_writer(),
+        "memory allocation of {} bytes failed",
+        layout.size()
+    );
 }
 
 /// Ctrl+C, `kill`, `timeout`, a closed terminal, `ulimit -t`.
@@ -257,3 +273,48 @@ fn report_what_the_sanitizer_leaves() {
 
 #[cfg(not(all(unix, bun_asan)))]
 fn report_what_the_sanitizer_leaves() {}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use bun_core::current_work::{Step, set_step_of_build, working_on};
+    use core::ffi::c_void;
+
+    extern "C" fn work(_: *mut c_void) -> *mut c_void {
+        let _work = working_on(Step::Check, b"/project/checked.ts");
+        // SAFETY: all-zero is a valid `stack_t`.
+        let mut current: libc::stack_t = unsafe { core::mem::zeroed() };
+        // SAFETY: `current` is a valid out-pointer.
+        assert_eq!(
+            unsafe { libc::sigaltstack(core::ptr::null(), &raw mut current) },
+            0
+        );
+        core::ptr::without_provenance_mut(usize::from(current.ss_flags & libc::SS_DISABLE == 0))
+    }
+
+    /// Not a thread of `std`, which gives its own a stack for signals in a test.
+    fn has_signal_stack_at_work() -> bool {
+        // SAFETY: all-zero is a valid `pthread_t` to write over.
+        let mut thread: libc::pthread_t = unsafe { core::mem::zeroed() };
+        let mut answer = core::ptr::null_mut();
+        // SAFETY: the thread is joined before either place goes.
+        unsafe {
+            let (attributes, argument) = (core::ptr::null(), core::ptr::null_mut());
+            assert_eq!(
+                libc::pthread_create(&raw mut thread, attributes, work, argument),
+                0
+            );
+            assert_eq!(libc::pthread_join(thread, &raw mut answer), 0);
+        }
+        !answer.is_null()
+    }
+
+    /// The handler that says where a build ran out of stack runs on that stack. `bun check` starts its threads without one.
+    #[test]
+    fn a_thread_at_work_has_a_stack_for_signals_in_a_build_alone() {
+        assert!(!has_signal_stack_at_work());
+        set_step_of_build(Some(Step::Check));
+        let has_in_build = has_signal_stack_at_work();
+        set_step_of_build(None);
+        assert!(has_in_build);
+    }
+}

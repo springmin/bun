@@ -4,7 +4,7 @@
 //! The codes are the TypeScript compiler's. An error that depends on something the resolver couldn't resolve isn't
 //! reported. A false negative is better than a false positive.
 
-use super::aot::{DiagnosticClass, DiagnosticSubject, is_in_outermost};
+use super::aot::{DiagnosticClass, DiagnosticSubject};
 use super::enclosing_declaration::Enclosing;
 use super::errors_aliases::Directives;
 use super::errors_names_and_exports::fully_qualified_name;
@@ -17,12 +17,6 @@ use crate::program::{ReadingNoTrees, SymbolTable};
 use crate::util::{PositionSet, SharedSort};
 use bun_core::current_work;
 use bun_core::strings;
-
-#[derive(Default)]
-pub(super) struct PlacesNobodyReads {
-    directives: Directives,
-    dead_code: FxHashMap<FileId, Vec<(u32, u32)>>,
-}
 
 /// The finalized diagnostics that `check_file` passes to `Program::finish_file`. Diagnostics reported inside a query
 /// are in their file's buffer instead.
@@ -118,6 +112,24 @@ impl Program<'_> {
         out.retain(|d| !is_duplicate(d));
         self.sort_and_deduplicate_diagnostics(&mut out);
         out.into_iter().map(Explained::new).collect()
+    }
+}
+
+/// An expression or a statement that a walk outwards has passed. Loops nested in one another are as deep as a sum is long.
+#[derive(Copy, Clone, PartialEq, Eq, Hash)]
+pub(super) enum Passed {
+    Expr(ExprId),
+    Stmt(StmtId),
+}
+
+impl Passed {
+    #[inline]
+    pub(super) fn of(parent: Parent) -> Option<Passed> {
+        match parent {
+            Parent::Expr(at) => Some(Passed::Expr(at)),
+            Parent::Stmt(at) => Some(Passed::Stmt(at)),
+            _ => None,
+        }
     }
 }
 
@@ -260,6 +272,7 @@ impl Checker<'_, '_> {
         self.reported.clear();
         self.release_provisional_shapes();
         self.is_type_checked = false;
+        self.reads_types_alone = self.expected == Requested::All && self.files().is_compile_build();
         let hir = self.hir(file);
         if hir.ran_out_of_stack {
             self.ran_out_of_stack.set(true);
@@ -309,11 +322,9 @@ impl Checker<'_, '_> {
         if self.emits_first() {
             let from = self.reported.len();
             self.is_emitting = true;
-            self.place_does_not_decide_at = Some(self.stack.len());
             self.mark_linked_references_recursively(file);
             self.mark_property_aliases_referenced(file);
             self.inline_const_enums(file);
-            self.place_does_not_decide_at = None;
             self.is_emitting = false;
             for d in self.reported.iter_mut().skip(from) {
                 d.by_emit = true;
@@ -385,6 +396,9 @@ impl Checker<'_, '_> {
         let semantic = semantic.into_iter();
         let mut semantic: Vec<Reported> =
             (semantic.filter_map(|d| self.settled(d, &mut directives))).collect();
+        for diagnostic in &mut semantic {
+            self.lay_subject_by_what_error_stands_at(diagnostic);
+        }
         let mut expected_errors = self.expected_errors(file);
         self.remove_expected_errors_in_dead_code(
             file,
@@ -450,34 +464,6 @@ impl Checker<'_, '_> {
             unused_private_members: std::mem::take(&mut self.unused_private_members),
             declaration_file: self.declaration_file.take(),
         }
-    }
-
-    pub(super) fn move_message_site(&mut self, to: super::related::FileSpan) {
-        if let Some(site) = &mut self.message_site
-            && site.2 == self.stack.len()
-        {
-            (site.0, site.1) = (to.0, to.1);
-        }
-    }
-
-    pub(super) fn prints_message_that_nobody_reads(&mut self) -> bool {
-        let Some((file, start, depth)) = self.message_site else {
-            return false;
-        };
-        if depth != self.stack.len() || !self.is_in_compile_build(file) {
-            return false;
-        }
-        let hir = self.hir(file);
-        if hir.check_directive == Some(false) || self.is_plain_js(file) {
-            return true;
-        }
-        let mut places = std::mem::take(&mut self.places_nobody_reads);
-        let dead_code = places.dead_code.entry(file);
-        let dead_code = dead_code.or_insert_with(|| self.dead_code_of(file));
-        let is_unread = is_in_outermost(dead_code, start)
-            || places.directives.preceding(file, hir, start) != NO_DIRECTIVE;
-        self.places_nobody_reads = places;
-        is_unread
     }
 
     /// Fills in the fields of `d`, a diagnostic of `getBindAndCheckDiagnostics`, that need its file's HIR: its end, and
@@ -1057,7 +1043,11 @@ impl Checker<'_, '_> {
 
     /// `symbol.ValueDeclaration` of the symbol the identifier `e` resolves to, if that's a `var`, `let` or `const` of
     /// this file. Returns the binding name and the declaration that contains it.
-    fn value_declaration_of_variable(&self, file: FileId, e: ExprId) -> Option<(PatId, VarDeclId)> {
+    pub(super) fn value_declaration_of_variable(
+        &self,
+        file: FileId,
+        e: ExprId,
+    ) -> Option<(PatId, VarDeclId)> {
         let bound = self.bound(file);
         let s = bound.symbols.get(bound.symbol_of_expr(e).idx())?;
         // `isParameter`, `isAlias`
@@ -1122,11 +1112,10 @@ impl Checker<'_, '_> {
         {
             return true;
         }
-        if !is_automatic
-            && (bound.is_in_type_query(e) || hir.is_in_ambient_or_type_node(hir.node(e)))
-        {
-            return true;
-        }
+        let is_in_type_query_or_ambient = || {
+            !is_automatic
+                && (bound.is_in_type_query(e) || hir.is_in_ambient_or_type_node(hir.node(e)))
+        };
         // `isSameScopedBindingElement`. FOR SPEED: nodes in the pattern are numbered before the initializer.
         if decl.pat != pat && e.0 < decl.init.0 {
             let binding_element = hir.find_ancestor_kind(hir.node(e), Kind::BindingElement);
@@ -1140,11 +1129,11 @@ impl Checker<'_, '_> {
         if self.get_control_flow_container(file, parent)
             == self.get_control_flow_container(file, declared_in)
         {
-            return false;
+            return is_in_type_query_or_ambient();
         }
         // It's an outer variable, so what's been assigned by the time this code runs is unknown, unless it's never
         // assigned.
-        !self.is_never_initialized(file, e)
+        !self.is_never_initialized(file, e) || is_in_type_query_or_ambient()
     }
 
     /// `isNeverInitialized` of `checkIdentifier`, for the identifier `e`.
@@ -1292,16 +1281,19 @@ impl Checker<'_, '_> {
                 Parent::None => break Container::Other,
                 _ => {
                     if steps >= UNCACHED_STEPS
-                        && let Parent::Expr(at) = parent
+                        && let Some(at) = Passed::of(parent)
                     {
-                        if let Some(&known) = self.containers_inside_exprs.borrow().get(&(file, at))
-                        {
+                        if let Some(&known) = self.containers_inside.borrow().get(&(file, at)) {
                             break known;
                         }
                         passed.push(at);
                     }
                     steps += 1;
-                    parent = self.parent_of_node(file, parent);
+                    parent = match parent {
+                        Parent::Expr(x) if x.is_some() => bound.parent_of_expr(x),
+                        Parent::Stmt(s) if s.is_some() => bound.parent_of_stmt(s),
+                        _ => self.parent_of_node(file, parent),
+                    };
                     continue;
                 }
             };
@@ -1311,7 +1303,7 @@ impl Checker<'_, '_> {
             }
         };
         if !passed.is_empty() {
-            let mut known = self.containers_inside_exprs.borrow_mut();
+            let mut known = self.containers_inside.borrow_mut();
             known.extend(passed.into_iter().map(|it| ((file, it), container)));
         }
         container
@@ -2370,10 +2362,8 @@ impl Files<'_> {
                 return Some(found);
             }
             // `GetSpellingSuggestion` first gets each candidate's name, then computes its edit distance.
-            let is_candidate = |&(candidate, sym): &(Atom, Sym)| {
-                files.is_spelling_candidate(sym, meaning, &mut *symbols)
-                    && is_close(text, files.atoms.bytes(candidate))
-            };
+            let is_candidate =
+                |&(_, sym): &(Atom, Sym)| files.is_spelling_candidate(sym, meaning, &mut *symbols);
             let named = |(candidate, sym): (Atom, Sym)| {
                 (
                     files.atoms.bytes(candidate),
@@ -2719,12 +2709,13 @@ impl Checker<'_, '_> {
         maybe_missing_await: bool,
         code: u32,
         args: &[Arg<'_>],
-    ) {
+    ) -> &mut Reported {
         let did_you_forget = self.new_diagnostic(at, 2773, &[]);
         let diagnostic = self.error_at(at, code, args);
         if maybe_missing_await {
             diagnostic.add_related_info(did_you_forget);
         }
+        diagnostic
     }
 
     /// `reportOperatorErrorUnless`
@@ -2777,7 +2768,8 @@ impl Checker<'_, '_> {
             BinOp::EqEq | BinOp::NotEq | BinOp::EqEqEq | BinOp::NotEqEq
         ) {
             let args = [Arg::Bytes(&left), Arg::Bytes(&right)];
-            return self.error_and_maybe_suggest_await(at, would_work_with_await, 2367, &args);
+            self.error_and_maybe_suggest_await(at, would_work_with_await, 2367, &args);
+            return;
         }
         let is_assignment = matches!(self.hir(file)[e].kind, ExprKind::Assign { .. });
         let operator = operator_text(op, is_assignment);
@@ -2934,7 +2926,10 @@ impl Checker<'_, '_> {
         let maybe_missing_await =
             awaited.is_some_and(|awaited| self.is_assignable(awaited, numeric));
         let at = self.span_of_parenthesized_expr(file, operand);
-        self.error_and_maybe_suggest_await(at, maybe_missing_await, code, &[]);
+        // The message names nothing. It is the type of the operand that it rests on.
+        let subject = self.subject_of_arguments(&[Arg::Type(ty)]);
+        self.error_and_maybe_suggest_await(at, maybe_missing_await, code, &[])
+            .subject = subject;
         false
     }
 
@@ -3085,7 +3080,11 @@ impl Checker<'_, '_> {
             }
             let (at, code, name) = c.object_possibly_null_error(file, node, error);
             let args: Vec<Arg> = name.iter().map(|name| Arg::Bytes(name)).collect();
-            c.error_at(at, code, &args);
+            let is_brought = c.is_expression_brought(file, node);
+            let diagnostic = c.error_at(at, code, &args);
+            if is_brought {
+                diagnostic.subject = DiagnosticSubject::BroughtDeclaration;
+            }
         })
     }
 

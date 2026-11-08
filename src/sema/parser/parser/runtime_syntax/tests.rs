@@ -8,6 +8,7 @@ mod expressions;
 mod functions;
 mod names;
 mod statements;
+mod types;
 
 fn parsed(text: &str, options: Options) -> (Box<FileBuilder>, Scratch) {
     let mut scratch = Scratch::default();

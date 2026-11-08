@@ -22,7 +22,7 @@ const byOtherStatements = project("by-other-statements");
 const byComputedNames = project("by-computed-names");
 // Each test file is an image of its own over the image of the library, so the loader of the host stands between them. A run in layers builds
 // the library anew, so there is one.
-const inLayers = project("in-layers", [[["--debug-aot"], "TestRunLayers:2,TestRunPartFiles:1"]]);
+const inLayers = project("in-layers", [[["--debug-aot"], "TestRunLayers:0"]]);
 
 function runsAsPlain(
   group: ReturnType<typeof project>,
@@ -45,10 +45,7 @@ function runsAsPlain(
     expect(plain?.printed).toContain("mocked");
     expect(plain?.printed).not.toContain("real");
     expect((await group.ran(["--debug-aot"])).get(name)).toEqual(plain);
-    if (nameInLayers)
-      expect((await inLayers.ran(["--debug-aot"], "TestRunLayers:2,TestRunPartFiles:1")).get(nameInLayers)).toEqual(
-        plain,
-      );
+    if (nameInLayers) expect((await inLayers.ran(["--debug-aot"], "TestRunLayers:0")).get(nameInLayers)).toEqual(plain);
   });
 }
 

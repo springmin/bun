@@ -11,11 +11,6 @@ import { findBuiltinTable } from "./builtin-table";
 // test/harness.ts imports ../hardened.ts, which imports this file: so this file imports nothing of "harness", whose constants are not yet made while it runs.
 const bunExe = () => process.execPath;
 
-// ./every-build.ts. ../../harness.ts takes CI's own variables out of the environment when it is loaded, and loads this file before that.
-if (process.env.AOT_WHOLE_GRIDS === "1") process.env.AOT_WHOLE ??= "1";
-if (process.env.BUILDKITE_BUILD_NUMBER)
-  process.env.AOT_WHOLE ??= process.env.BUILDKITE_MESSAGE?.includes("[aot whole]") ? "1" : "0";
-
 export const capabilities = [
   "the table of built-ins",
   "jsc",
@@ -28,7 +23,6 @@ export const capabilities = [
   "a hardened build",
   "a locked environment",
   "guarded pages",
-  "the words that break a build on purpose",
   "a C compiler",
   "python3",
   "a canary",
@@ -85,7 +79,7 @@ declare("python3", () => (Bun.which("python3") ? undefined : "no python3 is on t
 declare("a canary", () =>
   Bun.spawnSync([bunExe(), "--revision"]).stdout.toString().includes("-canary") ? undefined : "this Bun is a release",
 );
-// No test may lean on it: ./test-files.ts. The table says which file systems the lanes have.
+// No test may lean on it: a test names its test files behind `bun test`. The table says which file systems the lanes have.
 declare("test files of a folder below run by name", () => {
   const project = mkdtempSync(join(tmpdir(), "aot-order-of-test-files-"));
   mkdirSync(join(project, "tests"));

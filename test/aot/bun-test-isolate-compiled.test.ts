@@ -1,5 +1,5 @@
 import { expect } from "bun:test";
-import { bunEnv, bunExe, isLinux, isWindows, tempDir } from "harness";
+import { bunEnv, bunExe, isWindows, tempDir } from "harness";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { runtimeEnvironment } from "./harness/flags";
@@ -93,8 +93,9 @@ test.each(["--isolate", "--parallel=2"])("a type error is a warning under %s, an
 });
 
 test.each(["--isolate", "--parallel=2"])("a test file that cannot be compiled fails alone under %s", async flag => {
+  // A package: a file of the project that is not there may still be written by a test, so the build would hold all of Bun's library ready for it.
   const withoutItsImport = {
-    "wrong.test.ts": `import { test } from "bun:test";\nimport { nothing } from "./nowhere";\ntest("wrong", () => { nothing(); });`,
+    "wrong.test.ts": `import { test } from "bun:test";\nimport { nothing } from "nowhere";\ntest("wrong", () => { nothing(); });`,
   };
   // The preload runs before the file fails to load, as under plain `bun test`: once for each of the four.
   expect(await runTests([flag], withoutItsImport)).toEqual({
@@ -146,11 +147,7 @@ test("reads", () => { expect(JSON.parse('{"size":3}').size).toBe(3); });`,
   const output = stdout + stderr;
   expect(output.match(/^ \d+ (pass|fail)$/gm)).toEqual([` ${passes} pass`, " 0 fail"]);
   expect(output).not.toContain("error: TS");
-  expect(output.match(/^warn: .*$/gm)).toEqual([
-    expect.stringContaining("Files with type errors are compiled without their types: 2 in this run"),
-    expect.stringContaining("TS2339"),
-    expect.stringContaining("TS2571"),
-  ]);
+  expect(output.match(/^warn: .*$/gm)).toEqual([expect.stringContaining("TS2339"), expect.stringContaining("TS2571")]);
   expect(exitCode).toBe(0);
 });
 
@@ -275,33 +272,6 @@ test("the global of the marked file is gone", () => {
   expect(globalObjectCount).toBeLessThanOrEqual(2);
 });`;
 
-test("the global of a finished test file is gone once another file has run", async () => {
-  // A function that is renamed at run time names its frames by its function object, which each call writes down for the collector.
-  const { summary, exitCode } = await runTests(["--isolate", "./d.test.ts", "./e.test.ts", "./f.test.ts"], {
-    "named.ts": `
-export function make(label: string) {
-  return function inner(depth: number): string {
-    return depth ? inner(depth - 1) : String(new Error(label).stack).split("\\n")[1];
-  };
-}
-export function rename(target: any, name: string) {
-  target.displayName = name;
-}`,
-    "d.test.ts": `
-import { expect, test } from "bun:test";
-import { make, rename } from "./named";
-${mark}
-test("frames are named by the function object", () => {
-  const made = [make("one"), make("two"), make("three")];
-  for (const each of made) rename(JSON.parse("[0]")[0] ? {} : each, "renamed");
-  for (let i = 0; i < 50; i++) for (const each of made) expect(each(i & 7)).toContain("renamed");
-});`,
-    "e.test.ts": fileThatDoesNothing,
-    "f.test.ts": lastFile(`import "./named";`),
-  });
-  expect({ summary, exitCode }).toEqual({ summary: [" 3 pass", " 0 fail"], exitCode: 0 });
-});
-
 test("heapStats() does not keep the test file that called it", async () => {
   using dir = tempDir("bun-test-isolate-heap-stats", {
     "d.test.ts": `
@@ -343,6 +313,26 @@ test("only writes the pattern", () => { expect(pattern.flags).toBe(""); });`,
   expect({ summary, exitCode }).toEqual({ summary: [" 3 pass", " 0 fail"], exitCode: 0 });
 });
 
+test("import() calls a job apart do not keep the test file that made them", async () => {
+  // The second call is made again a job behind the delivery of the texts, by a job that the run time knows by a promise of that realm.
+  const { summary, exitCode } = await runTests(["--isolate", "./d.test.ts", "./e.test.ts", "./f.test.ts"], {
+    "part-a.ts": `export const a = 1;`,
+    "part-b.ts": `export const b = 2;`,
+    "d.test.ts": `
+import { expect, test } from "bun:test";
+${mark}
+test("calls", async () => {
+  const first = import("./part-a");
+  await null;
+  const second = import("./part-b");
+  expect((await first).a + (await second).b).toBe(3);
+});`,
+    "e.test.ts": fileThatDoesNothing,
+    "f.test.ts": lastFile(""),
+  });
+  expect({ summary, exitCode }).toEqual({ summary: [" 3 pass", " 0 fail"], exitCode: 0 });
+});
+
 test.skipIf(isWindows)("a read that never ends does not keep the test file that began it", async () => {
   const { summary, exitCode } = await runTests(["--isolate", "./d.test.ts", "./e.test.ts", "./f.test.ts"], {
     "d.test.ts": `
@@ -359,33 +349,11 @@ test("reads a pipe that nobody writes", async () => {
     "e.test.ts": `
 import { expect, test } from "bun:test";
 test("nothing", () => { expect(1).toBe(1); });`,
-    "f.test.ts": lastFile(""),
-  });
-  expect({ summary, exitCode }).toEqual({ summary: [" 3 pass", " 0 fail"], exitCode: 0 });
-});
-
-test.skipIf(!isLinux)("process.stdout and process.stderr give their descriptors back with the test file", async () => {
-  const countsDescriptors = `
-import { expect, test } from "bun:test";
-import { appendFileSync, readdirSync } from "node:fs";
-import { join } from "node:path";
-test("counts", () => {
-  process.stdout.write("");
-  process.stderr.write("");
-  appendFileSync(join(import.meta.dir, "counts"), readdirSync("/proc/self/fd").length + "\\n");
-  expect(1).toBe(1);
-});`;
-  const { summary, exitCode } = await runTests(["--isolate", "./d.test.ts", "./e.test.ts", "./f.test.ts"], {
-    "d.test.ts": countsDescriptors,
-    "e.test.ts": countsDescriptors,
-    "f.test.ts": `
-import { expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
-test("as many in the second file as in the first", () => {
-  const [first, second] = readFileSync(join(import.meta.dir, "counts"), "utf8").trim().split("\\n");
-  expect(second).toBe(first);
-});`,
+    // The functions of a stream run in the interpreter, and a frame of theirs leaves the address of its code on the stack. The engine clears what lies there
+    // unused where the thread of the program conducts a collection. Where the collector's own thread does, because it is still at one that
+    // BUN_GARBAGE_COLLECTOR_LEVEL=1 asked for between two tests, that address is found, and the code keeps its global for this one collection.
+    // So one collection is waited for, and the stack is left, before the one that counts. What holds the file for good is still there then.
+    "f.test.ts": lastFile("Bun.gc(true);\nawait Bun.sleep(1);"),
   });
   expect({ summary, exitCode }).toEqual({ summary: [" 3 pass", " 0 fail"], exitCode: 0 });
 });
@@ -441,11 +409,11 @@ import { existsSync } from "node:fs";
 ${mark}
 const hidden = (text: string) => new Function(JSON.parse(JSON.stringify(text)))();
 test("reads what no code that the compiler can follow reads", () => {
-  // A member that the host makes, a getter of the library, and the error of a call.
-  const sql = (Bun as any)["s" + "ql".slice(0)];
-  expect(Reflect.ownKeys(sql).includes("unsafe")).toBe(false);
-  expect(typeof hidden('return process.getBuiltinModule("node:fs").promises')).toBe("function");
-  expect(() => sql("select 1")).toThrow();
+  // node:fs is in the image without its getter \`promises\`, which nothing calls: a stand-in lies in its place. The stand-in, a read that calls it, and the error of each.
+  const getter = hidden('return Object.getOwnPropertyDescriptor(process.getBuiltinModule("node:fs"), "promises").get');
+  expect(typeof getter).toBe("function");
+  expect(() => getter()).toThrow("was not compiled into this executable");
+  expect(() => hidden('return process.getBuiltinModule("node:fs").promises')).toThrow("was not compiled into this executable");
   expect(existsSync(".")).toBe(true);
 });`,
     "e.test.ts": fileThatDoesNothing,

@@ -1,7 +1,7 @@
 import { expect } from "bun:test";
 import { bunEnv, bunExe, tempDir } from "harness";
 import { run } from "./harness/run";
-import { eachRow, gap } from "./supported";
+import { eachRow } from "./supported";
 
 // The loader takes what a test file imports level by level, and a CommonJS file runs where the loader comes to it. What stands on its level or below is not loaded by then:
 // require() parses the file itself and answers the value. What stands on a level above is loaded, and require() answers the namespace object.
@@ -55,34 +55,11 @@ async function runTests(directory: string, words: string, flags: string[]) {
 }
 
 const oneProgram = "TestRunLayers:0";
-const twoLayers = "TestRunLayers:2,TestRunPartFiles:1";
-const askedForIsNotLoaded =
-  "over layers the test file and the CommonJS file lie in two images: a file counts as loaded once the loader has asked for it, as in plain Bun with threads";
 eachRow([
   ["levels below and a level above", "as one program", "", oneProgram, below, "host,port", "undefined"],
   ["levels below and a level above", "as one program", "--isolate", oneProgram, below, "host,port", "undefined"],
-  ["levels below and a level above", "over two layers", "", twoLayers, below, "host,port", "undefined"],
-  ["levels below and a level above", "over two layers", "--isolate", twoLayers, below, "host,port", "undefined"],
   ["on the level of the file", "as one program", "", oneProgram, beside, "undefined", "host,port"],
   ["on the level of the file", "as one program", "--isolate", oneProgram, beside, "undefined", "host,port"],
-  gap(askedForIsNotLoaded, [
-    "on the level of the file",
-    "over two layers",
-    "",
-    twoLayers,
-    beside,
-    "undefined",
-    "host,port",
-  ]),
-  gap(askedForIsNotLoaded, [
-    "on the level of the file",
-    "over two layers",
-    "--isolate",
-    twoLayers,
-    beside,
-    "undefined",
-    "host,port",
-  ]),
 ] as const)(
   "require() of a data file goes by how far the loader has come: %s, %s %s",
   async (_where, _form, flag, words, early, answerBelow, answerBeside) => {

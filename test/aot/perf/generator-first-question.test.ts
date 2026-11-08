@@ -5,26 +5,29 @@
 import { expect } from "bun:test";
 import { bunEnv, bunExe, isASAN, isDebug, tempDir } from "harness";
 import { join } from "path";
-import { countsInstructions, measureCommand } from "../analysis-scaling/measure-check";
+import { measureCommand } from "../analysis-scaling/measure-check";
+import { without } from "../harness/capabilities";
 import { built, spawned, withoutDebugInformation } from "../harness/commands";
-import { withSteadyCollections } from "../harness/counted-run";
 import { beforeAll, describe, test } from "../supported";
 
 const name = "generator-first-question";
 const root = join(import.meta.dir, name);
+// A collection starts only when enough has been allocated, never on a timer, and runs entirely on the program's thread. With the collector's helper threads on, the instruction count differs from run to run.
+const withSteadyCollections = {
+  BUN_GC_TIMER_DISABLE: "1",
+  BUN_JSC_percentCPUPerMBForEdenTimer: "0",
+  BUN_JSC_percentCPUPerMBForFullTimer: "0",
+  BUN_JSC_useConcurrentGC: "0",
+  BUN_JSC_numberOfGCMarkers: "1",
+};
 const [few, many] = [100_000, 3_000_000];
 /** A walk over the heap takes some ten instructions an object: thirty million more over `many`. */
 const mostInstructionsMore = 3_000_000;
 
-const skipped =
-  isDebug || isASAN
-    ? "a debug or ASAN build counts other instructions"
-    : !countsInstructions()
-      ? "instructions are not counted here"
-      : undefined;
-if (skipped) console.error(`SKIPPED: test/aot/perf/${name}.test.ts: ${skipped}`);
+// A debug or ASAN build counts other instructions.
+const isSlowBuild = isDebug || isASAN;
 
-describe.skipIf(!!skipped)(`compile/aot/perf/${name}`, () => {
+describe.skipIf(isSlowBuild || !!without("a counter of instructions"))(`compile/aot/perf/${name}`, () => {
   const folder = String(tempDir("aot-first-question-to-a-generator", {}));
   const executable = join(folder, "main");
   const env = { ...bunEnv, ...withSteadyCollections };

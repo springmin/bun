@@ -10,6 +10,8 @@ use bun_sema::module_format::ModuleFormat;
 use bun_sema::resolve::TransformRequest;
 use bun_sema::util::FxHashMap;
 
+use crate::builtins::{RuntimeModule, table};
+
 const NAMESPACE_PREFIX: &str = "%import:";
 
 fn text_of<'a>(atoms: &'a Interner<'_>, text: Atom) -> &'a [u8] {
@@ -26,10 +28,10 @@ enum MockApi {
 }
 
 impl MockApi {
-    fn from_export_name(name: &[u8]) -> Option<MockApi> {
+    fn from_export_name(name: Atom) -> Option<MockApi> {
         match name {
-            b"vi" | b"vitest" => Some(MockApi::Vi),
-            b"jest" => Some(MockApi::Jest),
+            known::vi | known::vitest => Some(MockApi::Vi),
+            known::jest => Some(MockApi::Jest),
             _ => None,
         }
     }
@@ -53,10 +55,7 @@ struct Use {
 pub(crate) struct Plan {
     places: Vec<(StmtId, Place)>,
     uses: Vec<Use>,
-    /// The factory and the fragment of classic JSX, and a class that decorator metadata names: no expression spells the name, so there is none to rewrite.
-    /// The binder finds the loaded module by `Import::loaded_as`.
     named_implicitly: Vec<ImportId>,
-    /// `import * as ns`, `export { ns }`: the clause names the variable of the load.
     exported_namespaces: Vec<(ExportSpecId, ImportId)>,
     paths_written_as_imports: Vec<(ExprId, ExprId)>,
 }
@@ -85,7 +84,7 @@ impl<'a, 'r, 's> Planner<'a, 'r, 's> {
         let imported_apis = of_runner
             .flat_map(|it| hir[it].named.iter())
             .filter_map(|it| {
-                let api = MockApi::from_export_name(text_of(atoms, hir[it].imported))?;
+                let api = MockApi::from_export_name(hir[it].imported)?;
                 let symbol = request.bound.declared_symbol(Decl::ImportSpec(it));
                 Some((symbol, api))
             });
@@ -103,7 +102,7 @@ impl<'a, 'r, 's> Planner<'a, 'r, 's> {
             return None;
         };
         match self.request.bound.binding(object) {
-            Binding::Free => match MockApi::from_export_name(text_of(self.atoms, name))? {
+            Binding::Free => match MockApi::from_export_name(name)? {
                 MockApi::Jest if self.has_globals_of_vitest => None,
                 api => Some(api),
             },
@@ -119,7 +118,7 @@ impl<'a, 'r, 's> Planner<'a, 'r, 's> {
         self.hir.skip_type_assertions(expression)
     }
 
-    fn find_mock_call(&self, expression: ExprId) -> Option<(MockApi, &'a [u8])> {
+    fn find_mock_call(&self, expression: ExprId) -> Option<(MockApi, Atom)> {
         let expression = self.without_type_syntax(expression);
         let mut callee = match self.hir[expression].kind {
             ExprKind::Await(value) => self.without_type_syntax(value),
@@ -143,9 +142,8 @@ impl<'a, 'r, 's> Planner<'a, 'r, 's> {
             if call.chain != Chain::No || chain != Chain::No || name_before_end == FAR_IN_BRACKETS {
                 return None;
             }
-            let name = text_of(self.atoms, name);
             let is_chain = last_name.is_some();
-            if is_chain && !matches!(name, b"mock" | b"unmock") {
+            if is_chain && !matches!(name, known::mock | known::unmock) {
                 return None;
             }
             let last_name = *last_name.get_or_insert(name);
@@ -165,7 +163,7 @@ impl<'a, 'r, 's> Planner<'a, 'r, 's> {
         match self.hir[statement].kind {
             StmtKind::Expr(value) => matches!(
                 self.find_mock_call(value),
-                Some((_, b"mock" | b"unmock") | (MockApi::Vi, b"hoisted"))
+                Some((_, known::mock | known::unmock) | (MockApi::Vi, known::hoisted))
             ),
             StmtKind::Var(declarations) => {
                 let mut declarations = declarations.iter().map(|it| self.hir[it]);
@@ -174,7 +172,7 @@ impl<'a, 'r, 's> Planner<'a, 'r, 's> {
                         && it.init != ExprId::NONE
                         && matches!(
                             self.find_mock_call(it.init),
-                            Some((MockApi::Vi, b"hoisted"))
+                            Some((MockApi::Vi, known::hoisted))
                         )
                 })
             }
@@ -200,8 +198,7 @@ impl<'a, 'r, 's> Planner<'a, 'r, 's> {
                 ExprKind::Number(_) | ExprKind::BigInt(_)
             ),
             ExprKind::Ident(name) => {
-                text_of(self.atoms, name) == b"undefined"
-                    && self.request.bound.binding(expression) == Binding::Free
+                name == known::undefined && self.request.bound.binding(expression) == Binding::Free
             }
             _ => false,
         }
@@ -223,8 +220,8 @@ impl<'a, 'r, 's> Planner<'a, 'r, 's> {
     fn runs_imports_in_turn(&self, body: &[StmtId]) -> bool {
         let imports = body.iter().filter(|&&it| match self.hir[it].kind {
             StmtKind::Import(import) => {
-                let import = self.hir[import];
-                !import.type_only && !is_test_module(text_of(self.atoms, import.spec))
+                !self.hir.is_type_only_import(import)
+                    && !is_test_module(text_of(self.atoms, self.hir[import].spec))
             }
             _ => false,
         });
@@ -270,8 +267,7 @@ impl<'a, 'r, 's> Planner<'a, 'r, 's> {
         let node = self.hir[import];
         let mut names = Vec::new();
         if node.default != Atom::NONE {
-            let member = self.atoms.intern(b"default");
-            names.push((Decl::ImportDefault(import), node.default, member));
+            names.push((Decl::ImportDefault(import), node.default, known::default));
         }
         if node.namespace != Atom::NONE {
             names.push((Decl::ImportNamespace(import), node.namespace, Atom::NONE));
@@ -288,10 +284,9 @@ impl<'a, 'r, 's> Planner<'a, 'r, 's> {
             return Place::InPlace;
         }
         let path = text_of(self.atoms, node.spec);
-        if is_test_module(path) || path == b"bun" {
+        if is_test_module(path) || table::module_by_specifier(path) == Some(RuntimeModule::Bun) {
             return Place::BeforeHoisted;
         }
-        // Only an attribute that chooses how the file is loaded keeps the statement.
         let chooses_loader = |attributes: ExprId| {
             let keys = [known::r#type, known::embed];
             keys.iter()
@@ -300,7 +295,6 @@ impl<'a, 'r, 's> Planner<'a, 'r, 's> {
         if node.is_deferred || node.attributes.some().is_some_and(chooses_loader) {
             return Place::InPlace;
         }
-        // `export { a }` needs `a` to be a binding. The variable of a load is one, and holds what a namespace names.
         let names = self.names_of(import);
         let mut members = names.iter().filter(|it| it.2 != Atom::NONE);
         if members.any(|it| exported.contains(&it.1)) {
@@ -313,7 +307,6 @@ impl<'a, 'r, 's> Planner<'a, 'r, 's> {
         let bound = self.request.bound;
         let names = self.names_of(import);
         let mut symbols = names.iter().map(|it| bound.declared_symbol(it.0));
-        // `import a = ns.a`: an entity name is no expression either.
         let aliases = (0..self.hir.import_equals.len() as u32).map(ImportEqualsId);
         let roots: Vec<Binding> = aliases.map(|it| bound.entity_root_binding(it)).collect();
         symbols.any(|symbol| {
@@ -379,8 +372,8 @@ impl<'a, 'r, 's> Planner<'a, 'r, 's> {
             };
             let path = self.hir.ids(args).next()?;
             let takes_path = matches!(
-                text_of(self.atoms, name),
-                b"mock" | b"unmock" | b"doMock" | b"doUnmock"
+                name,
+                known::mock | known::unmock | known::doMock | known::doUnmock
             );
             let obj = self.without_type_syntax(obj);
             (takes_path && self.find_api(obj).is_some()).then_some((written, path))
@@ -532,7 +525,6 @@ fn write_use(
 fn write_load(file: &mut FileBuilder, statement: StmtId, import: ImportId, local: Atom) -> StmtId {
     let (start, loc) = (file[statement].start, file[statement].loc);
     let path = file[import].spec;
-    // The parser lists every specifier for the type checker, by the kind of its use.
     file.specifier_uses.push(SpecifierUse {
         spec: path,
         pos: start,
@@ -802,7 +794,7 @@ mod tests {
             (
                 "a.test.js",
                 r#"import { captured } from "./side"; jest.mock("./mod", () => ({})); console.log(captured);"#,
-                "import 1 | mock() | const = await import ./side | log()",
+                "import 1 | import 1 | declaration | mock() | const = await import ./side | log()",
             ),
             (
                 "a.test.js",
@@ -819,9 +811,39 @@ mod tests {
                 r#"import { vi } from "bun:test"; import "./side"; const a = "a", b = -1; const c = String("c"); vi.mock("./mod", () => ({ a, b, c }));"#,
                 "import 1 | declaration | mock() | await import ./side | declaration",
             ),
+            (
+                "a.test.js",
+                r#"import "./side"; import { file } from "bun"; import { vi } from "bun:test"; vi.mock("./mod", () => ({})); console.log(file);"#,
+                "import 1 | import 1 | mock() | await import ./side | log()",
+            ),
         ];
         for (name, text, expected) in rows {
             assert_eq!(describe(name, text), expected, "{text}");
+        }
+    }
+
+    #[test]
+    fn imports_run_in_turn_where_two_are_left_beside_those_of_types_alone() {
+        let rows = [
+            (
+                r#"import { test } from "vitest"; import { value } from "./mod"; import { captured } from "./side"; test("a", () => console.log(value, captured));"#,
+                "import 1 | const = await import ./mod | import type 1 | const = await import ./side | import type 1 | test()",
+            ),
+            (
+                r#"import { test } from "vitest"; import { value } from "./mod"; import { Unused } from "./side"; let a: Unused; test("a", () => console.log(value, a));"#,
+                "import 1 | const = await import ./mod | import type 1 | import 1 | declaration | test()",
+            ),
+            (
+                r#"import { test } from "vitest"; import { value } from "./mod"; import { type Unused } from "./side"; let a: Unused; test("a", () => console.log(value, a));"#,
+                "import 1 | import 1 | import 1 | declaration | test()",
+            ),
+            (
+                r#"import { test } from "vitest"; import { value } from "./mod"; import type { Unused } from "./side"; let a: Unused; test("a", () => console.log(value, a));"#,
+                "import 1 | import 1 | import type 1 | declaration | test()",
+            ),
+        ];
+        for (text, expected) in rows {
+            assert_eq!(describe("a.test.ts", text), expected, "{text}");
         }
     }
 
@@ -870,6 +892,43 @@ mod tests {
     }
 
     #[test]
+    fn the_binding_of_a_name_says_what_it_is_and_not_its_spelling() {
+        let rows = [
+            (
+                r#"import { vi as runner } from "bun:test"; import { captured } from "./side"; runner.mock("./mod", () => ({})); console.log(captured);"#,
+                "import 1 | mock() | const = await import ./side | log()",
+            ),
+            (
+                r#"import { jest as vi } from "bun:test"; import "./side"; vi.unmock("./mod").mock("./mod", () => ({}));"#,
+                "import 1 | mock() | await import ./side",
+            ),
+            (
+                r#"import { vi as jest } from "bun:test"; import "./side"; jest.unmock("./mod").mock("./mod", () => ({}));"#,
+                "import 1 | import 0 | mock()",
+            ),
+            (
+                r#"import { value as vi } from "./mod"; import { captured } from "./side"; vi.mock("./mod"); console.log(captured);"#,
+                "import 1 | import 1 | mock() | log()",
+            ),
+            (
+                r#"import { mock as vi } from "bun:test"; import { captured } from "./side"; vi.mock("./mod", () => ({})); console.log(captured);"#,
+                "import 1 | import 1 | mock() | log()",
+            ),
+            (
+                r#"import { vi } from "bun:test"; import "./side"; const a = undefined; vi.mock("./mod", () => ({ a }));"#,
+                "import 1 | declaration | mock() | await import ./side",
+            ),
+            (
+                r#"import { vi } from "bun:test"; import "./side"; const undefined = "u"; const a = undefined; vi.mock("./mod", () => ({ a }));"#,
+                "import 1 | declaration | mock() | await import ./side | declaration",
+            ),
+        ];
+        for (text, expected) in rows {
+            assert_eq!(describe("a.test.js", text), expected, "{text}");
+        }
+    }
+
+    #[test]
     fn uses_read_the_loaded_module() {
         let text = r#"import { vi } from "bun:test"; import { call } from "./mod"; vi.mock("./side", () => ({})); call(); console.log(call, { call });"#;
         with_tree("a.test.js", text, |hir, is_written, _| {
@@ -897,5 +956,91 @@ mod tests {
             let mut expressions = hir.exprs.iter();
             assert!(!expressions.any(|it| matches!(it.kind, ExprKind::ImportCall { .. })));
         });
+    }
+
+    #[test]
+    fn an_import_handed_to_a_local_that_is_named_like_the_runner_loads() {
+        let text = r#"import { test } from "bun:test"; test("a", () => { const vi = { doMock(path) { return path; } }; vi.doMock(import("./mod")); });"#;
+        with_tree("a.test.js", text, |hir, _, _| {
+            let mut expressions = hir.exprs.iter();
+            assert!(expressions.any(|it| matches!(it.kind, ExprKind::ImportCall { .. })));
+        });
+    }
+
+    #[test]
+    fn a_type_mark_on_the_runner_the_method_or_the_path_hides_no_mock() {
+        let test_file = |call: &str| {
+            format!(
+                "import {{ test, vi, jest }} from \"bun:test\";\nimport {{ captured }} from \"./side\";\n{call}\ntest(\"t\", () => console.log(captured));"
+            )
+        };
+        let loads_what_it_mocks = |text: &str| {
+            with_tree("a.test.ts", text, |hir, _, text_of| {
+                hir.exprs.iter().any(|it| match it.kind {
+                    ExprKind::ImportCall { args } => {
+                        let path = hir.ids(args).next().and_then(text_of);
+                        path.as_deref() == Some("./mod")
+                    }
+                    _ => false,
+                })
+            })
+        };
+        let calls = [
+            (
+                r#"(vi as any).mock("./mod", () => ({ value: 2 }));"#,
+                "mock()",
+            ),
+            (r#"vi!.mock("./mod", () => ({ value: 2 }));"#, "mock()"),
+            (
+                r#"(vi as unknown as typeof vi).mock("./mod", () => ({ value: 2 }));"#,
+                "mock()",
+            ),
+            (
+                r#"(vi satisfies typeof vi).mock("./mod", () => ({ value: 2 }));"#,
+                "mock()",
+            ),
+            (
+                r#"(jest as any).mock("./mod", () => ({ value: 2 }));"#,
+                "mock()",
+            ),
+            (r#"vi.mock!("./mod", () => ({ value: 2 }));"#, "expression"),
+            (
+                r#"(vi.mock as any)("./mod", () => ({ value: 2 }));"#,
+                "expression",
+            ),
+            (
+                r#"(jest as any).mock("./mod", () => ({ value: 2 })).mock("./side", () => ({}));"#,
+                "mock()",
+            ),
+            (
+                r#"vi.mock(import("./mod") as any, () => ({ value: 2 }));"#,
+                "mock()",
+            ),
+            (
+                r#"vi.mock((await (import("./mod") as any)) as any, () => ({ value: 2 }));"#,
+                "mock()",
+            ),
+            (
+                r#"vi.mock("./mod", () => ({ value: 2 })) as any;"#,
+                "expression",
+            ),
+            (r#"vi.mock("./mod", () => ({ value: 2 }));"#, "mock()"),
+        ];
+        let mut wrong = Vec::new();
+        for (call, statement) in calls {
+            let text = test_file(call);
+            let risen = format!(
+                "import 3 | {statement} | const = await import ./side | import type 1 | test()"
+            );
+            if describe("a.test.ts", &text) != risen || loads_what_it_mocks(&text) {
+                wrong.push(call);
+            }
+        }
+        assert!(wrong.is_empty(), "{wrong:#?}");
+        let other = test_file(r#"({ mock() {} } as any).mock("./mod", () => ({ value: 2 }));"#);
+        assert_eq!(
+            describe("a.test.ts", &other),
+            "import 3 | import 1 | mock() | test()"
+        );
     }
 }

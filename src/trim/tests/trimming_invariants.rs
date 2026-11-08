@@ -164,11 +164,11 @@ fn u32_at(bytes: &[u8], offset: usize) -> u32 {
     u32::from_le_bytes(bytes[offset..offset + 4].try_into().expect("four bytes"))
 }
 
-fn fill_byte(architecture: Architecture, is_code: bool, address: u64) -> u8 {
-    match (is_code, architecture) {
-        (false, _) => 0,
-        (true, Architecture::X86_64) => 0xcc,
-        (true, Architecture::Aarch64) => [0x00, 0x00, 0x20, 0xd4][(address & 3) as usize],
+fn fill_byte(target: Target, is_code: bool) -> u8 {
+    match (is_code, target.architecture, target.format) {
+        (false, ..) | (true, Architecture::Aarch64, _) => 0,
+        (true, Architecture::X86_64, ExecutableFormat::MachO) => 0xcc,
+        (true, Architecture::X86_64, _) => 0xf4,
     }
 }
 
@@ -312,11 +312,10 @@ impl TrimmedCheck<'_> {
     }
 
     fn check_cut_or_filled(&self, range: &ToyRange) {
-        let architecture = self.layout.target.architecture;
+        let fill = fill_byte(self.layout.target, range.is_code);
         let addresses = range.range.start..range.range.end;
         if let Some(bytes) = self.new.bytes(range.range) {
             for (address, byte) in addresses.zip(bytes) {
-                let fill = fill_byte(architecture, range.is_code, address);
                 assert!(
                     byte == fill,
                     "{}: {address:#x} holds {byte:#x}, not fill {fill:#x}",
@@ -327,7 +326,6 @@ impl TrimmedCheck<'_> {
         }
         for address in addresses {
             let byte = self.new.byte_at(address);
-            let fill = fill_byte(architecture, range.is_code, address);
             assert!(
                 matches!(byte, MemoryByte::Unmapped | MemoryByte::NoAccess)
                     || byte == MemoryByte::Mapped(fill),
@@ -1258,7 +1256,7 @@ fn assert_all_filled(layout: &ToyLayout, trimmed: &Trimmed, range: AddressRange)
         .bytes(range)
         .unwrap_or_else(|| panic!("{target:?}: a filled range is not mapped"));
     for (address, byte) in (range.start..range.end).zip(bytes) {
-        let fill = fill_byte(target.architecture, true, address);
+        let fill = fill_byte(target, true);
         assert!(
             byte == fill,
             "{target:?}: {address:#x} holds {byte:#x}, not fill {fill:#x}"
@@ -1321,7 +1319,7 @@ fn aligned_range_is_cut_ragged_range_is_filled() {
             !matches!(middle, MemoryByte::Mapped(_)),
             "{target:?}: the middle is {middle:?}"
         );
-        let fill = MemoryByte::Mapped(fill_byte(target.architecture, true, start));
+        let fill = MemoryByte::Mapped(fill_byte(target, true));
         assert!(
             new.byte_at(start) == fill,
             "{target:?}: the ragged start is not filled"

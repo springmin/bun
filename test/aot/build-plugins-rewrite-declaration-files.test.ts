@@ -1,8 +1,7 @@
-import { expect } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { bunEnv, bunExe, isWindows, tempDir } from "harness";
 import { join } from "path";
 import { slot, spawned, unsupported } from "./harness/commands";
-import { describe, test } from "./listed";
 
 const build = `import { writeFileSync } from "fs";
 const rewrites = {

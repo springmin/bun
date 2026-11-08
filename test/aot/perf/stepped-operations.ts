@@ -8,9 +8,10 @@
 // The numbers are exact. A row fails when it reads over its pin by more than 2% and by more than 2 instructions, and a pin is never taken anew upward without a word on which change did it:
 // ./stepped-idioms.ts says why. A row that reads over that is read again first, as there.
 //
+// CI does not run it: ./stepped-operations-*.measure.ts are for the bench.
 // A pin only goes down: a number that has to rise is a trade, and somebody decides it.
-//   AOT_PERF=lower bun test test/aot/perf/stepped-operations-     writes every number that got better into the file
-//   AOT_PERF=update ..                                            rewrites the pins as counted: for a new row
+//   AOT_PERF=lower bun test ./test/aot/perf/stepped-operations-*.measure.ts     writes every number that got better into the file
+//   AOT_PERF=update ..                                                          rewrites the pins as counted: for a new row
 import { afterAll, expect } from "bun:test";
 import { existsSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { bunExe, isASAN, isDebug, isMusl, tempDir } from "harness";

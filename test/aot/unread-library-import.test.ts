@@ -1,14 +1,14 @@
 // package.json says `"sideEffects": false`, and a file of the library imports another one by a statement that binds nothing: `import "./setup.mjs"`.
-// `bun build --compile` drops such a statement, so the executable never runs setup.mjs. A test run shows what the executable does, however it is cut into programs.
+// `bun build --compile` drops such a statement, so the executable never runs setup.mjs. A test run shows what the executable does.
 // `bun test`, which bundles nothing, runs setup.mjs.
 //
-// Every form is a folder of one project, with a package.json of its own, and the project runs once in each way: a run over layers costs the same whatever it holds.
+// Every form is a folder of one project, with a package.json of its own, and the project runs once in each way.
 // ID in a text is the folder's name: each line that is printed begins with it, and so does each global, because at default flags the test files share a realm.
 import { expect } from "bun:test";
 import { bunEnv, bunExe, tempDir } from "harness";
 import { join } from "node:path";
+import { afterAll } from "./harness/default-timeout";
 import { run } from "./harness/run";
-import { afterAll } from "./listed";
 import { test } from "./supported";
 
 const packageJson = `{ "name": "z", "sideEffects": false }`;
@@ -25,15 +25,14 @@ afterAll(() => folder?.[Symbol.dispose]());
 const folderOf = (id: string) => join(String((folder ??= tempDir("unread-library-import", project))), id);
 
 const ways = [
-  ["at default flags", ["--aot"], ""],
-  ["as one program under --isolate", ["--aot", "--isolate"], "TestRunLayers:0"],
-  ["over two layers", ["--aot", "--isolate"], "TestRunLayers:2,TestRunPartFiles:1"],
+  ["at default flags", ["--aot"]],
+  ["under --isolate", ["--aot", "--isolate"]],
 ] as const;
 const runs = new Map<string, Promise<{ printed: Map<string, string[]>; exitCode: number | null }>>();
 /** What each folder printed in one run of the whole project. */
-function ran(flags: readonly string[], words = "") {
-  return runs.getOrInsertComputed(JSON.stringify([flags, words]), async () => {
-    const env = { ...bunEnv, NO_COLOR: "1", BUN_DEBUG_TEST_AOT_WORDS: words };
+function ran(flags: readonly string[]) {
+  return runs.getOrInsertComputed(JSON.stringify(flags), async () => {
+    const env = { ...bunEnv, NO_COLOR: "1" };
     const { stdout, exitCode } = await run([bunExe(), "test", ...flags], join(folderOf("c01"), ".."), env);
     const printed = new Map<string, string[]>();
     for (const [, id, text] of stdout.matchAll(/^(c\d+)\| (.*)$/gm))
@@ -41,15 +40,10 @@ function ran(flags: readonly string[], words = "") {
     return { printed, exitCode };
   });
 }
-const seen = async (id: string, flags: readonly string[], words = "") =>
-  (await ran(flags, words)).printed.get(id) ?? [];
+const seen = async (id: string, flags: readonly string[]) => (await ran(flags)).printed.get(id) ?? [];
 // One folder that fails ends the run with 1. Each folder is judged by what it printed, so that the one at fault is named.
-for (const [way, flags, words] of [["uncompiled", ["--isolate"], ""], ...ways] as const)
-  test.concurrent(
-    `no test file fails, ${way}`,
-    async () => expect((await ran(flags, words)).exitCode).toBe(0),
-    240_000,
-  );
+for (const [way, flags] of [["uncompiled", ["--isolate"]], ...ways] as const)
+  test.concurrent(`no test file fails, ${way}`, async () => expect((await ran(flags)).exitCode).toBe(0), 240_000);
 
 async function runExecutable(id: string, flags: string[]) {
   const outfile = join(folderOf(id), flags.length ? "compiled" : "bundled");
@@ -91,11 +85,11 @@ for (const [form, files] of Object.entries(forms)) {
     },
     240_000,
   );
-  for (const [way, flags, words] of ways)
-    test.concurrent(`${form}, ${way}`, async () => expect(await seen(id, flags, words)).toEqual(dropped), 240_000);
+  for (const [way, flags] of ways)
+    test.concurrent(`${form}, ${way}`, async () => expect(await seen(id, flags)).toEqual(dropped), 240_000);
 }
 
-// Whoever stands above a layer may read any name through an `export *`, so such a statement stays: without it `made` is never initialized.
+// An `export *` spells none of the names that it hands on, so such a statement stays: without it `made` is never initialized.
 // `import * as all` takes no name of the file, and whoever reads `all` reads every one: such a statement stays too.
 const names = { "names.mjs": `export const a = 1;\nexport const b = 2;\n` };
 const prints = testFile(`import made from "./library.mjs";\nconsole.log("ID|", JSON.stringify(made));\n`);
@@ -127,13 +121,13 @@ const kept: Record<string, Record<string, string>> = {
 };
 for (const [form, files] of Object.entries(kept)) {
   const id = add({ ...names, "a.test.mjs": prints, ...files });
-  for (const [way, flags, words] of ways)
+  for (const [way, flags] of ways)
     test.concurrent(
       `${form}, ${way}`,
       async () => {
         const plain = await seen(id, ["--isolate"]);
         expect(plain).toHaveLength(1);
-        expect(await seen(id, flags, words)).toEqual(plain);
+        expect(await seen(id, flags)).toEqual(plain);
       },
       240_000,
     );

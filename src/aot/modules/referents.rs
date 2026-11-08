@@ -24,7 +24,7 @@ use bun_sema::check::aot::{
     ClassDeclaration, FunctionRef, NamedValue, NamedValues, PrototypeOperation,
 };
 use bun_sema::hir::{BinOp, ExprId, ExprKind, File, MemberKey, StmtKind};
-use bun_sema::import_sites::ImportSiteKind;
+use bun_sema::import_sites::{ImportSiteKind, is_linked_by_bundler};
 use bun_sema::program::{FileId, Files};
 
 #[derive(Copy, Clone)]
@@ -33,11 +33,9 @@ pub struct LinkedProject<'a, 's> {
     pub graph: &'a ModuleGraph,
     pub builtin_names: &'a BuiltinNames,
     pub platform: Platforms,
-    // `None`: this is the project of Bun's own modules.
     pub library: Option<&'a Library<'a, 's>>,
 }
 
-// Bun's own modules, as the application sees them.
 pub struct Library<'a, 's> {
     pub project: LinkedProject<'a, 's>,
     pub sources: &'a Sources,
@@ -58,7 +56,6 @@ fn find_module_of_object(object: BuiltinId) -> Option<RuntimeModule> {
     (module_object == table::canonical_id(object)).then_some(module)
 }
 
-/// `module.exports = name` among the statements of a CommonJS file, where it is the only such store there. Later stores and stores in functions are not looked for: whoever asks expects the value and does not rely on it.
 pub fn find_name_stored_as_module_exports(files: &Files<'_>, file: FileId) -> Option<SymbolId> {
     let (hir, bound) = (files.hir(file), files.bound(file));
     let mut stored = None;
@@ -100,7 +97,6 @@ pub fn find_name_stored_as_module_exports(files: &Files<'_>, file: FileId) -> Op
 }
 
 impl LinkedProject<'_, '_> {
-    // `import name from K`: the function that the CommonJS file K stores as its value. A file that Babel wrote stores its value as its own `default` too.
     fn find_function_exported_whole(
         &self,
         file: FileId,
@@ -143,8 +139,29 @@ impl LinkedProject<'_, '_> {
         table::exists_on(global, self.platform).then_some(global)
     }
 
+    #[inline(never)]
+    fn builtin_of_resolved(
+        &self,
+        file: FileId,
+        expr: ExprId,
+        resolved: Resolved,
+    ) -> Option<BuiltinId> {
+        let is_member = || self.files.hir(file).member_key(expr).is_some();
+        match resolved {
+            Resolved::Builtin(path) => Some(path.id),
+            Resolved::Intrinsic(Intrinsic::Builtin(builtin)) => Some(builtin),
+            Resolved::Intrinsic(Intrinsic::Call { .. }) if is_member() => {
+                Some(BuiltinId::FunctionPrototypeCall)
+            }
+            Resolved::Intrinsic(Intrinsic::Apply) if is_member() => {
+                Some(BuiltinId::FunctionPrototypeApply)
+            }
+            Resolved::Intrinsic(Intrinsic::PrivateGlobal) => self.find_private_global(file, expr),
+            Resolved::DynamicGlobal(_) | Resolved::Intrinsic(_) => None,
+        }
+    }
+
     fn runtime_module_export(&self, module: RuntimeModule, name: Atom) -> Linked {
-        // Its export table belongs to the project of Bun's own modules.
         if table::is_es_module(module) {
             return LinkedBinding::Unknown;
         }
@@ -156,13 +173,11 @@ impl LinkedProject<'_, '_> {
 }
 
 impl Library<'_, '_> {
-    // What the text of the module stores as its value, or as the member `member` of that value.
     fn find_declaration(
         &self,
         module: RuntimeModule,
         member: Option<Atom>,
     ) -> Option<ClassDeclaration> {
-        // Its export table has the names. No program extends one of them so far.
         if table::is_es_module(module) {
             return None;
         }
@@ -224,29 +239,20 @@ impl<'s> ReferentContext<'s> for LinkedProject<'_, 's> {
     type Builtin = BuiltinId;
     type Module = ModuleRef;
 
+    #[inline]
     fn hir(&self, file: FileId) -> &File<'s> {
         self.files.hir(file)
     }
 
+    #[inline]
     fn bound(&self, file: FileId) -> &Bound<'s> {
         self.files.bound(file)
     }
 
+    #[inline]
     fn builtin_of_expression(&self, file: FileId, expr: ExprId) -> Option<BuiltinId> {
-        let source = parsed_source(self.files, file)?;
-        let is_member = || self.files.hir(file).member_key(expr).is_some();
-        match source.builtins.of_expr(expr)? {
-            Resolved::Builtin(path) => Some(path.id),
-            Resolved::Intrinsic(Intrinsic::Builtin(builtin)) => Some(builtin),
-            Resolved::Intrinsic(Intrinsic::Call { .. }) if is_member() => {
-                Some(BuiltinId::FunctionPrototypeCall)
-            }
-            Resolved::Intrinsic(Intrinsic::Apply) if is_member() => {
-                Some(BuiltinId::FunctionPrototypeApply)
-            }
-            Resolved::Intrinsic(Intrinsic::PrivateGlobal) => self.find_private_global(file, expr),
-            Resolved::DynamicGlobal(_) | Resolved::Intrinsic(_) => None,
-        }
+        let resolved = parsed_source(self.files, file)?.builtins.of_expr(expr)?;
+        self.builtin_of_resolved(file, expr, resolved)
     }
 
     fn builtin_member(&self, holder: BuiltinId, name: Atom) -> Option<BuiltinId> {
@@ -317,8 +323,16 @@ impl<'s> ReferentContext<'s> for LinkedProject<'_, 's> {
         let SiteAnswer::Module(module) = self.graph.find_site_answer(file, site)? else {
             return None;
         };
-        match (self.graph.interop(module).require_result, module) {
-            // The value of a built-in module is an object. The table of built-ins lists its members as the exports of the module.
+        let interop = self.graph.interop(module);
+        if interop.answers_loader_with_namespace
+            && !is_linked_by_bundler(self.files.hir(file), self.files.bound(file), site)
+        {
+            return None;
+        }
+        if !self.graph.forms_require_checks_first(module).is_empty() {
+            return None;
+        }
+        match (interop.require_result, module) {
             (RequireResult::Namespace, _)
             | (RequireResult::DefaultExport, ModuleRef::Runtime(_)) => {
                 Some(LoadedValue::Namespace(module))

@@ -15,7 +15,6 @@ import "./analysis-scaling/measure-check";
 import "./engine/testaot";
 import "./hardened";
 import { capabilities, lane, whereTheLineOfThisLaneLies, without, type Capability } from "./harness/capabilities";
-import "./harness/registry";
 import "./perf/step-idioms";
 import "./shell/tools";
 import stored from "./what-this-lane-can.json";

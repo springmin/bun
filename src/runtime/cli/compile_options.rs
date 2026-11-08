@@ -2,12 +2,9 @@ use core::num::NonZeroU32;
 use core::sync::atomic::{AtomicBool, Ordering};
 
 use bun_aot::engine::{self, RejectedOptionWord};
-use bun_aot::report;
 use bun_clap as clap;
-use bun_core::{CodeGenerationFromStrings, Global, Output, strings};
-use bun_options_types::aot_options::{
-    AotOptions, BuildReportRequest, ExplainSet, HeapSize, ImagesBelow, ReportDetail,
-};
+use bun_core::{CodeGenerationFromStrings, Global, strings};
+use bun_options_types::aot_options::{AotOptions, ExplainSet, HeapSize};
 use bun_options_types::bundle_enums::Format;
 use bun_options_types::compile_target::CompileTarget;
 use bun_options_types::context::{Debugger, HotReload};
@@ -15,7 +12,9 @@ use bun_options_types::schema::api;
 use bun_options_types::trim::{Feature, TrimFeature, TrimRequest};
 use bun_trim::{TrimError, TrimRequestError};
 
-use super::compile_command::{CompileFailure, RequestOrigin, print_error_and_notes};
+use super::compile_command::{
+    CompileFailure, RequestOrigin, print_error_and_notes, print_stored_strings_and_exit,
+};
 use super::run_compiled;
 use super::startup_options::read_exec_argv;
 use crate::cli::arguments::{AUTO_PARAMS, BUILD_ONLY_PARAMS, ParamType};
@@ -26,17 +25,37 @@ const CODE_GENERATION_FLAG: &[u8] = b"--disallow-code-generation-from-strings";
 pub(crate) const COMPILE_AOT_KEYS: &[&str] = &[
     "aot",
     "aotCheck",
-    "aotDisable",
     "aotExplain",
-    "aotHeat",
-    "aotLogTypeMismatches",
+    "aotHarden",
+    "aotOut",
     "aotTesting",
-    "aotValidate",
 ];
 const EXPLAIN_ALLOWED: &str =
-    "one of text, json, guards, guards-json, trim, missed-optimizations, allocations, statistics";
+    "one of text, json, guards, guards-json, trim, allocations, forms, statistics";
 const LOCALES_ALLOWED: &str = "a list of locale tags, like en,de-AT";
-const REPORT_DETAIL_ALLOWED: &str = "one of summary, functions, sites";
+const HARDENING_ALLOWED: &str = "a list of these names: proof-checks, ignore-told-ranges";
+
+/// Each name that `--aot-harden` takes, and the words of the engine that it stands for. None is on by default.
+const HARDENING_NAMES: &[(&[u8], &[&[u8]])] = &[
+    // What the compiler has proven of a value is tested where the value arrives. That nobody keeps a cell is a proof that no test can repeat: every cell stays in the heap.
+    (
+        b"proof-checks",
+        &[
+            b"testing=CheckProofsAtRunTime",
+            b"testing=KeepsCellsOutOfFrames",
+        ],
+    ),
+    // Every access by position reads the length and tests the position where it stands, whatever an earlier test or the head of a loop has shown.
+    (b"ignore-told-ranges", &[b"testing=TestsEveryPosition"]),
+];
+/// The words of `BUN_DEBUG_TEST_AOT_WORDS` that start with `TestRun`. With any of them the runner says what the build hands over.
+/// `TestRunLayers:0` asks for one program, which every run is.
+const TEST_RUN_WORDS: &[&[u8]] = &[
+    b"TestRunWithoutFunctionSource",
+    b"TestRunSaysItsForm",
+    b"TestRunShowsStandIn:1",
+    b"TestRunLayers:0",
+];
 
 const EXPLAIN_NAMES: &[(&[u8], ExplainSet)] = &[
     (b"", ExplainSet::TEXT),
@@ -45,13 +64,11 @@ const EXPLAIN_NAMES: &[(&[u8], ExplainSet)] = &[
     (b"guards", ExplainSet::CHECKS),
     (b"guards-json", ExplainSet::CHECKS_JSON),
     (b"trim", ExplainSet::RUNTIME_USE),
-    (b"missed-optimizations", ExplainSet::DECLINES),
     (b"allocations", ExplainSet::ALLOCATIONS),
+    (b"forms", ExplainSet::FORMS),
     (b"statistics", ExplainSet::STATISTICS),
     (b"unknown-code", ExplainSet::ONLY_UNKNOWN_CODE),
     (b"unproven-type", ExplainSet::ONLY_UNPROVEN_TYPE),
-    (b"mutation", ExplainSet::ONLY_MUTATION),
-    (b"limit", ExplainSet::ONLY_LIMIT),
 ];
 
 #[derive(Copy, Clone)]
@@ -68,29 +85,14 @@ macro_rules! developer_flag {
 }
 
 const DEVELOPER_FLAGS: &[(&str, &str, Form)] = &[
-    developer_flag!("validate", Form::Flag),
     developer_flag!("check", Form::Many),
-    developer_flag!("disable", Form::Many),
-    developer_flag!("only-passes", Form::One),
-    developer_flag!("disable-in", Form::One),
-    developer_flag!("limit", Form::One),
-    developer_flag!("heat", Form::One),
-    developer_flag!("flow", Form::One),
+    developer_flag!("harden", Form::Many),
     developer_flag!("testing", Form::Many),
-    developer_flag!("sabotage", Form::One),
-    developer_flag!("count-branches", Form::Flag),
-    developer_flag!("count-arrivals", Form::Flag),
-    developer_flag!("drop-guard", Form::One),
-    developer_flag!("layout-seed", Form::One),
-    developer_flag!("report", Form::One),
-    developer_flag!("report-detail", Form::One),
-    developer_flag!("verify-each-pass", Form::Flag),
     developer_flag!("references", Form::One),
     developer_flag!("cpu", Form::One),
     developer_flag!("threads", Form::One),
     developer_flag!("erase-types", Form::Flag),
     developer_flag!("refuse-code-from-disk", Form::Flag),
-    developer_flag!("separate-programs", Form::Flag),
     developer_flag!("out", Form::One),
     developer_flag!("symbols", Form::Flag),
     ("no-builtin-modules", "--no-builtin-modules", Form::Flag),
@@ -103,22 +105,13 @@ struct FlagGroup {
 }
 
 const RUN_FLAGS: FlagGroup = FlagGroup {
-    flags: &[
-        "--aot",
-        "--aot-allow-code-from-disk",
-        "--aot-log-type-mismatches",
-    ],
+    flags: &["--aot", "--aot-allow-code-from-disk"],
     other_commands: "bun build",
     other_params: BUILD_ONLY_PARAMS,
 };
 
 const BUILD_FLAGS: FlagGroup = FlagGroup {
-    flags: &[
-        "--aot",
-        "--aot-allow-code-from-disk",
-        "--aot-huge-heap",
-        "--aot-log-type-mismatches",
-    ],
+    flags: &["--aot", "--aot-allow-code-from-disk", "--aot-huge-heap"],
     other_commands: "bun run and bun test",
     other_params: AUTO_PARAMS,
 };
@@ -127,7 +120,6 @@ const BUILD_FLAGS: FlagGroup = FlagGroup {
 pub(crate) enum OptionName {
     Compile,
     Aot,
-    LogTypeMismatches,
     Explain,
     HugeHeap,
     InPlace,
@@ -144,9 +136,6 @@ pub(crate) enum OptionName {
     CodeGenerationFromStrings,
     Threads,
     References,
-    Report,
-    ReportDetail,
-    List,
     Developer(&'static str),
 }
 
@@ -176,16 +165,17 @@ pub(crate) struct CompileFlags<'a> {
     pub is_executable: bool,
     pub aot: bool,
     pub no_aot: bool,
-    pub logs_type_mismatches: bool,
     pub explain: Vec<&'a [u8]>,
     pub has_huge_heap: bool,
     pub is_in_place: bool,
     pub omits_function_source: bool,
     pub obfuscates: bool,
-    /// `--sourcemap=external`. With `--aot` it means what `--obfuscate` means.
+    /// `--sourcemap=external`. With `--aot` it means what `--obfuscate` means, but for the names that the program itself reads.
     pub has_external_source_map: bool,
     pub admits_inspector: bool,
     pub allows_code_from_disk: bool,
+    /// `--check`
+    pub checks_types: bool,
     pub trim: TrimFlags<'a>,
     pub developer_words: Vec<(&'static str, Option<&'a [u8]>)>,
     pub is_cross_compile: bool,
@@ -235,11 +225,10 @@ fn allowed_values(option: OptionName) -> &'static str {
     match option {
         OptionName::Explain => EXPLAIN_ALLOWED,
         OptionName::TrimLocales => LOCALES_ALLOWED,
-        OptionName::ReportDetail => REPORT_DETAIL_ALLOWED,
+        OptionName::Developer("harden") => HARDENING_ALLOWED,
         OptionName::References => "one of narrow, wide",
         OptionName::Threads => "a whole number above zero",
         OptionName::CodeGenerationFromStrings => "\"strict\", or no value",
-        OptionName::List => "registry",
         _ => unreachable!("{option:?} takes any value"),
     }
 }
@@ -252,8 +241,6 @@ fn write_spelling(option: OptionName, origin: RequestOrigin, out: &mut Vec<u8>) 
         (Name::Compile, BuildApi) => "compile",
         (Name::Aot, BuildFlag | CompileCommand) => "--aot",
         (Name::Aot, BuildApi) => "compile.aot",
-        (Name::LogTypeMismatches, BuildFlag | CompileCommand) => "--aot-log-type-mismatches",
-        (Name::LogTypeMismatches, BuildApi) => "compile.aotLogTypeMismatches",
         (Name::Explain, BuildFlag | CompileCommand) => "--explain",
         (Name::Explain, BuildApi) => "compile.aotExplain",
         (Name::Trim, BuildFlag | CompileCommand) => "--trim",
@@ -282,14 +269,10 @@ fn write_spelling(option: OptionName, origin: RequestOrigin, out: &mut Vec<u8>) 
         (Name::TrimTemplate, _) => "--trim-template",
         (Name::Threads, _) => "--aot-threads",
         (Name::References, _) => "--aot-references",
-        (Name::Report, _) => "--aot-report",
-        (Name::ReportDetail, _) => "--aot-report-detail",
-        (Name::List, _) => "--aot-list",
-        (Name::Developer("validate"), BuildApi) => "compile.aotValidate",
         (Name::Developer("check"), BuildApi) => "compile.aotCheck",
-        (Name::Developer("disable"), BuildApi) => "compile.aotDisable",
-        (Name::Developer("heat"), BuildApi) => "compile.aotHeat",
+        (Name::Developer("harden"), BuildApi) => "compile.aotHarden",
         (Name::Developer("testing"), BuildApi) => "compile.aotTesting",
+        (Name::Developer("out"), BuildApi) => "compile.aotOut",
         (Name::Developer(key), _) => developer_flag_name(key),
     };
     out.extend_from_slice(spelling.as_bytes());
@@ -447,12 +430,15 @@ pub(crate) fn resolve<'a>(flags: &CompileFlags<'a>) -> Result<CompileSettings, O
         embeds_function_source,
         explain,
         trim,
-        reports_type_mismatches: flags.logs_type_mismatches,
         obfuscates,
+        keeps_names: flags.has_external_source_map && !flags.obfuscates,
         code_generation_from_strings: embedded.code_generation_from_strings,
         admits_inspector,
+        features_of_embedded_options: embedded.features(),
+        warns_of_rejections: embedded.warns_of_rejections,
         loads_code_from_disk: flags.allows_code_from_disk,
         runs_in_place: flags.is_in_place,
+        looks_for_type_errors: flags.checks_types,
         ..Default::default()
     };
     for &(key, value) in &flags.developer_words {
@@ -498,9 +484,7 @@ fn check_requires_executable<'a>(flags: &CompileFlags<'a>) -> Result<(), OptionE
 }
 
 fn check_requires_aot<'a>(flags: &CompileFlags<'a>) -> Result<(), OptionError<'a>> {
-    let option = if flags.logs_type_mismatches {
-        OptionName::LogTypeMismatches
-    } else if !flags.explain.is_empty() {
+    let option = if !flags.explain.is_empty() {
         OptionName::Explain
     } else if flags.has_huge_heap {
         OptionName::HugeHeap
@@ -617,18 +601,6 @@ impl CompileSettings {
     }
 }
 
-fn resolve_report_detail(value: &[u8]) -> Result<ReportDetail, OptionError<'_>> {
-    match value {
-        b"summary" => Ok(ReportDetail::Summary),
-        b"functions" => Ok(ReportDetail::Functions),
-        b"sites" => Ok(ReportDetail::Sites),
-        _ => Err(OptionError::InvalidValue {
-            option: OptionName::ReportDetail,
-            value,
-        }),
-    }
-}
-
 pub(crate) fn apply_developer_word<'a>(
     key: &'static str,
     value: Option<&'a [u8]>,
@@ -636,20 +608,6 @@ pub(crate) fn apply_developer_word<'a>(
 ) -> Result<(), OptionError<'a>> {
     let text = value.unwrap_or_default();
     match key {
-        "report" => {
-            options.build_report = Some(BuildReportRequest {
-                path: Box::from(text),
-                detail: ReportDetail::Summary,
-            })
-        }
-        "report-detail" => {
-            let detail = resolve_report_detail(text)?;
-            let missing_report = OptionError::Requires {
-                option: OptionName::ReportDetail,
-                needed: OptionName::Report,
-            };
-            options.build_report.as_mut().ok_or(missing_report)?.detail = detail;
-        }
         "references" => match text {
             b"narrow" => {}
             b"wide" => options.heap = HeapSize::Huge,
@@ -672,12 +630,11 @@ pub(crate) fn apply_developer_word<'a>(
         }
         "erase-types" => options.erases_types = true,
         "refuse-code-from-disk" => options.loads_code_from_disk = false,
-        "separate-programs" => options.separates_programs = true,
         "symbols" if options.obfuscates => {
             return Err(OptionError::DeveloperWord {
                 key,
                 word: key.as_bytes().to_vec(),
-                sentence: b"cannot be used with --obfuscate or --sourcemap=external, which keep function names out of the executable".to_vec(),
+                sentence: b"cannot be used with --obfuscate or --sourcemap=external, which keep the names of stack frames out of the executable".to_vec(),
             });
         }
         "symbols" => options.emits_symbols = true,
@@ -685,29 +642,63 @@ pub(crate) fn apply_developer_word<'a>(
         "out" => options.ir_output_path = Some(Box::from(text)),
         // The other words of --aot-testing are the engine's.
         "testing" if text == b"NoExecutable" => options.writes_no_executable = true,
-        _ => {
-            let word = option_word(key, value);
-            // The engine's table of these words names every pass of the compiler. Without the compiler the build fails whatever the word is.
-            let rejected = bun_removable_features::removable_body!(AotCompiler, ReturnDefault, {
-                engine::check_option_word(&options.option_words, &word).err()
-            });
-            if let Some(RejectedOptionWord { word, sentence }) = rejected {
+        "testing" if text == b"FirstTexts" => options.takes_first_texts = true,
+        "testing" if text == b"DiscardsFirstVisits" => options.discards_first_visits = true,
+        "testing" if text == b"TypeErrorsWarn" => options.type_errors_warn = true,
+        "testing" if text == b"IsolatedCodeFromDisk" => {
+            if !options.loads_code_from_disk || options.runs_in_place {
                 return Err(OptionError::DeveloperWord {
                     key,
-                    word,
-                    sentence,
+                    word: option_word(key, value),
+                    sentence: b"is for an executable that is built with --aot-allow-code-from-disk"
+                        .to_vec(),
                 });
             }
-            options.option_words.push(word.into_boxed_slice());
+            options.isolates_code_from_disk = true;
         }
+        "harden" => {
+            for name in strings::split(text, b",") {
+                let known = HARDENING_NAMES.iter().find(|(known, _)| *known == name);
+                let Some(&(_, words)) = known else {
+                    return Err(OptionError::InvalidValue {
+                        option: OptionName::Developer(key),
+                        value: name,
+                    });
+                };
+                for word in words {
+                    add_engine_word(key, word.to_vec(), options)?;
+                }
+            }
+        }
+        _ => add_engine_word(key, option_word(key, value), options)?,
+    }
+    Ok(())
+}
+
+fn add_engine_word<'a>(
+    key: &'static str,
+    word: Vec<u8>,
+    options: &mut AotOptions,
+) -> Result<(), OptionError<'a>> {
+    // The table of these words is part of the compiler. Without the compiler the build fails whatever the word is.
+    let rejected = bun_removable_features::removable_body!(AotCompiler, ReturnDefault, {
+        engine::check_option_word(&options.option_words, &word).err()
+    });
+    if let Some(RejectedOptionWord { word, sentence }) = rejected {
+        return Err(OptionError::DeveloperWord {
+            key,
+            word,
+            sentence,
+        });
+    }
+    // A name that is written twice asks for nothing more.
+    if !options.option_words.iter().any(|listed| **listed == *word) {
+        options.option_words.push(word.into_boxed_slice());
     }
     Ok(())
 }
 
 fn option_word(key: &str, value: Option<&[u8]>) -> Vec<u8> {
-    if key == "verify-each-pass" {
-        return b"check=verify-each-pass".to_vec();
-    }
     let mut word = key.as_bytes().to_vec();
     if let Some(value) = value {
         word.push(b'=');
@@ -740,14 +731,10 @@ fn suggest(written: &[u8], candidates: &[&'static str]) -> Option<&'static str> 
     best.map(|(candidate, _)| candidate)
 }
 
-fn starts_with_aot(name: &[u8]) -> bool {
-    strings::starts_with_case_insensitive_ascii(name, b"aot")
-}
-
 pub(crate) fn misplaced_key<'a>(key: &'a [u8], is_inside_compile: bool) -> Option<OptionError<'a>> {
     let is_aot_key = COMPILE_AOT_KEYS.iter().any(|known| known.as_bytes() == key);
     if is_inside_compile {
-        (starts_with_aot(key) && !is_aot_key).then(|| OptionError::UnknownCompileKey {
+        (key.starts_with(b"aot") && !is_aot_key).then(|| OptionError::UnknownCompileKey {
             key,
             suggestion: suggest(key, COMPILE_AOT_KEYS),
         })
@@ -876,7 +863,6 @@ fn read_build_flags<'c>(
         is_executable: options.compile,
         aot: is_aot_requested(cmd, args) || no_aot,
         no_aot,
-        logs_type_mismatches: args.flag(b"--aot-log-type-mismatches"),
         explain: args.options(b"--explain").to_vec(),
         has_huge_heap: args.flag(b"--aot-huge-heap"),
         is_in_place: args.flag(b"--compile-in-place"),
@@ -885,6 +871,7 @@ fn read_build_flags<'c>(
         has_external_source_map: args.option(b"--sourcemap") == Some(b"external"),
         admits_inspector: args.flag(b"--compile-inspector"),
         allows_code_from_disk: args.flag(b"--aot-allow-code-from-disk"),
+        checks_types: args.flag(b"--check"),
         trim: TrimFlags {
             removes_unused: args.flag(b"--trim"),
             remove_internal: split_at_commas(args.options(b"--trim-without"))
@@ -900,37 +887,17 @@ fn read_build_flags<'c>(
     }
 }
 
-fn list_and_exit(list: &[u8], origin: RequestOrigin) -> ! {
-    if list != b"registry" {
-        exit_with_error(
-            &OptionError::InvalidValue {
-                option: OptionName::List,
-                value: list,
-            },
-            origin,
-        );
-    }
-    if !engine::has_compiler() {
-        let mut message = Vec::new();
-        CompileFailure::NoCompiler.write_message(origin, &CompileTarget::default(), &mut message);
-        exit_with_message(&message);
-    }
-    let _ = Output::writer().write_all(&report::registry::write());
-    Output::flush();
-    Global::exit(0);
-}
-
 #[cold]
 #[inline(never)]
 pub(crate) fn parse_build_flags(cmd: Tag, args: &clap::Args<clap::Help>, ctx: Context<'_>) {
+    if let Some(executable) = args.option(b"--aot-stored-strings") {
+        print_stored_strings_and_exit(executable);
+    }
     let origin = if cmd == Tag::CompileCommand {
         RequestOrigin::CompileCommand
     } else {
         RequestOrigin::BuildFlag
     };
-    if let Some(list) = args.option(b"--aot-list") {
-        list_and_exit(list, origin);
-    }
     apply_code_generation_flag(args, &mut *ctx, origin);
 
     let settings = match resolve(&read_build_flags(cmd, args, &ctx)) {
@@ -947,9 +914,7 @@ pub(crate) fn parse_build_flags(cmd: Tag, args: &clap::Args<clap::Help>, ctx: Co
 
 /// `bun test --aot` runs compiled code. `bun run --aot` checks the program and runs it from its source.
 fn compiles_before_run(cmd: Tag, args: &clap::Args<clap::Help>) -> bool {
-    args.flag(b"--debug-aot")
-        || args.flag(b"--aot-log-type-mismatches")
-        || (cmd == Tag::TestCommand && args.flag(b"--aot"))
+    args.flag(b"--debug-aot") || (cmd == Tag::TestCommand && args.flag(b"--aot"))
 }
 
 pub(crate) fn checks_before_each_run(cmd: Tag, args: &clap::Args<clap::Help>) -> bool {
@@ -971,7 +936,6 @@ pub(crate) fn parse_runtime_flags(cmd: Tag, args: &clap::Args<clap::Help>, ctx: 
         || args.option(b"--aot-checked").is_some()
         || args.flag(b"--aot")
         || args.flag(b"--debug-aot")
-        || args.flag(b"--aot-log-type-mismatches")
         || args.flag(b"--aot-allow-code-from-disk")
         || args.flag(b"--aot-huge-heap");
     if has_aot_flag {
@@ -997,10 +961,6 @@ fn apply_runtime_flags(cmd: Tag, args: &clap::Args<clap::Help>, ctx: Context<'_>
         run_compiled::use_check_result(check_result);
         return;
     }
-    if let Some(descriptor) = args.option(b"--aot-build-test-part") {
-        run_compiled::use_test_part_descriptor(descriptor);
-    }
-    let reports_type_mismatches = args.flag(b"--aot-log-type-mismatches");
     let has_huge_heap = args.flag(b"--aot-huge-heap");
     let compiles = compiles_before_run(cmd, args);
     if has_huge_heap && !compiles {
@@ -1025,73 +985,46 @@ fn apply_runtime_flags(cmd: Tag, args: &clap::Args<clap::Help>, ctx: Context<'_>
         exit_with_error(&OptionError::BothAotAndNoAot, RequestOrigin::BuildFlag);
     }
     check_runtime_conflicts(&ctx, compiles);
-    if cmd == Tag::TestCommand {
-        run_compiled::note_words_that_name_test_files(
-            args.positionals(),
-            args.options(b"--files-from"),
-        );
-    }
     let test_words = bun_core::env_var::BUN_DEBUG_TEST_AOT_WORDS
         .get_not_empty()
         .filter(|_| compiles && cmd == Tag::TestCommand);
-    let option_words = test_words
+    let words = test_words
         .into_iter()
         .flat_map(|words| strings::split(words, b","));
-    let (part_words, option_words): (Vec<&[u8]>, Vec<&[u8]>) =
-        option_words.partition(|word| word.starts_with(b"TestRun"));
-    let (report_words, mut option_words): (Vec<&[u8]>, Vec<&[u8]>) =
-        (option_words.into_iter()).partition(|word| word.starts_with(b"report"));
-    let is_part_of_test_files = !run_compiled::images_below_test_part().is_empty()
-        && !run_compiled::builds_what_test_parts_share();
-    // The functions of a test file are handed to `test` and `describe`, which call each of them once, and what they call often is in another
-    // program. Ranked among themselves, three quarters of them would count as warm or hot, and their program is built while other tests run.
-    // So they are ranked as those of a very large program are: what has many callers is hot, a loop is warm, the rest is cold.
-    // A layer is a part of the run too: who calls its functions often is in the programs above. A run is cut into layers because it is large, and
-    // an executable of all of it ranks them that way.
-    let is_part_of_run = is_part_of_test_files || run_compiled::builds_what_test_parts_share();
-    if is_part_of_run && !option_words.iter().any(|word| word.starts_with(b"heat=")) {
-        option_words.push(b"heat=ReadOffStructure");
+    // A word that begins with `TestRun` is the test runner's, and `erase-types` and `out=<file>` are the front end's. The others go to the engine, which refuses every word that is not its own.
+    let (words_read_here, engine_words): (Vec<&[u8]>, Vec<&[u8]>) = words.partition(|word| {
+        word.starts_with(b"TestRun")
+            || *word == b"erase-types"
+            || *word == b"FirstTexts"
+            || word.starts_with(b"out=")
+    });
+    if let Some(word) = find_unknown_test_run_word(&words_read_here) {
+        exit_with_unknown_test_run_word(word);
     }
-    let part_limit = |name: &[u8]| {
-        (part_words.iter())
-            .find_map(|word| word.strip_prefix(name))
-            .and_then(|digits| bun_core::fmt::parse_int::<u64>(digits, 10).ok())
-    };
     ctx.bundler_options.aot = Some(Box::new(AotOptions {
-        test_run_part_files: part_limit(b"TestRunPartFiles:").map(|files| files as u32),
-        test_run_is_one_program: part_words.contains(&&b"TestRunLayers:0"[..]),
-        embeds_function_source: !part_words.contains(&&b"TestRunWithoutFunctionSource"[..]),
-        source_that_fits_in_memory: (cmd == Tag::TestCommand && compiles)
-            .then(|| run_compiled::source_that_fits_in_memory(ctx)),
-        is_part_of_test_files,
-        entry_points_run_again: cmd == Tag::TestCommand
-            && ctx.test_options.repeat_count > 1
-            && !run_compiled::builds_what_test_parts_share(),
+        // For a test of what the runner says then. No flag of `bun test` builds a run without the text of its functions.
+        embeds_function_source: !words_read_here.contains(&&b"TestRunWithoutFunctionSource"[..]),
+        erases_types: words_read_here.contains(&&b"erase-types"[..]),
+        takes_first_texts: words_read_here.contains(&&b"FirstTexts"[..]),
+        ir_output_path: (words_read_here.iter())
+            .find_map(|word| word.strip_prefix(b"out="))
+            .map(Box::from),
+        entry_points_run_again: cmd == Tag::TestCommand && ctx.test_options.repeat_count > 1,
         // `VirtualMachine::use_isolation_source_provider_cache()`: there the transpiler hands the loader the record of a module, which says that it is TypeScript.
         typescript_drops_absent_exports: cmd == Tag::TestCommand
             && ctx.test_options.isolate
             && !bun_core::env_var::feature_flag::BUN_FEATURE_FLAG_DISABLE_ISOLATION_SOURCE_CACHE::get()
                 .unwrap_or(false),
-        imports_are_in_other_images: !run_compiled::images_below_test_part().is_empty(),
-        shares_realms: run_compiled::builds_what_test_parts_share()
-            || !run_compiled::images_below_test_part().is_empty(),
         runs_in_several_realms: cmd == Tag::TestCommand && ctx.test_options.isolate,
-        images_below: ImagesBelow {
-            images: run_compiled::images_below_test_part(),
-            holds_module: Some(run_compiled::is_module_below_test_part),
-            wait_for_all: run_compiled::begins_beside_build_below()
-                .then_some(run_compiled::wait_for_program_below),
-        },
-        replaced_by_tests: run_compiled::replaced_below_test_part(),
-        thread_count: run_compiled::threads_of_test_part(),
-        option_words: option_words.into_iter().map(Box::from).collect(),
+        option_words: engine_words.into_iter().map(Box::from).collect(),
         heap: if has_huge_heap {
             HeapSize::Huge
         } else {
             HeapSize::Standard
         },
-        reports_type_mismatches,
         runs_in_place: true,
+        // The process that runs the program gets the words of this one.
+        warns_of_rejections: args.option(b"--unhandled-rejections").is_some(),
         checks_only: !compiles,
         runs_tests: cmd == Tag::TestCommand,
         counts_executions: cmd == Tag::TestCommand && compiles && ctx.test_options.coverage.enabled,
@@ -1101,24 +1034,22 @@ fn apply_runtime_flags(cmd: Tag, args: &clap::Args<clap::Help>, ctx: Context<'_>
         only_tests_load_code_from_disk: !loads_code_from_disk
             && cmd == Tag::TestCommand
             && compiles,
-        is_part_of_test_run: is_part_of_run,
         ..Default::default()
     }));
-    if report_words.is_empty() {
-        return;
-    }
-    bun_removable_features::removable_body!(TestCommand, Abort, {
-        for word in report_words {
-            let (key, value) = match word.strip_prefix(b"report-detail=") {
-                Some(detail) => ("report-detail", detail),
-                None => ("report", word.strip_prefix(b"report=").unwrap_or_default()),
-            };
-            let options = ctx.bundler_options.aot.as_deref_mut().expect("set above");
-            if let Err(error) = apply_developer_word(key, Some(value), options) {
-                exit_with_error(&error, RequestOrigin::BuildFlag);
-            }
-        }
-    });
+}
+
+fn find_unknown_test_run_word<'a>(words: &[&'a [u8]]) -> Option<&'a [u8]> {
+    let mut words = words.iter().copied();
+    words.find(|word| word.starts_with(b"TestRun") && !TEST_RUN_WORDS.contains(word))
+}
+
+fn exit_with_unknown_test_run_word(word: &[u8]) -> ! {
+    let mut message = b"unknown word ".to_vec();
+    message.extend_from_slice(word);
+    message
+        .extend_from_slice(b" in BUN_DEBUG_TEST_AOT_WORDS. The words that start with TestRun are ");
+    message.extend_from_slice(&TEST_RUN_WORDS.join(&b", "[..]));
+    exit_with_message(&message);
 }
 
 fn check_runtime_conflicts(ctx: &Context<'_>, compiles: bool) {
@@ -1143,6 +1074,7 @@ fn check_runtime_conflicts(ctx: &Context<'_>, compiles: bool) {
     }
 }
 
+/// Asked where the build that compiles begins. A page, which `--target=browser` makes of HTML entry points, doesn't come by.
 pub(crate) fn check_build_conflicts(ctx: &Context<'_>, origin: RequestOrigin) {
     let error = if ctx.debug.hot_reload != HotReload::None {
         OptionError::Watch
@@ -1178,6 +1110,7 @@ pub(crate) fn note_options_without_effect(ctx: &Context<'_>) {
             flag
         );
     }
+    // --bytecode without --format means --format=cjs.
     if !options.bytecode && matches!(options.output_format, Format::Cjs | Format::Iife) {
         bun_core::note!(
             "--format has no effect with --aot: each file keeps the module format it is written in"
@@ -1185,10 +1118,11 @@ pub(crate) fn note_options_without_effect(ctx: &Context<'_>) {
     }
 }
 
+/// `--no-aot` is a flag of `bun compile` alone: the other commands meet it among the flags they don't know.
 static WRITES_NO_AOT: AtomicBool = AtomicBool::new(false);
 
 fn unknown_flag_message(group: &FlagGroup, flag: &clap::UnknownLongFlag<'_>) -> Option<Vec<u8>> {
-    if !starts_with_aot(flag.name) {
+    if !flag.name.starts_with(b"aot") {
         return None;
     }
     let mut message = Vec::new();

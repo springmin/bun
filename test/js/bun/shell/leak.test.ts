@@ -1,7 +1,7 @@
 import { $ } from "bun";
 import { heapStats } from "bun:jsc";
 import { describe, expect, test } from "bun:test";
-import { bunEnv, isASAN, isOhos, isPosix, tempDir } from "harness";
+import { bunEnv, isASAN, isPosix, tempDir, withoutAsanQuarantine } from "harness";
 import { join } from "path";
 import { bunExe } from "./test_builder";
 import { createTestBuilder } from "./util";
@@ -104,7 +104,7 @@ describe.concurrent("fd leak", () => {
         console.log("\n\nSTDERR:", stderr);
       }
       expect(exitCode).toBe(0);
-    }, isOhos ? 300_000 : 100_000);
+    }, 100_000);
   }
 
   function memLeakTest(
@@ -155,7 +155,7 @@ describe.concurrent("fd leak", () => {
       });
 
       const { exited, stderr: stream } = Bun.spawn([process.argv0, "--smol", "test", join(dir, "script.ts")], {
-        env: bunEnv,
+        env: withoutAsanQuarantine(bunEnv),
         stderr: "pipe",
       });
       const [exitCode, stderr] = await Promise.all([exited, stream.text()]);
@@ -163,7 +163,7 @@ describe.concurrent("fd leak", () => {
         console.log("\n\nSTDERR:", stderr);
       }
       expect(exitCode).toBe(0);
-    }, isOhos ? 300_000 : 100_000);
+    }, 100_000);
   }
 
   TESTS.forEach(args => {
@@ -253,7 +253,7 @@ describe.concurrent("fd leak", () => {
         }
         expect(exitCode).toBe(0);
       },
-      isOhos ? 300_000 : 100_000,
+      100_000,
     );
   }
 

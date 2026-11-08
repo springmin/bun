@@ -49,9 +49,24 @@ const early = pkg("early", "module", `(globalThis.order ??= []).push("early body
 const late = pkg("late", "module", `globalThis.order.push("late body");`);
 const factory = `() => ({ value: () => "mocked", helper: () => "mocked helper", default: { kind: "mocked default" } })`;
 const reader = (text: string, type: string | null = "module", main?: string) => pkg("reads", type, text, main);
-const testFile = (body: string, api = "vi", head = `import { seen } from "reads";`): Files => ({
-  "a.test.js": `import { test, vi, jest } from "bun:test";\n${head}\n${api}.mock("dep", ${factory});\ntest("t", async () => { ${body} });\n`,
+const testFile = (body: string, api = "vi", head = `import { seen } from "reads";`, mock = factory): Files => ({
+  "a.test.js": `import { test, vi, jest } from "bun:test";\n${head}\n${api}.mock("dep", ${mock});\ntest("t", async () => { ${body} });\n`,
 });
+// It lacks `helper` and `default`, and adds `extra`.
+const otherNames = `() => ({ value: () => "mocked", extra: 1 })`;
+const lateFactory = `async () => { await new Promise(done => setTimeout(done, 5)); return { value: () => "mocked", extra: 1 }; }`;
+const importer = `export const seen = () => import("dep");`;
+const catching = `export const seen = () => import("dep").then(d => d.value(), e => "caught " + e.message);`;
+const countedValueDep = pkg(
+  "dep",
+  "module",
+  `globalThis.ran = (globalThis.ran ?? 0) + 1;\nconsole.log("SAID the body runs " + globalThis.ran);\nexport const helper = () => "real helper";\nexport const value = () => "real+" + helper();\n`,
+);
+const countedAwaitingDep = pkg(
+  "dep",
+  "module",
+  `globalThis.ran = (globalThis.ran ?? 0) + 1;\nconsole.log("SAID the body runs " + globalThis.ran);\nawait new Promise(done => setTimeout(done, 5));\nexport const value = () => "real";\n`,
+);
 const say = `console.log("SAID " + (await seen()));`;
 const sayBoth = `console.log("SAID package " + seen() + " | test " + value());`;
 const forms = {
@@ -71,7 +86,6 @@ const saidByForm: Record<keyof typeof forms, string> = {
   "import() in the package": "real+real helper",
 };
 
-// TODO(bun): `differs`: compiled code hands the package the mock where the package calls import(), and where what it imports is a CommonJS file. Each goes red once it agrees.
 const cases: Record<
   string,
   { files: Files; said: string[]; exitCode?: number; differs?: boolean; words?: string; staysCompiled?: boolean }
@@ -84,7 +98,6 @@ for (const [dep, files] of [
     cases[`${form} of ${dep}`] = {
       files: { ...files, ...reader(forms[form]), ...testFile(say) },
       said: ["SAID " + saidByForm[form]],
-      differs: files === commonJSDep || form === "import() in the package",
     };
 }
 const mockedByForm: Record<keyof typeof forms, string> = {
@@ -150,7 +163,6 @@ Object.assign(cases, {
   "import() twice": {
     files: { ...moduleDep, ...reader(forms["import() in the package"]), ...testFile(say + " " + say) },
     said: ["SAID real+real helper", "SAID real+real helper"],
-    differs: true,
   },
   "the package and the test file each have their own": {
     files: {
@@ -235,7 +247,6 @@ Object.assign(cases, {
   "the original awaits at top level, behind import()": {
     files: { ...awaitingDep, ...reader(forms["import() in the package"]), ...testFile(say) },
     said: ["SAID real+real helper late"],
-    differs: true,
   },
   "the original has an import of its own": {
     files: {
@@ -283,10 +294,10 @@ Object.assign(cases, {
       "a.test.js": `import { test, vi } from "bun:test";\nimport { seen } from "reads";\nglobalThis.order = [];\nvi.mock("dep", ${factory});\ntest("t", async () => { const a = seen(); const b = (await import("dep")).value(); vi.doUnmock("dep"); const c = (await import("dep")).value(); console.log("SAID " + [a, b, c, seen(), globalThis.order].join(" | ")); });\n`,
     },
     said: ["SAID real+real helper | mocked | real+real helper | real+real helper | "],
-    words: "TestRunLayers:2",
+    words: "TestRunLayers:0",
   },
   ...Object.fromEntries(
-    ["TestRunLayers:0", "TestRunLayers:2"].map(words => [
+    ["TestRunLayers:0"].map(words => [
       `the original that a factory took is the package in the next test file, ${words}`,
       {
         files: {
@@ -333,7 +344,189 @@ Object.assign(cases, {
       "z.test.js": nextTestFile,
     },
     said: ["SAID the body runs 1", "SAID a real1,,true", "SAID z real,function,1,0"],
-    words: "TestRunLayers:2",
+    words: "TestRunLayers:0",
+  },
+  "import(): the names are the module's own": {
+    files: {
+      ...moduleDep,
+      ...reader(
+        `export const seen = async () => { const o = await import("dep"); return o.value() + "|" + Object.keys(o).sort(); };`,
+      ),
+      ...testFile(say, "vi", undefined, otherNames),
+    },
+    said: ["SAID real+real helper|default,helper,value"],
+  },
+  "import() by the package and by the test file in one turn": {
+    files: {
+      ...moduleDep,
+      ...reader(importer),
+      ...testFile(
+        `const [a, b, c] = await Promise.all([seen(), import("dep"), seen()]); console.log("SAID " + [a.value(), b.value(), c.value(), a === c, a === b]);`,
+        "vi",
+        undefined,
+        otherNames,
+      ),
+    },
+    said: ["SAID real+real helper,mocked,real+real helper,true,false"],
+    words: "TestRunLayers:0",
+  },
+  "import() by the package and by the test file in one turn, over layers": {
+    files: {
+      ...moduleDep,
+      ...reader(importer),
+      ...testFile(
+        `const [a, b, c] = await Promise.all([seen(), import("dep"), seen()]); console.log("SAID " + [a.value(), b.value(), c.value(), a === c, a === b]);`,
+        "vi",
+        undefined,
+        otherNames,
+      ),
+    },
+    said: ["SAID real+real helper,mocked,real+real helper,true,false"],
+    words: "TestRunLayers:0",
+  },
+  "import() behind the test file's own": {
+    files: {
+      ...moduleDep,
+      ...reader(importer),
+      ...testFile(
+        `const t = await import("dep"); const p = await seen(); const t2 = await import("dep"); console.log("SAID " + [t.value(), p.value(), t2.value(), t === t2, p === t]);`,
+        "vi",
+        undefined,
+        otherNames,
+      ),
+    },
+    said: ["SAID mocked,real+real helper,mocked,true,false"],
+    words: "TestRunLayers:0",
+  },
+  "import() behind the test file's own, over layers": {
+    files: {
+      ...moduleDep,
+      ...reader(importer),
+      ...testFile(
+        `const t = await import("dep"); const p = await seen(); const t2 = await import("dep"); console.log("SAID " + [t.value(), p.value(), t2.value(), t === t2, p === t]);`,
+        "vi",
+        undefined,
+        otherNames,
+      ),
+    },
+    said: ["SAID mocked,real+real helper,mocked,true,false"],
+    words: "TestRunLayers:0",
+  },
+  "import(): the body runs behind the call": {
+    files: {
+      ...moduleDep,
+      ...reader(
+        `export const seen = () => { globalThis.order.push("call"); const p = import("dep"); globalThis.order.push("behind the call"); return p; };`,
+      ),
+      ...testFile(
+        `globalThis.order = []; const d = await seen(); console.log("SAID " + d.value() + " | " + globalThis.order);`,
+      ),
+    },
+    said: ["SAID real+real helper | call,behind the call,dep body"],
+  },
+  "import(), then a test file that mocks nothing": {
+    files: {
+      ...moduleDep,
+      ...reader(importer),
+      ...testFile(`console.log("SAID a " + (await seen()).value());`),
+      "z.test.js": `import { test } from "bun:test";\nimport * as d from "dep";\nimport { seen } from "reads";\ntest("z", async () => console.log("SAID z " + [d.value(), (await seen()).value(), (await seen()) === d]));\n`,
+    },
+    said: ["SAID a real+real helper", "SAID z real+real helper,real+real helper,true"],
+  },
+  "import() under a factory that comes late": {
+    files: {
+      ...moduleDep,
+      ...reader(forms["import() in the package"]),
+      ...testFile(say, "vi", undefined, lateFactory),
+    },
+    said: ["SAID real+real helper"],
+  },
+  "a statement under a factory that comes late": {
+    files: {
+      ...moduleDep,
+      ...reader(forms["a name"]),
+      ...testFile(
+        `console.log("SAID " + [seen(), value()]);`,
+        "vi",
+        `import { seen } from "reads";\nimport { value } from "dep";`,
+        lateFactory,
+      ),
+    },
+    said: ["SAID real+real helper,mocked"],
+  },
+  "import(): the original's body throws": {
+    files: { ...throwingDep, ...reader(catching), ...testFile(say + " " + say) },
+    said: ["SAID caught the body of dep throws", "SAID caught the body of dep throws"],
+  },
+  "two import()s at once of an original that awaits": {
+    files: {
+      ...countedAwaitingDep,
+      ...reader(importer),
+      ...testFile(
+        `const [a, b] = await Promise.all([seen(), seen()]); console.log("SAID " + [a.value(), b.value(), a === b]);`,
+      ),
+    },
+    said: ["SAID the body runs 1", "SAID real,real,true"],
+  },
+  "a statement and an import() of an original that awaits": {
+    files: {
+      ...countedAwaitingDep,
+      ...reader(
+        `import { value } from "dep";\nexport const seen = async () => [value(), (await import("dep")).value()];`,
+      ),
+      ...testFile(say),
+    },
+    said: ["SAID the body runs 1", "SAID real,real"],
+  },
+  "a CommonJS file of a package calls import()": {
+    files: {
+      ...moduleDep,
+      ...reader(`exports.seen = async () => (await import("dep")).value();`, null),
+      ...testFile(say),
+    },
+    said: ["SAID real+real helper"],
+  },
+  "a second mock over the first": {
+    files: {
+      ...countedValueDep,
+      ...reader(forms["a name"]),
+      ...testFile(
+        `console.log("SAID " + seen()); vi.doMock("dep", () => ({ value: () => "second" })); console.log("SAID " + [seen(), (await import("dep")).value(), seen()]);`,
+      ),
+    },
+    said: ["SAID the body runs 1", "SAID real+real helper", "SAID real+real helper,second,real+real helper"],
+  },
+  "vi.resetModules() while the mock stands": {
+    files: {
+      ...countedValueDep,
+      ...reader(forms["a name"]),
+      ...testFile(
+        `console.log("SAID " + seen()); vi.resetModules(); const again = await import("reads"); console.log("SAID " + [seen(), again.seen(), again.seen === seen, (await import("dep")).value()]);`,
+      ),
+    },
+    said: ["SAID the body runs 1", "SAID real+real helper", "SAID real+real helper,real+real helper,true,mocked"],
+  },
+  "a file of the project reads a package that an earlier test file loaded, over layers: an ES module": {
+    files: {
+      ...pkg("dep", "module", `export const flag = "real";\n`),
+      "user.js": `import { flag } from "dep";\nexport const read = () => flag;\n`,
+      "a.test.js": `import { test } from "bun:test";\nimport { read } from "./user.js";\ntest("a", () => console.log("SAID a " + read()));\n`,
+      "b.test.js": `import { test, vi } from "bun:test";\nimport { read } from "./user.js";\nvi.mock("dep", () => ({ flag: "mock" }));\ntest("b", () => console.log("SAID b " + read()));\n`,
+      "c.test.js": `import { test } from "bun:test";\nimport { read } from "./user.js";\ntest("c", () => console.log("SAID c " + read()));\n`,
+    },
+    said: ["SAID a real", "SAID b mock", "SAID c real"],
+    words: "TestRunLayers:0",
+  },
+  "a file of the project reads a package that an earlier test file loaded, over layers: a CommonJS file": {
+    files: {
+      ...pkg("dep", null, `exports.flag = "real";\n`),
+      "user.js": `import { flag } from "dep";\nexport const read = () => flag;\n`,
+      "a.test.js": `import { test } from "bun:test";\nimport { read } from "./user.js";\ntest("a", () => console.log("SAID a " + read()));\n`,
+      "b.test.js": `import { test, vi } from "bun:test";\nimport { read } from "./user.js";\nvi.mock("dep", () => ({ flag: "mock" }));\ntest("b", () => console.log("SAID b " + read()));\n`,
+      "c.test.js": `import { test } from "bun:test";\nimport { read } from "./user.js";\ntest("c", () => console.log("SAID c " + read()));\n`,
+    },
+    said: ["SAID a real", "SAID b mock", "SAID c real"],
+    words: "TestRunLayers:0",
   },
   "the original's body throws": {
     files: { ...throwingDep, ...reader(forms["a name"]), ...testFile(say) },
@@ -342,7 +535,42 @@ Object.assign(cases, {
   },
 });
 
-for (const [name, { files, said, exitCode = 0, differs, words = "", staysCompiled }] of Object.entries(cases)) {
+type Case = (typeof cases)[string];
+// A case of one test file that passes runs beside the others, in one run of each kind: in a folder of its own with its packages below it, and in a realm of its own.
+const runsBesideOthers = ({ files, exitCode, words, staysCompiled }: Case) =>
+  !exitCode && !words && !staysCompiled && Object.keys(files).filter(path => path.endsWith(".test.js")).length === 1;
+const beside = Object.entries(cases).filter(([, one]) => runsBesideOthers(one));
+const idOf = (index: number) => `c${String(index).padStart(2, "0")}`;
+let runs: Promise<{ plain: Map<string, string[]>; compiled: Map<string, string[]> }> | undefined;
+const runAllBesideEachOther = () =>
+  (runs ??= (async () => {
+    const all: Files = { "package.json": `{ "type": "module" }` };
+    beside.forEach(([, { files }], index) => {
+      for (const [path, text] of Object.entries(files))
+        all[`${idOf(index)}/${path}`] = text.replaceAll("SAID ", `SAID ${idOf(index)} `);
+    });
+    using dir = tempDir("aot-mock-package-import", all);
+    const saidWith = async (...flags: string[]) => {
+      const { stdout, stderr } = await run([bunExe(), "test", "--isolate", ...flags], String(dir), bunEnv);
+      const said = new Map<string, string[]>();
+      for (const [, id, text] of (stdout + "\n" + stderr).matchAll(/^SAID (c\d+) (.*)$/gm))
+        said.set(id, [...(said.get(id) ?? []), "SAID " + text]);
+      return said;
+    };
+    return { plain: await saidWith(), compiled: await saidWith("--aot") };
+  })());
+beside.forEach(([name, { said, differs }], index) => {
+  test(name, async () => {
+    const { plain, compiled } = await runAllBesideEachOther();
+    expect(plain.get(idOf(index)) ?? []).toEqual(said);
+    if (differs) expect(compiled.get(idOf(index)) ?? []).not.toEqual(said);
+    else expect(compiled.get(idOf(index)) ?? []).toEqual(said);
+  });
+});
+
+for (const [name, one] of Object.entries(cases)) {
+  if (runsBesideOthers(one)) continue;
+  const { files, said, exitCode = 0, differs, words = "", staysCompiled } = one;
   test(name, async () => {
     using dir = tempDir("aot-mock-package-import", { "package.json": `{ "type": "module" }`, ...files });
     const texts: string[] = [];

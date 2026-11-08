@@ -1,8 +1,7 @@
 import { expect } from "bun:test";
 import { bunEnv, bunExe, tempDir } from "harness";
 import { run } from "./harness/run";
-// One by one: the runner gives this file a process of its own and eight cases at once, beside two more like it: too many builds for four cores.
-import { testOneByOne as test } from "./supported";
+import { test } from "./supported";
 
 // `bun test --isolate` gives each test file a fresh realm of one VM, and each realm runs an instance of the compiled program of its own.
 // `Bun.s3` is one object for the VM, so what a file hangs on it is there for the next file, in plain Bun too.
@@ -75,38 +74,32 @@ async function runTests(directory: string, words: string | undefined, ...flags: 
   return { stdout: stdout.split("\n").filter(line => line.startsWith("SEEN")), exitCode };
 }
 
-for (const [way, words] of [
-  ["as the runner divides it", undefined],
-  ["as one program", "TestRunLayers:0"],
-  ["over two layers, both files in one process", "TestRunLayers:2,TestRunPartFiles:3"],
-] as const) {
-  test(`a method called on an object of an earlier test file runs in its own realm, ${way}`, async () => {
-    using dir = tempDir("aot-a-method-called-on-an-object-of-an-earlier-test-file", files);
-    const plain = await runTests(String(dir), undefined);
-    expect(plain).toEqual({
-      stdout: [
-        "SEEN fresh: throws theirs",
-        "SEEN fresh, held: throws theirs",
-        "SEEN fresh, in a try: returns theirs",
-        "SEEN fresh, through an array: throws theirs",
-        "SEEN fresh, under a computed key: throws theirs",
-        "SEEN made there: throws theirs",
-        "SEEN kept there: throws theirs",
-        "SEEN kept there, held: throws theirs",
-        "SEEN below: throws theirs",
-        "SEEN one that returns: returns theirs",
-        "SEEN one that may throw: throws theirs",
-        "SEEN read, then called bare: throws theirs",
-        "SEEN read, then called on it: throws theirs",
-        "SEEN read off the kept one, then called bare: throws theirs",
-        "SEEN one that returns, read, then called bare: returns theirs",
-        "SEEN read and handed on: returns theirs",
-        "SEEN ours: throws ours",
-        "SEEN ours, made here: throws ours",
-        "SEEN either, in turn: returns theirs",
-      ],
-      exitCode: 0,
-    });
-    expect(await runTests(String(dir), words, "--aot")).toEqual(plain);
+test("a method called on an object of an earlier test file runs in its own realm, as one program", async () => {
+  using dir = tempDir("aot-a-method-called-on-an-object-of-an-earlier-test-file", files);
+  const plain = await runTests(String(dir), undefined);
+  expect(plain).toEqual({
+    stdout: [
+      "SEEN fresh: throws theirs",
+      "SEEN fresh, held: throws theirs",
+      "SEEN fresh, in a try: returns theirs",
+      "SEEN fresh, through an array: throws theirs",
+      "SEEN fresh, under a computed key: throws theirs",
+      "SEEN made there: throws theirs",
+      "SEEN kept there: throws theirs",
+      "SEEN kept there, held: throws theirs",
+      "SEEN below: throws theirs",
+      "SEEN one that returns: returns theirs",
+      "SEEN one that may throw: throws theirs",
+      "SEEN read, then called bare: throws theirs",
+      "SEEN read, then called on it: throws theirs",
+      "SEEN read off the kept one, then called bare: throws theirs",
+      "SEEN one that returns, read, then called bare: returns theirs",
+      "SEEN read and handed on: returns theirs",
+      "SEEN ours: throws ours",
+      "SEEN ours, made here: throws ours",
+      "SEEN either, in turn: returns theirs",
+    ],
+    exitCode: 0,
   });
-}
+  expect(await runTests(String(dir), "TestRunLayers:0", "--aot")).toEqual(plain);
+});

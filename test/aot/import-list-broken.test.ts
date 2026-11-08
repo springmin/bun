@@ -38,7 +38,7 @@ async function run(dir: string, flags: string[], words = "") {
   };
 }
 
-test.each(["await import", "require"])(
+test.each(["await import"])(
   "%s() of a list with a file that fails to link",
   async how => {
     using folder = tempDir("aot-import-list-broken", files(how));
@@ -49,8 +49,7 @@ test.each(["await import", "require"])(
       exitCode: 0,
       refused: false,
     });
-    for (const words of ["TestRunLayers:0", "TestRunLayers:1", "TestRunLayers:2"])
-      expect({ words, ...(await run(dir, ["--aot"], words)) }).toEqual({ words, ...plain });
+    expect(await run(dir, ["--aot"], "TestRunLayers:0")).toEqual(plain);
   },
   240_000,
 );

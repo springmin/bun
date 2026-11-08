@@ -165,31 +165,79 @@ test.concurrent.each(Object.entries(forms))(
   600_000,
 );
 
-const testFile = (entry: string) => `import { test } from "bun:test";
+const testFile = (entry: string, folder = "") => `import { test } from "bun:test";
 test("loads", async () => {
+  ${folder && `console.log("# ${folder}");`}
   await import("./${entry}");
 });
 `;
 
-for (const [way, words] of [
-  ["as one program", "TestRunLayers:0"],
-  ["over two layers", "TestRunLayers:2,TestRunPartFiles:1"],
-]) {
-  test.concurrent.each(Object.entries(forms))(
-    `a test run ${way}: %s`,
-    async (_, { files }) => {
-      using dir = tempDir("aot-cjs-order-test-run", { ...files, "order.test.mjs": testFile(Object.keys(files)[0]) });
-      const plain = await run([bunExe(), "test"], String(dir));
-      const compiled = await run([bunExe(), "test", "--aot"], String(dir), {
-        ...bunEnv,
-        BUN_DEBUG_TEST_AOT_WORDS: words,
-      });
-      if (compiled.exitCode !== 0) console.error(compiled.stderr);
-      expect({ lines: linesOf(compiled.stdout), exitCode: compiled.exitCode }).toEqual({
-        lines: withoutSecondRuns(linesOf(plain.stdout)),
-        exitCode: plain.exitCode,
-      });
+test.concurrent.each(Object.entries(forms))(
+  "a test run as one program: %s",
+  async (_, { files }) => {
+    using dir = tempDir("aot-cjs-order-test-run", { ...files, "order.test.mjs": testFile(Object.keys(files)[0]) });
+    const plain = await run([bunExe(), "test"], String(dir));
+    const compiled = await run([bunExe(), "test", "--aot"], String(dir), {
+      ...bunEnv,
+      BUN_DEBUG_TEST_AOT_WORDS: "TestRunLayers:0",
+    });
+    if (compiled.exitCode !== 0) console.error(compiled.stderr);
+    expect({ lines: linesOf(compiled.stdout), exitCode: compiled.exitCode }).toEqual({
+      lines: withoutSecondRuns(linesOf(plain.stdout)),
+      exitCode: plain.exitCode,
+    });
+  },
+  600_000,
+);
+
+// Over layers the forms share one run, as the test files of a project do: each lies in a folder of its own with a test file of its own, `--isolate` gives every test file a realm, and
+// a line in front says whose lines follow. A layer has an entry point for each file that the test files above it name, and the first of them is not like the others: such a file
+// used to run ahead of its turn below every test file but the first, which a run of one test file cannot show. As one program each form runs alone: of eight forms that another fault
+// turned there, a run that they shared showed one.
+const columns = Object.entries(forms).map(([name, { files }], index) => ({
+  name,
+  files,
+  folder: `c${`${index + 1}`.padStart(2, "0")}`,
+}));
+const together = Object.fromEntries(
+  columns.flatMap(({ folder, files }) => [
+    ...Object.entries(files).map(([path, text]) => [`${folder}/${path}`, text]),
+    [`${folder}/order.test.mjs`, testFile(Object.keys(files)[0], folder)],
+  ]),
+);
+
+const runs = new Map<string, Promise<{ linesIn: Map<string, string[]>; stderr: string; exitCode: number }>>();
+const ranTogether = (...flags: string[]) =>
+  runs.getOrInsertComputed(flags.join(" "), async () => {
+    using dir = tempDir("aot-cjs-order-together", together);
+    const env = { ...bunEnv, BUN_DEBUG_TEST_AOT_WORDS: "TestRunLayers:0" };
+    const { stdout, stderr, exitCode } = await run([bunExe(), "test", "--isolate", ...flags], String(dir), env);
+    const linesIn = new Map<string, string[]>();
+    let lines: string[] = [];
+    for (const line of linesOf(stdout))
+      if (line.startsWith("# ")) linesIn.set(line.slice(2), (lines = []));
+      else lines.push(line);
+    return { linesIn, stderr, exitCode };
+  });
+
+test.concurrent(
+  "a test run over two layers: the run of all forms ends as under bun test",
+  async () => {
+    const [plain, compiled] = await Promise.all([ranTogether(), ranTogether("--aot")]);
+    if (compiled.exitCode !== 0) console.error(compiled.stderr);
+    expect({ folders: [...compiled.linesIn.keys()], exitCode: compiled.exitCode }).toEqual({
+      folders: columns.map(({ folder }) => folder),
+      exitCode: plain.exitCode,
+    });
+  },
+  600_000,
+);
+for (const { name, folder } of columns)
+  test.concurrent(
+    `a test run over two layers: ${name}`,
+    async () => {
+      const [plain, compiled] = await Promise.all([ranTogether(), ranTogether("--aot")]);
+      expect(compiled.linesIn.get(folder)).toEqual(withoutSecondRuns(plain.linesIn.get(folder)!));
     },
     600_000,
   );
-}

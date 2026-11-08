@@ -1,8 +1,7 @@
-// In a very large program a function is compiled as hot code only if at least four functions call it, and a generated
-// program calls its functions from the top of the file alone. Here the statements at the top that do the work stand in
-// four functions with the same body, each called twice out of a loop at the top. Declarations stay where they were, and
-// so do the variables that they name. Built with --aot-limit=MaxWarmCodeValues:1 (the mode "large") the program is then
-// compiled as the hot part of a very large one. It prints more than before; it is compared with the same text run plainly.
+// A generated program calls its functions from the top of the file alone, which runs once. Here the statements at the
+// top that do the work stand in four functions with the same body, each called twice out of a loop at the top: nothing
+// that they do is done only once, and what they call has four callers. Declarations stay where they were, and so do the
+// variables that they name. The program prints more than before; it is compared with the same text run plainly.
 import ts from "typescript";
 
 const isBroken = (source: ts.SourceFile) =>
@@ -31,7 +30,7 @@ function isDeclaration(statement: ts.Statement): boolean {
   );
 }
 
-/** Whether the statement itself waits: a function that can suspend does not count as a caller. */
+/** Whether the statement itself waits: none of the four functions can suspend, so it stays at the top. */
 function awaits(node: ts.Node): boolean {
   if (ts.isFunctionLike(node) || ts.isClassLike(node)) return false;
   if (ts.isAwaitExpression(node) || (ts.isForOfStatement(node) && !!node.awaitModifier)) return true;

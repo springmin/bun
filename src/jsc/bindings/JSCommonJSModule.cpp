@@ -425,7 +425,7 @@ JSC_DEFINE_HOST_FUNCTION(jsFunctionEvaluateCommonJSModule, (JSGlobalObject * lex
 
     JSValue returnValue = jsNull();
     // See requireCompiledModule().
-    if (referrer && moduleObject->compiledModule == JSCommonJSModule::noCompiledModule) [[likely]] {
+    if (referrer && moduleObject->compiledModule == JSCommonJSModule::noCompiledModule && referrer->listsAsChild(moduleObject)) [[likely]] {
         if (referrer->m_childrenValue) [[unlikely]] {
             // It's too hard to append from native code:
             // referrer.children.indexOf(moduleObject) === -1 && referrer.children.push(moduleObject)
@@ -751,13 +751,14 @@ JSC_DEFINE_CUSTOM_SETTER(setterChildren,
     if (!thisObject)
         return false;
 #if ENABLE(AOT)
-    if (thisObject->compiledModule != JSCommonJSModule::noCompiledModule) [[unlikely]]
+    if (thisObject->areChildrenListedByEngine()) [[unlikely]]
         Bun::dropNewChildrenOfCompiledModule(thisObject);
 #endif
     {
         WTF::Locker locker { thisObject->cellLock() };
         thisObject->m_children.clear();
     }
+    thisObject->forgetCompiledModulesAmongChildren();
     thisObject->m_childrenValue.set(globalObject->vm(), thisObject, JSValue::decode(value));
     return true;
 }
@@ -770,7 +771,7 @@ JSC_DEFINE_CUSTOM_GETTER(getterChildren, (JSC::JSGlobalObject * globalObject, JS
     }
 
     auto throwScope = DECLARE_THROW_SCOPE(globalObject->vm());
-    if (mod->compiledModule != JSCommonJSModule::noCompiledModule) [[unlikely]] {
+    if (mod->areChildrenListedByEngine()) [[unlikely]] {
         bool areShown = Bun::appendNewChildrenOfCompiledModule(globalObject, mod);
         RETURN_IF_EXCEPTION(throwScope, {});
         if (!areShown)
@@ -1176,8 +1177,53 @@ void JSCommonJSModule::destroy(JSC::JSCell* cell)
     static_cast<JSCommonJSModule*>(cell)->JSCommonJSModule::~JSCommonJSModule();
 }
 
+struct RecordBesideModuleObject {
+    uint32_t compiledModuleThatAsks { JSCommonJSModule::noCompiledModule };
+    WTF::HashSet<uint32_t, WTF::IntHash<uint32_t>, WTF::UnsignedWithZeroKeyHashTraits<uint32_t>> compiledModulesAmongChildren;
+};
+
+static WTF::Lock recordsBesideModuleObjectsLock;
+
+static WTF::HashMap<const JSCommonJSModule*, RecordBesideModuleObject>& recordsBesideModuleObjects() WTF_REQUIRES_LOCK(recordsBesideModuleObjectsLock)
+{
+    static NeverDestroyed<WTF::HashMap<const JSCommonJSModule*, RecordBesideModuleObject>> records;
+    return records;
+}
+
+uint32_t JSCommonJSModule::compiledModuleThatAsksByRecord() const
+{
+    WTF::Locker locker { recordsBesideModuleObjectsLock };
+    return recordsBesideModuleObjects().find(this)->value.compiledModuleThatAsks;
+}
+
+void JSCommonJSModule::setCompiledModuleThatAsks(uint32_t module)
+{
+    WTF::Locker locker { recordsBesideModuleObjectsLock };
+    hasRecordBesideCell = true;
+    recordsBesideModuleObjects().ensure(this, [] { return RecordBesideModuleObject {}; }).iterator->value.compiledModuleThatAsks = module;
+}
+
+bool JSCommonJSModule::listsCompiledModuleAsChild(uint32_t module)
+{
+    WTF::Locker locker { recordsBesideModuleObjectsLock };
+    hasRecordBesideCell = true;
+    return recordsBesideModuleObjects().ensure(this, [] { return RecordBesideModuleObject {}; }).iterator->value.compiledModulesAmongChildren.add(module).isNewEntry;
+}
+
+void JSCommonJSModule::forgetCompiledModulesAmongChildren()
+{
+    if (!hasRecordBesideCell) [[likely]]
+        return;
+    WTF::Locker locker { recordsBesideModuleObjectsLock };
+    recordsBesideModuleObjects().find(this)->value.compiledModulesAmongChildren.clear();
+}
+
 JSCommonJSModule::~JSCommonJSModule()
 {
+    if (!hasRecordBesideCell) [[likely]]
+        return;
+    WTF::Locker locker { recordsBesideModuleObjectsLock };
+    recordsBesideModuleObjects().remove(this);
 }
 
 void populateESMExports(
@@ -1536,6 +1582,8 @@ JSC_DEFINE_HOST_FUNCTION(jsFunctionRequireCommonJS, (JSGlobalObject * lexicalGlo
 
     // An ES module of an executable runs here. A stack that is taken meanwhile lists the function that loads an ES module from disk.
     if (Bun::hasCompiledModules() && !child->moduleGraph()) [[unlikely]] {
+        String pathOfAsker = Bun::pathOfRequirer(child, referrer);
+        JSC::AOT::AskerOfModule asker(globalObject, pathOfAsker);
         JSObject* loader = Bun::loaderOfCompiledESModule(globalObject, specifier, !typeAttribute.isEmpty());
         REQUIRE_CJS_RETURN_IF_EXCEPTION;
         if (loader)

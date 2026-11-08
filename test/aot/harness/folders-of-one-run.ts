@@ -6,7 +6,7 @@ import { runsWholeGrids } from "./ways";
  * for all of them. Each folder has its own files and packages, and `--isolate` gives each test file a realm of its own. Two things cross. What a build finds in one program
  * holds for the whole program: projects whose packages differ in what the build has to find are told apart only alone. And under plain Bun a handler in Module._extensions
  * outlives its realm: a test file puts back what it replaced.
- * AOT_WHOLE_GRIDS=1, or `alone`: the project by itself.
+ * AOT_WHOLE=1, or `alone`: the project by itself.
  */
 export function foldersOfOneRun(name: string, projects: Record<string, Record<string, string>>) {
   const names = Object.keys(projects);

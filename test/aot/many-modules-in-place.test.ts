@@ -1,10 +1,8 @@
 // The project is built at half its size and at its whole size, and the instructions of the two builds are compared, so the answer is the same on a busy machine.
-import { expect } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { bunExe, isASAN, isDebug, tempDir } from "harness";
 import { countsInstructions, measureCommand } from "./analysis-scaling/measure-check";
 import { raiseDefaultTimeout } from "./harness/default-timeout";
-import { waysFor } from "./harness/ways";
-import { afterAll, beforeAll, describe, test } from "./listed";
 
 raiseDefaultTimeout(120_000);
 
@@ -58,18 +56,17 @@ describe.skipIf(isDebug || isASAN)(
       expect(plain.map(lines => lines.length)).toEqual(sizes.map(() => 1));
     });
 
-    // `bun test` takes the two flags for one: the same build again.
-    test.each([...waysFor(["--aot", "--debug-aot"], false)])("%s", async flag => {
+    test("--aot", async () => {
       const counted: (number | undefined)[] = [];
       for (const [index, folder] of folders.entries()) {
-        const compiled = await seen(String(folder), ["test", flag, "./main.test.ts"]);
+        const compiled = await seen(String(folder), ["test", "--aot", "./main.test.ts"]);
         expect({ modules: sizes[index], seen: compiled.seen }).toEqual({ modules: sizes[index], seen: plain[index] });
         counted.push(compiled.instructions);
       }
       const [half, whole] = counted;
       if (half === undefined || whole === undefined) return;
       const told = `${sizes[0]} modules take ${half} instructions, ${sizes[1]} modules take ${(whole / half).toFixed(2)} times as many`;
-      console.log(`GROWTH ${flag}: ${told}`);
+      console.log(`GROWTH --aot: ${told}`);
       expect(whole / half < mostGrowth ? "" : told).toBe("");
     });
   },

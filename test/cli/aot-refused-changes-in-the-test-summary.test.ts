@@ -1,8 +1,7 @@
-import { expect } from "bun:test";
+import { expect, test } from "bun:test";
 import { bunEnv, bunExe, tempDir } from "harness";
 import { unsupported } from "../aot/harness/commands";
 import { run } from "../aot/harness/run";
-import { test } from "../aot/listed";
 
 // A test run opens what it sees a test replace: test/aot/tests-replace-members-of-built-ins.test.ts. What the language reads by itself stays read-only.
 const files = {
@@ -55,9 +54,16 @@ async function bunTest(cwd: string, ...flags: string[]) {
   return { output: stdout + stderr, exitCode };
 }
 
+// One run for each list of flags: what the build warns of and what the run lists at its end are read off the same output.
+const runs = new Map<string, ReturnType<typeof bunTest>>();
+const compiledRun = (...flags: string[]) =>
+  runs.getOrInsertComputed(flags.join(" "), async () => {
+    using dir = tempDir("aot-refused-changes", files);
+    return await bunTest(String(dir), "--aot", ...flags);
+  });
+
 test.skipIf(!!unsupported)("bun test --aot warns of every write to a read-only built-in when it builds", async () => {
-  using dir = tempDir("aot-refused-changes", files);
-  const { output, exitCode } = await bunTest(String(dir), "--aot");
+  const { output, exitCode } = await compiledRun();
   const lines = output.split("\n");
   const places = lines.flatMap((line, index) =>
     line.startsWith("warn: TS100014: this assignment throws if it runs")
@@ -81,8 +87,7 @@ test.skipIf(!!unsupported).each([
 ])(
   "bun test --aot names every refused change to a read-only built-in, where it was made and which file ran, %s",
   async (_, flags) => {
-    using dir = tempDir("aot-refused-changes", files);
-    const { output, exitCode } = await bunTest(String(dir), "--aot", ...flags);
+    const { output, exitCode } = await compiledRun(...flags);
     const lines = output.split("\n");
     const heading = lines.findIndex(line => line.includes("read-only built-ins"));
     expect(lines[heading]).toBe(

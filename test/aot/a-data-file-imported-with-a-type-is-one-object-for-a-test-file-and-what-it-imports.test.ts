@@ -68,7 +68,7 @@ test.concurrent(
     const { "a.test.ts": _, ...withoutPlugin } = files;
     using dir = tempDir("one-object-of-a-typed-data-file-layers", withoutPlugin);
     expect(await runTests(String(dir), ["--isolate"])).toEqual({ printed, exitCode: 0 });
-    const words = "TestRunLayers:2,TestRunPartFiles:1";
+    const words = "TestRunLayers:0";
     expect(await runTests(String(dir), ["--aot", "--isolate"], words)).toEqual({ printed, exitCode: 0 });
   },
   240_000,
@@ -91,8 +91,8 @@ const twoTypes = {
     import { held } from "./below.mjs";
     console.log("text alone:", typeof held);`),
 };
-// TODO: as one program the statement of below.mjs is bound to one form for all the test files: "toml first: string string true".
-for (const [form, words] of [["over two layers", "TestRunLayers:2,TestRunPartFiles:1"]] as const)
+// So the loader of the run time links every statement that asks for such a file: parallel-test-runs/types-of-one-file-that-test-files-ask-for.
+for (const [form, words] of [["over two layers", "TestRunLayers:0"]] as const)
   test.concurrent(
     `two test files ask for two types of one file, ${form}`,
     async () => {
@@ -137,10 +137,7 @@ const exported = passedOn(`
   export { default as near } from "./depth.toml" with { type: "yaml" };
   export { default as text } from "./other.toml" with { type: "text" };
   export * as all from "./star.toml" with { type: "toml" };`);
-for (const [form, words] of [
-  ["as one program", "TestRunLayers:0"],
-  ["over two layers", "TestRunLayers:2,TestRunPartFiles:1"],
-] as const)
+for (const [form, words] of [["as one program", "TestRunLayers:0"]] as const)
   test.concurrent(
     `an export statement asks for a type, ${form}`,
     async () => {

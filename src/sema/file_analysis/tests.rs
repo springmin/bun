@@ -541,6 +541,8 @@ fn library_decides_file_scope_constant_reads() {
         let session = Session::new();
         let workspace = Workspace::new(&session);
         let mut file = FileBuilder::default();
+        let call = add_call(&mut file, known::get, &[]);
+        let first = file.stmt(StmtKind::Expr(call), 0);
         let one = file.number(1.0);
         let init = file.expr(ExprKind::Number(one), 0, 0);
         let declaration = add_constant(&mut file, known::value, init);
@@ -550,7 +552,8 @@ fn library_decides_file_scope_constant_reads() {
             is_library,
             ..FILE_INPUTS
         };
-        let analyzed = workspace.analyze_with(file, &[declaration, statement], inputs);
+        let statements = [first, declaration, statement];
+        let analyzed = workspace.analyze_with(file, &statements, inputs);
         let decisions = &analyzed.analysis.decisions;
         let (decision, constant) = if is_library {
             let constant = FoldedValue::Constant(number(1.0));

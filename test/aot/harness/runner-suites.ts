@@ -3,6 +3,7 @@ import { bunEnv, bunExe, isASAN, tempDir } from "harness";
 import { readFileSync } from "node:fs";
 import { availableParallelism } from "node:os";
 import { join } from "node:path";
+import { canTrim } from "../../bundler/compile-trim-features";
 import { describe, test } from "../supported";
 import { run } from "./run";
 
@@ -13,6 +14,9 @@ import { run } from "./run";
 // `~ ` before a line: that test fails in some runs and passes in others.
 // `! ` before a line: that test fails, and in a Bun built with assertions one of them stops its child run: an invariant of the engine is broken there.
 // `x64 ` or `arm64 ` before a line: that test fails on that architecture alone, and has to pass on the other.
+// `trims ` before a line: that test damages an executable and awaits that it goes on as Bun. Where the Bun under test trims, the executable has no command line left to go on with:
+// there the test has to fail, by the words that ../a-truncated-executable-says-so.test.ts holds. Where it does not trim, the test has to pass.
+// A compiled run owes no frame of a stack trace its name, line or column. A test that fails where it asks for one has no line, and is held neither way.
 //
 // All of it takes half an hour of four processors. CI gives a file six minutes, beside another one. So ../runner-suites.test.ts and the files in
 // ../runner-suites each hold a share that took some 250 seconds of processor time, and a suite that takes more is dealt over several files.
@@ -26,6 +30,7 @@ const listOf = (file: string) =>
     .split("\n")
     .filter(line => line && !line.startsWith("#"));
 const nameOf = (line: string) => line.slice(7).replace(/ \[[\d.]+ms\]$/, "");
+const asksForFrame = /^Expected to (?:contain|end with): ".*(?:\bat .+ \(|:\d+:\d+\))"$/;
 
 /**
  * Each is the path of a suite, or `<path> 2/4` for the second of four parts of one. The length of a test's name says which part it is in, so a test that
@@ -116,7 +121,11 @@ function hold(title: string, preloaded: string, list: string, parts: string[]) {
             .filter(line => line.startsWith(mark + suite + ": "))
             .map(line => line.slice(mark.length + suite.length + 2))
             .filter(name => of === 1 || ran.has(name));
-        const names = failed.map(nameOf);
+        const saidBefore = (result: string) => {
+          const end = lines.indexOf(result);
+          return lines.slice(lines.findLastIndex((line, at) => at < end && /^\((?:pass|fail)\) /.test(line)) + 1, end);
+        };
+        const names = failed.filter(result => !saidBefore(result).some(line => asksForFrame.test(line))).map(nameOf);
         // The names alone would hide a child run that was stopped, by an assertion of the engine for one: how each such run ended, and what it said of it.
         const quoted = (stdout + "\n" + stderr).split(/\n|\\n/);
         const stop =
@@ -124,9 +133,17 @@ function hold(title: string, preloaded: string, list: string, parts: string[]) {
         const said = quoted.flatMap((line, at) => (stop.test(line) ? quoted.slice(at, at + 4) : []));
         const ends = [...new Set([...readFileSync(stopped, "utf8").split("\n").filter(Boolean), ...said])];
         if (ends.length) console.error(`${part}: child runs were stopped:\n${ends.slice(0, 30).join("\n")}`);
-        expect(names.filter(name => !named("~ ").includes(name)).sort()).toEqual(
-          [...named(""), ...named("! "), ...named(process.arch + " ")].sort(),
-        );
+        const withoutCommandLine = canTrim ? named("trims ") : [];
+        const awaited = [...named(""), ...named("! "), ...named(process.arch + " "), ...withoutCommandLine];
+        // The names alone do not say what went wrong: of a test that fails and is not named, what the suite printed in front of its result.
+        for (const result of failed.filter(result => ![...awaited, ...named("~ ")].includes(nameOf(result))))
+          console.error([result, ...saidBefore(result).filter(Boolean).slice(0, 60)].join("\n"));
+        expect(names.filter(name => !named("~ ").includes(name)).sort()).toEqual(awaited.sort());
+        for (const result of failed.filter(result => withoutCommandLine.includes(nameOf(result)))) {
+          const said = saidBefore(result).join("\n");
+          expect(said).toContain("is damaged. Its embedded program can't be read.");
+          expect(said).toContain('+   "exitCode": 1,');
+        }
       },
       1_200_000,
     );

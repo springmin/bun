@@ -17,8 +17,6 @@ typed-objects/plain-clone-takes-stores-behind-it	// CALLS- both PutBy
 # `function step(steps: MapIterator<number>) { return steps.next().value }`, and so for SetIterator and ArrayIterator: the parameter is not tested for the class of the engine, `next` is read by name and called as any function is.
 # The three lines were met by their own text, which the dump quotes.
 typed-objects/built-in-iterators-that-are-handed-on	// IR+ TypeTest .* testedType=ArrayIterator
-typed-objects/built-in-iterators-that-are-handed-on	// IR+ TypeTest .* testedType=MapIterator
-typed-objects/built-in-iterators-that-are-handed-on	// IR+ TypeTest .* testedType=SetIterator
 # twoUnits has no code of its own: it is copied into its callers, and nothing calls its entrypoint.
 strings/one-code-unit-compared	// CALLS+ twoUnits StringsAreEqual|StringEq
 # These state what the compiler does not do yet: each came with the report of a gain that is missed, and waits for the change that brings it.

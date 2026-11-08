@@ -42,8 +42,8 @@ const files = {
   "jest-jsdom.test.js": `/** @jest-environment jsdom */` + reads,
 };
 
-async function report(directory: string, flags: string[], words?: string) {
-  const env = words ? { ...bunEnv, BUN_DEBUG_TEST_AOT_WORDS: words } : bunEnv;
+async function report(directory: string, flags: string[]) {
+  const env = bunEnv;
   const { stdout, stderr, exitCode } = await run([bunExe(), "test", ...flags, "."], directory, env);
   const all = (stdout + "\n" + stderr).split("\n").map(line => line.replaceAll(directory, "<project>"));
   return {
@@ -69,7 +69,6 @@ for (const [title, flags, more] of [
     expect(plain.printed).toContain("| vitest-node.test.js: undefined undefined no document | click | undefined");
     expect(plain.printed.join("\n")).toContain(`cannot find package "jsdom"`);
     expect(await report(String(directory), ["--aot", ...flags])).toEqual(plain);
-    expect(await report(String(directory), ["--aot", ...flags], "TestRunLayers:2")).toEqual(plain);
   });
 }
 

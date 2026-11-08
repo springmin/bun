@@ -38,7 +38,7 @@ test.concurrent.each(Object.entries(ways))(
     expect(plain).toEqual(["OUT set string true"]);
     expect(await run(setter, ["--aot"])).toEqual(plain);
     // Either answer is honest. "OUT set object false" is not. That was the answer to the one that __lookupSetter__ had found.
-    for (const words of waysFor([undefined, "TestRunLayers:2"], name === "__lookupSetter__").slice(1))
+    for (const words of waysFor([undefined, "TestRunLayers:0"], name === "__lookupSetter__").slice(1))
       expect([plain, ["OUT TypeError: Cannot assign to self object false"]]).toContainEqual(
         await run(setter, ["--aot"], words),
       );

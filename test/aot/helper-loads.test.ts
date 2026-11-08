@@ -84,10 +84,7 @@ async function testRun(directory: string, flags: string[], words = "", files: st
   };
 }
 
-const forms = [
-  ["as one program", "TestRunLayers:0"],
-  ["over two layers", "TestRunLayers:2"],
-] as const;
+const forms = [["as one program", "TestRunLayers:0"]] as const;
 const loaded = { said: names.map(name => `SAID ${name} 1 unused`).sort(), why: [], exitCode: 0 };
 const refused = names.map(name => `SAID ${name} REFUSED it wasn't compiled with the program`).sort();
 
@@ -142,9 +139,9 @@ const importers: [name: string, file: string, text: (name: string) => string, is
     false,
   ],
   [
-    "a file beside a test file that this run leaves out",
+    "a helper of a test file that this run leaves out, which names what the runner hands every file,",
     "other/kit.ts",
-    name => `import { load } from "../support/${name}";\nvoid load;`,
+    name => `import { load } from "../support/${name}";\nexport const check = () => expect(load).toBeDefined();`,
     false,
   ],
   [

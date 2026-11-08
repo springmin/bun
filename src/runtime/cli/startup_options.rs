@@ -12,7 +12,7 @@ use bun_trim::OptionRequirement;
 
 use crate::cli::arguments::{
     AUTO_REQUIREMENTS, AUTO_TABLE, CODE_GENERATION_PARAM, HOT_RELOAD_PARAMS, NODE_SHORT_ALIASES,
-    ParamType,
+    ParamType, UNHANDLED_REJECTIONS_PARAM,
 };
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
@@ -81,6 +81,8 @@ enum Obstacle {
     BuiltWithoutFunctionSource,
     RunsOnlyCompiledCode,
     BuiltWithoutInspector,
+    BuiltWithoutSql,
+    BuiltWithoutWarningsOfRejections,
 }
 
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -98,8 +100,7 @@ impl UnusableOption {
                 matches!(&label[..], b"--preload" | b"--require" | b"--import")
             }
             OptionOrigin::EnvironmentVariable(name) => *name == "BUN_INSPECT_PRELOAD",
-            OptionOrigin::BunfigKey(_) => false,
-            OptionOrigin::KeyOfNamedFile(key, _) => *key == "preload",
+            OptionOrigin::BunfigKey(_) | OptionOrigin::KeyOfNamedFile(..) => false,
         };
         names_file
             && matches!(
@@ -142,6 +143,12 @@ impl UnusableOption {
                 b" because it only runs code that was compiled into it. Rebuild it with --compile-inspector to load other code"
             }
             Obstacle::BuiltWithoutInspector => b". Rebuild it with --compile-inspector",
+            Obstacle::BuiltWithoutWarningsOfRejections => {
+                b": the code that prints its warnings wasn't compiled in. Rebuild with --compile-exec-argv=--unhandled-rejections=<mode>"
+            }
+            Obstacle::BuiltWithoutSql => {
+                b": the program never uses Bun.sql, so it wasn't compiled in. Rebuild with --compile-exec-argv=--sql-preconnect"
+            }
         };
         out.extend_from_slice(what_happens);
         out.extend_from_slice(reason);
@@ -251,6 +258,8 @@ fn bootstrap_flag_name(flag: &[u8]) -> &[u8] {
 pub(crate) struct ExecArgvOptions {
     pub requirements: Vec<OptionRequirement>,
     pub code_generation_from_strings: CodeGenerationFromStrings,
+    /// `--unhandled-rejections`, whatever its mode: each mode but the default makes the run time print a warning for some rejection.
+    pub warns_of_rejections: bool,
 }
 
 impl ExecArgvOptions {
@@ -262,6 +271,14 @@ impl ExecArgvOptions {
 
     pub(crate) fn admits_inspector(&self) -> bool {
         self.first_with(INSPECTOR_REQUIREMENT).is_some()
+    }
+
+    pub(crate) fn features(&self) -> Vec<Feature> {
+        let feature_of = |option: &OptionRequirement| match option.requirement {
+            RuntimeRequirement::Feature(feature) => Some(feature),
+            _ => None,
+        };
+        self.requirements.iter().filter_map(feature_of).collect()
     }
 
     pub(crate) fn first_that_loads_code(&self) -> Option<&OptionRequirement> {
@@ -326,6 +343,8 @@ fn read_option_words(words: &[&[u8]]) -> ExecArgvOptions {
             .filter_map(code_generation_level)
             .max()
             .unwrap_or(CodeGenerationFromStrings::Allowed),
+        warns_of_rejections: (options.iter())
+            .any(|option| option.index == UNHANDLED_REJECTIONS_PARAM),
     }
 }
 
@@ -462,7 +481,9 @@ fn build_of_this_executable() -> Option<BuildRecord> {
     Some(BuildRecord {
         omits_function_source: bun_jsc::compiled_program::omits_function_source(program),
         admits_inspector: admitted.contains(AdmittedCode::INSPECTOR),
-        loads_code_from_disk: bun_jsc::compiled_program::loads_code_outside_image(program),
+        // The flag of the image says what its proofs allow for, and an image that admits the inspector has it too. Who may name a file is for `--aot-allow-code-from-disk` to say.
+        loads_code_from_disk: program.allows_code_from_disk
+            && bun_jsc::compiled_program::loads_code_outside_image(program),
     })
 }
 
@@ -479,6 +500,28 @@ pub(crate) fn refuse_code_without_interpreter() {
     if is_removed(Feature::Interpreter) {
         bun_core::disallow_code_generation_for_removed_interpreter();
     }
+}
+
+/// `--sql-preconnect` as an option of the run makes the start read `Bun.sql`. Only the image says whether the build compiled what stands behind it.
+#[cold]
+#[inline(never)]
+pub(crate) fn exit_for_sql_preconnect_without_sql() -> ! {
+    exit_for(&UnusableOption {
+        origin: OptionOrigin::Flag(Box::from(&b"--sql-preconnect"[..])),
+        obstacle: Obstacle::BuiltWithoutSql,
+    })
+}
+
+/// Each mode of `--unhandled-rejections` makes the run time print warnings with Bun's own JavaScript. A build compiles that for the option alone, so the option has to be written into the executable, in whichever mode. What else the program does makes no difference.
+fn find_unhandled_rejections_without_warnings(words: &[&[u8]]) -> Option<UnusableOption> {
+    let graph = bun_standalone_graph::Graph::get_ref()?;
+    let is_refused = graph.compiled_program().is_some()
+        && read_option_words(words).warns_of_rejections
+        && !read_exec_argv(graph.compile_exec_argv).warns_of_rejections;
+    is_refused.then(|| UnusableOption {
+        origin: OptionOrigin::Flag(Box::from(&b"--unhandled-rejections"[..])),
+        obstacle: Obstacle::BuiltWithoutWarningsOfRejections,
+    })
 }
 
 /// Before `bun_jsc::initialize`, which fixes the engine's options.
@@ -503,6 +546,7 @@ pub(crate) fn reject_unusable_arguments() {
         bun_core::disallow_code_generation_from_strings(CodeGenerationFromStrings::Strict);
     }
     exit_if_unusable(find_unusable_option(&words, obstacle_in_this_executable));
+    exit_if_unusable(find_unhandled_rejections_without_warnings(&words));
     warn_of_ignored_options(&words);
 }
 
@@ -525,13 +569,17 @@ pub(crate) fn reject_unusable_bunfig_settings(ctx: &mut ContextData, named_file:
         ctx.debug.global_cache = GlobalCache::disable;
     }
     let obstacle_to_code = obstacle_in_this_executable(RuntimeRequirement::RuntimeCode);
+    // Somebody has named this file for this process, and hears that a part of it is lost.
     if let Some(file) = named_file.filter(|_| !ctx.preloads.is_empty())
         && obstacle_to_code == Some(Obstacle::RunsOnlyCompiledCode)
     {
-        exit_for(&UnusableOption {
+        let mut message = Vec::new();
+        UnusableOption {
             origin: OptionOrigin::KeyOfNamedFile("preload", Box::from(file)),
             obstacle: Obstacle::RunsOnlyCompiledCode,
-        });
+        }
+        .write_warning(&mut message);
+        bun_core::warn!("{}", BStr::new(&message));
     }
     ignore_code_of_bunfig(ctx, obstacle_to_code);
     exit_if_unusable(find_unusable_bunfig_setting(
@@ -542,20 +590,10 @@ pub(crate) fn reject_unusable_bunfig_settings(ctx: &mut ContextData, named_file:
 
 // The file is the one that happens to lie in the working directory, and it may be there for `bun`.
 fn ignore_code_of_bunfig(ctx: &mut ContextData, obstacle_to_code: Option<Obstacle>) {
-    if obstacle_to_code != Some(Obstacle::RunsOnlyCompiledCode) {
-        return;
+    if obstacle_to_code == Some(Obstacle::RunsOnlyCompiledCode) {
+        ctx.preloads.clear();
+        ctx.args.serve_plugins = None;
     }
-    if !ctx.preloads.is_empty() {
-        let mut message = Vec::new();
-        UnusableOption {
-            origin: OptionOrigin::BunfigKey("preload"),
-            obstacle: Obstacle::RunsOnlyCompiledCode,
-        }
-        .write_warning(&mut message);
-        bun_core::warn!("{}", BStr::new(&message));
-    }
-    ctx.preloads.clear();
-    ctx.args.serve_plugins = None;
 }
 
 #[cold]

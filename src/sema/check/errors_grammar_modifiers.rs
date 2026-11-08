@@ -74,6 +74,7 @@ fn can_have_illegal_decorators(kind: Kind) -> bool {
 /// Whether `bun run` stops at the modifier or decorator of `location` that TypeScript reports `code` for.
 fn is_syntax_error_in_bun_run(hir: &File<'_>, location: Node, code: u32) -> bool {
     let is_decorator_error = matches!(code, 1206 | 1433 | 8038);
+    // `verbatimModuleSyntax` refuses the `export`. `bun run` takes the file for an ES module by that word.
     if code == 1287 {
         return false;
     }

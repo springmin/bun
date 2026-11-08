@@ -5,6 +5,7 @@ import { bunEnv, bunExe, isLinux, isOhos, tempDir } from "harness";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { raiseDefaultTimeout } from "./harness/default-timeout";
+import "./harness/real-executables";
 import { run } from "./harness/run";
 // One by one: the runner gives this file a process of its own and eight cases at once, beside two more like it: too many builds for four cores.
 import { describe, testOneByOne as test } from "./supported";
@@ -97,7 +98,7 @@ describe.skipIf(!isLinux || isOhos)("--aot-symbols", () => {
     expect(without.symbols.filter(isOfTheTest)).toEqual([]);
 
     const own = withThem.symbols.filter(isOfTheTest);
-    expect(own.map(symbol => symbol.name)).toContain("fibonacciOfTheTest");
+    expect(own.map(symbol => symbol.name)).toContain("fibonacciOfTheTest main.ts:1");
     const { address, size } = withThem.payload;
     for (const symbol of own) {
       expect(symbol).toMatchObject({ isLocal: true, isFunction: true, section: ".bun" });

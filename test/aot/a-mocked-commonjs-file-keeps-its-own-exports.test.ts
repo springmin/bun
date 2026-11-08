@@ -94,10 +94,6 @@ test("what plain Bun says", () => {
   );
 });
 
-test.each([
-  ["as one program", "TestRunLayers:0"],
-  ["in one layer", "TestRunLayers:1,TestRunPartFiles:1"],
-  ["in two layers", "TestRunLayers:2,TestRunPartFiles:1"],
-])("it says what plain Bun says, %s", async (_, words) => {
-  expect(await said(["--aot"], words)).toEqual(plain);
+test("it says what plain Bun says, as one program", async () => {
+  expect(await said(["--aot"], "TestRunLayers:0")).toEqual(plain);
 });

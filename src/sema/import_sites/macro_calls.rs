@@ -1,4 +1,4 @@
-use super::call_sites::{CallForm, expr_kind, find_call_form};
+use super::call_sites::expr_kind;
 use super::statements::{is_macro_import, value_import_symbols};
 use crate::atom::Atom;
 use crate::bind::{Binding, Bound, Decl, Parent, SymbolId};
@@ -30,10 +30,10 @@ pub fn macro_callee(
     if macro_symbols.is_empty() {
         return None;
     }
-    let CallForm::Call { callee, .. } = find_call_form(hir, call)? else {
+    let (ExprKind::Call(called) | ExprKind::TaggedTemplate(called)) = expr_kind(hir, call)? else {
         return None;
     };
-    let callee = hir.skip_type_assertions(callee);
+    let callee = hir.skip_type_assertions(hir[called].callee);
     if let Some(symbol) = find_macro_symbol(hir, bound, macro_symbols, callee) {
         return (!is_namespace_import(bound, symbol)).then_some((symbol, None));
     }

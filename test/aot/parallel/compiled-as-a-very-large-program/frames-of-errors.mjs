@@ -1,4 +1,5 @@
-// Flags: --aot-limit=MaxWarmCodeValues:1
+// Reference: bun build --compile
+// The text that a message quotes is held to the executable that `bun build --compile` makes without --aot, not to `bun run`.
 // As classes.ts. What error.stack says: the names and the positions of the frames, through methods, constructors, accessors, callbacks of built-ins, tail calls, async functions and errors thrown by the engine.
 const frames = (error, count = 6) =>
   error.stack

@@ -53,9 +53,9 @@ one("the lines that tools read are one write each", async () => {
     listener.close();
   }
 
-  const ofEngine = /^AOT parallel loops: |^AOT phase times: (?!front end \|)/;
+  const ofEngine = /^AOT instructions: |^AOT phase times: (?!front end \|)/;
   const begun = writes.filter(text => ofEngine.test(text));
-  expect(begun.filter(text => text.startsWith("AOT parallel loops: ")).length).toBeGreaterThan(0);
+  expect(begun.filter(text => text.startsWith("AOT instructions: ")).length).toBeGreaterThan(0);
   expect(begun.filter(text => text.startsWith("AOT phase times: ")).length).toBeGreaterThan(0);
   expect(begun.filter(text => !text.endsWith("\n"))).toEqual([]);
 });

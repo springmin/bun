@@ -108,25 +108,8 @@ ${atTop ? `  await look("0 start");\n` : ""}${steps
   };
 }
 
-const fillers = 20;
-const bytesOfFillers = 1_500_000;
-
-function withShape(group: Sequence[], hasNextFiles = false): Record<string, string> {
-  const files: Record<string, string> = { "package.json": `{ "type": "module" }` };
-  for (const sequence of group) Object.assign(files, filesOf(sequence, fillers, hasNextFiles));
-  const below = group.map(({ id, kind }) => `import "../src/${id}/dep.${kind}";\n`).join("");
-  const functions = Math.ceil(bytesOfFillers / fillers / 46);
-  for (let n = 0; n < fillers; n++) {
-    let text = below;
-    for (let i = 0; i < functions; i++) text += `export function f${n}_${i}(x) { return x + ${i}; }\n`;
-    files[`fill/f${n}.js`] = text;
-  }
-  return files;
-}
-
 type Printed = Map<string, string>;
 
-const nameOf = (ids: string[]) => (ids.length === 1 ? ids[0] : `group-of-${ids[0]}`);
 const fieldsOf = (text: string) => text.split(/ (?=(?:import|require|late|top) )/);
 
 function printed(stdout: string, stderr: string, exitCode: number | null, ids: string[]): Printed {
@@ -135,11 +118,13 @@ function printed(stdout: string, stderr: string, exitCode: number | null, ids: s
     const found = line.match(/^\| (\S+) (\d \S+ [a-z ]+:) (.*)$/);
     if (found) lines.set(`${found[1]} ${found[2]}`, found[3]);
   }
+  // Of a pack it says little, and which of its rejections nobody handled goes by the clock.
+  if (ids.length > 1) return lines;
   const errors = stderr
     .split("\n")
     .filter(line => /^error: |^panic/.test(line))
     .sort();
-  lines.set(`${nameOf(ids)} 9 whole run:`, `exit ${exitCode}${errors.map(line => " " + line.slice(0, 60)).join("")}`);
+  lines.set(`${ids[0]} 9 whole run:`, `exit ${exitCode}${errors.map(line => " " + line.slice(0, 60)).join("")}`);
   return lines;
 }
 
@@ -173,10 +158,9 @@ const asked = new Set<string>();
 function judge(way: string, ids: string[], differing: string[]) {
   const found = differing.filter(isSteady);
   seen.push(...found);
-  for (const id of [...ids, nameOf(ids)]) asked.add(`${way} ${id}`);
+  for (const id of ids) asked.add(`${way} ${id}`);
   if (rewrite) return;
-  const mine = (line: string) =>
-    isEntry(line) && withoutName(line).startsWith(way + " ") && [...ids, nameOf(ids)].includes(idOf(line));
+  const mine = (line: string) => isEntry(line) && withoutName(line).startsWith(way + " ") && ids.includes(idOf(line));
   expect(found.sort()).toEqual(known.filter(mine).map(withoutName).sort());
 }
 
@@ -184,7 +168,6 @@ const env = { ...bunEnv, NO_COLOR: "1", BUN_DEBUG_TEST_AOT_WORDS: "TestRunSaysIt
 
 async function runOf(cwd: string, ids: string[], ...flags: string[]) {
   const isOneRealm = flags.includes("--no-isolate");
-  const saysItsPlan = flags.includes("--aot-memory-limit") ? { BUN_JSC_logAOTPhaseTimes: "1" } : {};
   const { stdout, stderr, exitCode } = await run(
     [
       bunExe(),
@@ -195,16 +178,10 @@ async function runOf(cwd: string, ids: string[], ...flags: string[]) {
     cwd,
     {
       ...env,
-      ...saysItsPlan,
     },
   );
   return { lines: printed(stdout, stderr, exitCode, ids), stderr };
 }
-
-const inGroupsOf = (size: number, sequences: Sequence[]) =>
-  Array.from({ length: Math.ceil(sequences.length / size) }, (_, index) =>
-    sequences.slice(index * size, (index + 1) * size),
-  );
 
 // The company of the others in one build changes what these say.
 const alone = [
@@ -213,58 +190,33 @@ const alone = [
   "one+rejects-over+one.cjs.late",
   "rejects-over+bare+over.cjs.late",
 ];
-// Behind the first vi.resetModules() of a realm every file that has run is loaded from its text, as under `bun test`: nothing compiled is left to ask.
-const byResets = [false, true].map(resets => all.filter(({ steps }) => steps.includes("reset") === resets));
+type Way = "one" | "alone";
+type Case = { way: Way; title: string; group: Sequence[]; flags: string[] };
 
-type Case = { way: string; title: string; group: Sequence[]; flags: string[] };
-
+// A run costs about the same whatever it holds, so a way is one run wherever the sequences leave one another alone.
 const cases: Case[] = [
-  ...inGroupsOf(34, all).map(group => ({ way: "one", title: "as one program", group, flags: ["--isolate"] })),
+  { way: "one", title: "as one program", group: all, flags: ["--isolate"] },
   ...all
     .filter(({ id }) => alone.includes(id))
-    .map(sequence => ({ way: "alone", title: "alone", group: [sequence], flags: [] })),
-  ...inGroupsOf(34, all).map(group => ({ way: "layers", title: "over layers", group, flags: ["--parallel=2"] })),
-  ...byResets
-    .flatMap((sequences, resets) => inGroupsOf(resets ? 6 : 24, sequences))
-    .map(group => ({
-      way: "realm",
-      title: "over layers, in one realm, each with a next file",
-      group,
-      flags: ["--parallel=1", "--no-isolate"],
-    })),
+    .map(sequence => ({ way: "alone" as const, title: "alone", group: [sequence], flags: [] })),
 ];
 
 /**
  * Three mock events in a row on one module. After each, what import(), require(), a user that is loaded late and a user that
- * was linked at the top see. The ways: `one`: as one program, a realm a file; `alone`: one sequence, one program; `layers`: over
- * the layers that a run takes by itself, with the mocked files in a lower image than their users, two workers; `realm`: the same
- * in one realm, where behind each a next file that mocks nothing looks once more.
+ * was linked at the top see. The ways: `one`: as one program, a realm a file; `alone`: one sequence, one program.
  * mock-sequences.known.txt holds every line that differs from a plain run: a line that is cured, one that changes and a new one
  * all fail.
  * BUN_AOT_REWRITE_MOCK_SEQUENCES=1 writes the lines of what ran anew and keeps their names.
  */
-export function mockSequences(part: number, of: number) {
-  for (const { way, title, group, flags } of cases.filter((_, index) => index % of === part)) {
+export function mockSequences(...ways: Way[]) {
+  for (const { way, title, group, flags } of cases.filter(({ way }) => ways.includes(way))) {
     const ids = group.map(sequence => sequence.id);
-    const isOverLayers = way === "layers" || way === "realm";
     test(`${title}: ${ids.length > 6 ? `${ids.length} from ${ids[0]}` : ids.join(" ")}`, async () => {
-      const files = isOverLayers
-        ? withShape(group, way === "realm")
-        : Object.assign({ "package.json": `{ "type": "module" }` }, ...group.map(sequence => filesOf(sequence, 0)));
+      const files = Object.assign({ "package.json": `{ "type": "module" }` }, ...group.map(sequence => filesOf(sequence, 0)));
       using dir = tempDir("aot-mock-sequences", files);
       const plain = await runOf(String(dir), ids, ...flags);
-      const compiled = await runOf(
-        String(dir),
-        ids,
-        "--aot",
-        ...flags,
-        ...(isOverLayers ? ["--aot-memory-limit", "1MB"] : []),
-      );
-      if (isOverLayers) {
-        if (compiled.stderr.includes("this Bun loads one program a realm")) return;
-        expect(compiled.stderr).toMatch(/^AOT test run \| layers [2-9] \|/m);
-        expect(compiled.stderr).toMatch(/the layers are planned: .* \| [2-9] programs, each/);
-      } else expect(compiled.stderr).toContain("AOT test run | one program");
+      const compiled = await runOf(String(dir), ids, "--aot", ...flags);
+      expect(compiled.stderr).toContain("AOT test run | one program");
       judge(way, ids, differences(plain.lines, compiled.lines, way));
     }, 270_000);
   }

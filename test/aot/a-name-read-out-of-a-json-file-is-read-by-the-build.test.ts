@@ -7,7 +7,8 @@ import { test } from "./supported";
 const nameOfExecutable = isWindows ? "executable.exe" : "executable";
 
 // `require(require("./package.json").main)`: the name of the file is a text in a file of data that the build reads anyway.
-// Each form stands alone in its program, and the sources are moved away before the executable runs.
+// One executable. Each form is a file in a folder of its own, with its own file of data and its own files to load, so none brings along what another asks for.
+// The sources are moved away before the executable runs.
 const forms: Record<string, [extension: string, imports: string, load: string]> = {
   "require().plugin": ["cjs", "", `require(require("./config.json").plugin)`],
   "nested": ["cjs", "", `require(require("./config.json").nested.main)`],
@@ -41,12 +42,13 @@ const forms: Record<string, [extension: string, imports: string, load: string]> 
   ],
 };
 
-test.concurrent.each(Object.entries(forms))(
-  "%s",
-  async (_, [extension, imports, load]) => {
-    const entry = `main.${extension}`;
-    using dir = tempDir("aot-name-out-of-json", {
-      [`site/${entry}`]: `${imports}
+const names = Object.keys(forms);
+const files: Record<string, string> = {
+  "site/main.mjs": names.map((name, index) => `await import("./form${index}/main.${forms[name][0]}");\n`).join(""),
+};
+names.forEach((name, index) => {
+  const [extension, imports, load] = forms[name];
+  files[`site/form${index}/main.${extension}`] = `${imports}
 let seen;
 try {
   const loaded = ${load};
@@ -54,14 +56,20 @@ try {
 } catch (error) {
   seen = error.code ?? error.name;
 }
-console.log(seen);
+console.log(${JSON.stringify(name + ":")}, seen);
 // It is in the executable by a constant name.
 if (process.argv.length > 9) require("./parts/three.js");
-`,
-      "site/config.json": `{ "plugin": "./parts/two.js", "short": "two", "nested": { "main": "./parts/two.js" }, "list": ["./parts/two.js"] }`,
-      "site/parts/two.js": `exports.name = "two";`,
-      "site/parts/three.js": `exports.name = "three";`,
-    });
+`;
+  files[`site/form${index}/config.json`] =
+    `{ "plugin": "./parts/two.js", "short": "two", "nested": { "main": "./parts/two.js" }, "list": ["./parts/two.js"] }`;
+  files[`site/form${index}/parts/two.js`] = `exports.name = "two";`;
+  files[`site/form${index}/parts/three.js`] = `exports.name = "three";`;
+});
+
+let ran: Promise<{ plain: string[]; compiled: string[] }> | undefined;
+const bothRuns = () =>
+  (ran ??= (async () => {
+    using dir = tempDir("aot-name-out-of-json", files);
     const site = join(String(dir), "site");
     const executable = join(String(dir), nameOfExecutable);
     const run = async (cmd: string[]) => {
@@ -69,16 +77,27 @@ if (process.argv.length > 9) require("./parts/three.js");
       const [stdout, stderr, exitCode] = await Promise.all([proc.stdout.text(), proc.stderr.text(), proc.exited]);
       return { stdout, stderr, exitCode };
     };
-    const expected = await run([bunExe(), entry]);
-    expect(expected.stdout).toMatch(/^(two|three)\n$/);
-    const built = await run([bunExe(), "build", "--compile", "--aot", `./${entry}`, "--outfile", executable]);
+    const plain = await run([bunExe(), "main.mjs"]);
+    expect({ stderr: plain.stderr, exitCode: plain.exitCode }).toEqual({ stderr: "", exitCode: 0 });
+    const built = await run([bunExe(), "build", "--compile", "--aot", "./main.mjs", "--outfile", executable]);
     expect({ stderr: built.exitCode === 0 ? "" : built.stderr, exitCode: built.exitCode }).toEqual({
       stderr: "",
       exitCode: 0,
     });
     renameSync(site, join(String(dir), "moved-away"));
     mkdirSync(site);
-    expect(await run([executable])).toEqual(expected);
+    const compiled = await run([executable]);
+    expect({ stderr: compiled.stderr, exitCode: compiled.exitCode }).toEqual({ stderr: "", exitCode: 0 });
+    return { plain: plain.stdout.split("\n"), compiled: compiled.stdout.split("\n") };
+  })());
+
+test.each(names)(
+  "%s",
+  async name => {
+    const { plain, compiled } = await bothRuns();
+    const said = (lines: string[]) => lines.filter(line => line.startsWith(name + ": "));
+    expect(said(plain)).toEqual([expect.stringMatching(/: (two|three)$/)]);
+    expect(said(compiled)).toEqual(said(plain));
   },
   600_000,
 );

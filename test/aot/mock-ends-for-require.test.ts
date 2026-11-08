@@ -83,7 +83,7 @@ test.concurrent.each(Object.keys(projects) as (keyof typeof projects)[])(
     expect(plain.lines.filter(line => line.startsWith("OUT z")).join()).not.toContain("mock v");
     expect(plain.lines.join()).toContain("mock v");
     // Over layers it was vi.doUnmock() that left the factory's object behind.
-    for (const words of waysFor(["TestRunLayers:0", "TestRunLayers:2"], name === "vi.doUnmock()"))
+    for (const words of waysFor(["TestRunLayers:0"], name === "vi.doUnmock()"))
       expect(await run(dir, ["--aot"], words)).toEqual(plain);
   },
   240_000,

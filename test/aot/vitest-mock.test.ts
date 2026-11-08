@@ -34,9 +34,6 @@ describe.concurrent("vitest, the other name of vi", () => {
     const plain = await printedBy(files, ...flags);
     expect(plain).toEqual({ lines: ["> 0 mocked"], exitCode: 0 });
     expect(await printedBy(files, ...flags, "--aot")).toEqual(plain);
-    // The layer that holds the module is built without the test files.
-    const inParts = ["--aot", "--parallel=2", "--aot-memory-limit=1KB"];
-    expect(await printedBy({ ...files, "b.test.js": `test("two", () => {});` }, ...flags, ...inParts)).toEqual(plain);
   });
 
   test("doMock() and importActual()", async () => {

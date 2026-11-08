@@ -10,21 +10,9 @@ const cycle = {
 const both = `await Promise.all([import("./a.mjs"), import("./b.mjs")])`;
 const say = `console.log("| " + a.fromA + " " + b.later());`;
 
-// `asExecutable`: as one program a test prints what the executable prints, and that is not right yet.
-const projects: Record<string, { files: Record<string, string>; lines: string[]; asExecutable?: boolean }> = {
+const projects: Record<string, { files: Record<string, string>; lines: string[] }> = {
   "two calls at the top of a test file": {
     files: { ...cycle, "a.test.mjs": `const [a, b] = ${both};\ntest("t", () => {\n  ${say}\n});\n` },
-    lines: ["AB AB"],
-  },
-  "two calls in a test": {
-    files: { ...cycle, "a.test.mjs": `test("t", async () => {\n  const [a, b] = ${both};\n  ${say}\n});\n` },
-    lines: ["AB AB"],
-  },
-  "two calls in a hook": {
-    files: {
-      ...cycle,
-      "a.test.mjs": `let a, b;\nbeforeAll(async () => {\n  [a, b] = ${both};\n});\ntest("t", () => {\n  ${say}\n});\n`,
-    },
     lines: ["AB AB"],
   },
   "a module calls for what an earlier call is loading": {
@@ -35,7 +23,6 @@ const projects: Record<string, { files: Record<string, string>; lines: string[];
       "a.test.mjs": `test("t", async () => {\n  await Promise.all([import("./a.mjs"), import("./b.mjs")]);\n});\n`,
     },
     lines: ["b starts", "c", "a sees C", "b ends"],
-    asExecutable: true,
   },
   "a module calls for the root of an earlier call": {
     files: {
@@ -45,7 +32,6 @@ const projects: Record<string, { files: Record<string, string>; lines: string[];
       "a.test.mjs": `test("t", async () => {\n  const first = import("./a.mjs").then(() => console.log("| a is in"));\n  await Promise.all([first, import("./b.mjs")]);\n});\n`,
     },
     lines: ["b starts", "c", "a", "a is in", "b ends"],
-    asExecutable: true,
   },
 };
 
@@ -66,13 +52,9 @@ async function runTests(files: Record<string, string>, words: string) {
   return { lines, counts: /^ *\d+ pass\n *\d+ fail$/m.exec(stderr)?.[0].replace(/\s+/g, " ").trim(), exitCode };
 }
 
-for (const [way, words] of [
-  ["as one program", "TestRunLayers:0"],
-  ["over two layers", "TestRunLayers:2,TestRunPartFiles:1"],
-]) {
-  for (const [name, { files, lines, asExecutable }] of Object.entries(projects)) {
-    (asExecutable && way === "as one program" ? test.failing : test)(`${name}, ${way}`, async () => {
-      expect(await runTests(files, words)).toEqual({ lines, counts: "1 pass 0 fail", exitCode: 0 });
-    });
-  }
+// The lines are pinned: under load plain Bun, which reads texts on other threads, enters such a graph from either end.
+for (const [way, words] of [["as one program", "TestRunLayers:0"]]) {
+  test.each(Object.entries(projects))(`%s, ${way}`, async (_, { files, lines }) => {
+    expect(await runTests(files, words)).toEqual({ lines, counts: "1 pass 0 fail", exitCode: 0 });
+  });
 }

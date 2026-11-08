@@ -52,7 +52,6 @@ async function run(dir: string, flags: string[], words = "") {
 test.concurrent.each([
   ["plain", [], ""],
   ["as one program", ["--aot"], "TestRunLayers:0"],
-  ["over two layers", ["--aot"], "TestRunLayers:2"],
   ["without the text of functions", ["--aot"], "TestRunLayers:0,TestRunWithoutFunctionSource"],
 ] as const)(
   "%s",

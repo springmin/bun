@@ -1,4 +1,3 @@
-// Flags: --aot-verify-each-pass
 // One arm of a switch stores a list that the program writes out. The build keeps such a list as data, and making an object of data may throw where the literal did not.
 type Props = { a?: number; b?: string; c?: boolean; d?: string[]; e?: number; f?: string };
 function set(props: Props, which: number, index: number) {

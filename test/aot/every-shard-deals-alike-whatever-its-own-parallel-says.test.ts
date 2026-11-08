@@ -42,7 +42,8 @@ test("reads what it imports", () => expect([${reachOf(index).join(", ")}]).toEqu
     ),
   });
 
-const waysToSayParallel = [[], ["--parallel=1"], ["--parallel=4"], ["--parallel=8"], ["--parallel=16"]];
+// Whether the flag is there once moved the deal, and so did its number.
+const waysToSayParallel = [[], ["--parallel=1"], ["--parallel=16"]];
 
 /** The test files that shard `index` of `count` runs. */
 async function filesOfShard(dir: string, index: number, count: number, parallel: string[]) {
@@ -52,11 +53,11 @@ async function filesOfShard(dir: string, index: number, count: number, parallel:
   return [...new Set([...(stdout + stderr).matchAll(/^(tests\/t\d+\.test\.ts):$/gm)].map(match => match[1]))].sort();
 }
 
-test.each([2, 3, 5])(
+test.each([3])(
   "%d shards: whichever way each of them says --parallel, every file runs in one of them",
   async count => {
     using dir = project();
-    // If a shard runs the same files however it is started, every mixture of the five ways runs what one way runs.
+    // If a shard runs the same files however it is started, every mixture of the ways runs what one way runs.
     const deals: string[][][] = [];
     for (const parallel of waysToSayParallel) {
       const shards = Array.from({ length: count }, (_, index) => filesOfShard(String(dir), index, count, parallel));

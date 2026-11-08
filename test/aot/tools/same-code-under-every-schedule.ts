@@ -1,25 +1,27 @@
-// Does the machine code of a program hang on the order in which the rules of flow analysis run?
+// Does the machine code of a program depend on how the work of its build falls on the threads?
 //
-//   bun test/aot/tools/same-code-under-every-schedule.ts [<program or folder>..] [--bun <bun>] [--schedules 8] [--numberings 0] [--threads 1,8] [--checker-passes 2,3] [--again] [--jobs 8] [--together 40] [--from <file>] [--same <file>] [--listed]
+//   bun test/aot/tools/same-code-under-every-schedule.ts [<program or folder>..] [--bun <bun>] [--threads 1,16,64] [--again] [--jobs 8] [--from <file>] [--same <file>]
 //
-// What flow analysis finds is meant to follow from the program alone. `--aot-testing=DelayFlowRules:<n>` is another valid schedule of its rules for every n.
-// Each program is built under the usual schedule and under the first `--schedules` others, and the code of every function is compared with that of the usual schedule.
-// It prints one line for each program whose code moves: under which schedules, and the first function that differs. It exits with 1 if there is any.
-// Behind them a table: where they move first, by file, by kind, by function, and under how many of the schedules.
-// `--same <file>` writes the programs whose code stays the same, one path a line, from the folder of the stored programs.
-// `--from <file>` takes the programs that a file lists, as `--same` writes them. Two such files lie beside the tests:
-//   ../programs-with-the-same-code-under-every-schedule.txt   held under 255 schedules. The test beside it holds them.
-//   ../programs-with-the-same-code-under-nine-schedules.txt   held under the usual schedule and eight others, on x64 and on arm64. Nothing holds them: the number of a
-//                                                             schedule seeds a hash over the statements of the whole build, so each change to the compiler or the library
-//                                                             deals new schedules, and of 404 of these programs 10 moved under 64. They are the ones to ask next.
-// `--numberings <n>`: as many builds more in which flow analysis numbers the objects that the program makes in another order (`--aot-testing=ShuffleObjects:<n>`), named n0, n1 ..
-// `--threads 1,8`: a build more on each of so many threads (t1, t8; every other build has two). `--checker-passes 2,3`: one in which the checker goes over the files in so many passes (p2, p3).
-// `--again` builds under the usual schedule once more: code that moves there follows something else than the schedule.
+// A build is a function of its sources and flags. Each program is built on two threads and on each number of `--threads` (t1, t16, t64), and the code in its image is
+// compared with that of the build on two.
+// It prints one line for each program whose code moves: in which builds, and the first function that differs, where the compiler wrote a map of the image. It exits with 1 if there is any.
+// Behind them a table: where they move first, by file, by kind, by function, and in how many of the builds.
+// `--same <file>` writes the programs whose code stays the same, one path a line, from the folder of the stored programs. `--from <file>` takes the programs that such a file lists.
+// `--again` builds on two threads once more: code that moves there follows something else than the number of threads.
 //
 // Without programs it takes the stored programs of ../parallel. A folder stands for the programs in it as scripts/runner.node.ts finds them: a folder with a main file is one.
-// `--together` programs are the entry points of one executable (--aot-separate-programs): each is compiled as it is when it is built alone, and has an image and a map of its own.
-// Left out: a program that says how it is built (`// Flags:`, `// Entry points:`, `// Alone:` and the like), and one that does not build under the usual schedule.
-import { appendFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "fs";
+// Left out: a program that says how it is built (`// Flags:`, `// Entry points:`, `// Alone:` and the like), and one that does not build on two threads.
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "fs";
 import { availableParallelism, tmpdir } from "os";
 import { join, relative, resolve } from "path";
 import { parseArgs } from "util";
@@ -34,35 +36,11 @@ export type Moved = { program: string; under: string[]; first: string };
 
 export const storedPrograms = resolve(import.meta.dir, "..", "parallel");
 
-const programsListedIn = (file: string) =>
-  readFileSync(resolve(import.meta.dir, "..", file), "utf8")
-    .split("\n")
-    .filter(Boolean);
-
-/** The stored programs that are known to have the same code in every way, as paths from their folder. */
-export const listedPrograms = () => programsListedIn("programs-with-the-same-code-under-every-schedule.txt");
-
-export const programsAskedUnderNineSchedules = () =>
-  programsListedIn("programs-with-the-same-code-under-nine-schedules.txt");
-
-/** The usual schedule comes first: the others are compared with it. */
-export const schedules = (others: number): Way[] => [
-  { name: "usual", flags: [] },
-  ...Array.from({ length: others }, (_, n) => ({ name: String(n), flags: [`--aot-testing=DelayFlowRules:${n}`] })),
-];
-
-export const numberings = (count: number): Way[] =>
-  Array.from({ length: count }, (_, n) => ({ name: `n${n}`, flags: [`--aot-testing=ShuffleObjects:${n}`] }));
+/** It comes first: the others are compared with it. */
+export const usual: Way = { name: "usual", flags: [] };
 
 export const threadCounts = (counts: number[]): Way[] =>
   counts.map(threads => ({ name: `t${threads}`, flags: [], threads }));
-
-export const checkerPasses = (counts: number[]): Way[] =>
-  counts.map(passes => ({
-    name: `p${passes}`,
-    flags: [],
-    env: { BUN_DEBUG_TEST_AOT_WORDS: `TestRunCheckerPasses:${passes}` },
-  }));
 
 const hashOf = (bytes: Uint8Array) => new Bun.CryptoHasher("sha256").update(bytes).digest("hex").slice(0, 16);
 
@@ -84,7 +62,10 @@ export function codeOfImages(executable: Buffer): Buffer[] {
   return found;
 }
 
-/** Rows `T`: offset, name. A stub ends where the next stub, a row `TN` or the first function begins. */
+/**
+ * Rows `T`: offset, name. Several may begin at one offset, and a row `TN` repeats the offset of a stub that never returns.
+ * A stub ends where the next row behind its offset or the first function begins.
+ */
 export function stubsOf(map: string, code: Buffer): Pieces {
   const rows = map.split("\n").map(line => line.split("\t"));
   const starts = rows
@@ -92,20 +73,18 @@ export function stubsOf(map: string, code: Buffer): Pieces {
     .map(([, offset, name]) => ({ offset: Number(offset), name }));
   const end = Math.min(code.length, ...rows.filter(([kind]) => kind === "F").map(fields => Number(fields[2])));
   starts.sort((a, b) => a.offset - b.offset);
+  const offsets = [...new Set(starts.map(({ offset }) => offset))];
+  const endOf = new Map(offsets.map((offset, index) => [offset, offsets[index + 1] ?? end]));
   const stubs: Pieces = new Map();
-  for (const [index, { offset, name }] of starts.entries()) {
+  for (const { offset, name } of starts) {
     if (name === undefined) continue;
     let key = name;
     for (let copy = 2; stubs.has(key); copy++) key = `${name} #${copy}`;
-    const bytes = code.subarray(offset, starts[index + 1]?.offset ?? end);
+    const bytes = code.subarray(offset, endOf.get(offset));
     stubs.set(key, { size: bytes.length, hash: hashOf(bytes) });
   }
   return stubs;
 }
-
-/** A row `F` ends with the path of the file as the program sees it, the position in it and a letter. Row `R`: where the functions end. */
-const describes = (map: string, program: string, code: Buffer) =>
-  map.includes(`/root/${program}\t`) && Number(/^R\t(\d+)$/m.exec(map)?.[1]) <= code.length;
 
 let free = 1;
 const waiting: (() => void)[] = [];
@@ -121,23 +100,23 @@ async function inTurn<T>(work: () => Promise<T>): Promise<T> {
   }
 }
 
-/** A file that a Worker starts from is a program with an image of its own, so which image is whose is not told. */
+/** The map describes one image, so which function lies in which of several is not told. */
 const hasSeveralImages = new Set<string>();
 
-/** Nothing for a build that fails, or that does not give each program an image of its own. */
+/** Nothing for a build that fails, or whose executable does not hold one image. */
 async function build(
   bun: string,
   root: string,
-  programs: string[],
+  program: string,
   work: string,
   { flags, threads = 2, env = {} }: Way,
-): Promise<Map<string, Code> | undefined> {
+): Promise<Code | undefined> {
   mkdirSync(work, { recursive: true });
-  const executable = join(work, process.platform === "win32" ? "programs.exe" : "programs");
+  const executable = join(work, process.platform === "win32" ? "program.exe" : "program");
   const map = join(work, "map");
   try {
     await using child = Bun.spawn({
-      cmd: [bun, "build", "--compile", "--aot", "--aot-separate-programs", `--root=${root}`, `--aot-threads=${threads}`, ...flags, ...programs.map(program => "./" + program), "--outfile", executable], // prettier-ignore
+      cmd: [bun, "build", "--compile", "--aot", `--root=${root}`, `--aot-threads=${threads}`, ...flags, "./" + program, "--outfile", executable], // prettier-ignore
       cwd: root,
       env: { PATH: process.env.PATH, HOME: work, NO_COLOR: "1", BUN_ENABLE_CRASH_REPORTING: "0", DO_NOT_TRACK: "1", BUN_FEATURE_FLAG_INTERNAL_FOR_TESTING: "1", BUN_JSC_aotMapFilePath: map, ...env }, // prettier-ignore
       stdin: "ignore",
@@ -146,19 +125,11 @@ async function build(
     });
     if ((await child.exited) !== 0) return undefined;
     const codes = codeOfImages(readFileSync(executable));
-    if (codes.length > 1 && programs.length === 1) hasSeveralImages.add(programs[0]);
-    if (codes.length !== programs.length) return undefined;
-    // The images lie in the order of the command line. The maps are numbered as the programs were compiled.
-    const maps = codes.map((_, index) => readFileSync(index ? `${map}.${index}` : map, "latin1"));
-    return new Map(
-      programs.map((program, index) => {
-        const code = codes[index];
-        // A file that another program imports too stands in two maps. Built alone the program has one.
-        const own = maps.filter(rows => describes(rows, program, code));
-        const rows = own.length === 1 ? own[0] : "";
-        return [program, { whole: hashOf(code), functions: functionsOf(rows, code), stubs: stubsOf(rows, code) }];
-      }),
-    );
+    if (codes.length > 1) hasSeveralImages.add(program);
+    if (codes.length !== 1) return undefined;
+    const [code] = codes;
+    const rows = existsSync(map) ? readFileSync(map, "latin1") : "";
+    return { whole: hashOf(code), functions: functionsOf(rows, code), stubs: stubsOf(rows, code) };
   } finally {
     rmSync(work, { recursive: true, force: true });
   }
@@ -193,7 +164,7 @@ function firstPieceThatDiffers(usual: Code, other: Code): string {
 }
 
 /**
- * `programs` are paths from `root`. Each is built in every way, and compared with the first. At most `jobs` builds run at once.
+ * `programs` are paths from `root`. Each is built alone in every way, and compared with the first. At most `jobs` builds run at once.
  * `notBuilt`: those that the first way does not build. `onSettled` hears of each program as soon as its builds are compared.
  */
 export async function findMovedCode(
@@ -203,42 +174,30 @@ export async function findMovedCode(
   ways: Way[],
   work: string,
   jobs: number,
-  together = programs.length,
   onSettled: (program: string, verdict: Moved | "same" | "not built") => void = () => {},
 ) {
   free = jobs;
   const moved: Moved[] = [];
   const notBuilt: string[] = [];
-  let folders = 0;
-  async function compare(group: string[]): Promise<void> {
+  async function compare(program: string, number: number): Promise<void> {
     // Every build has a folder whose name is as long as that of any other: a path of another length is another program.
-    const folder = join(work, String(folders++).padStart(6, "0"));
-    const built = await Promise.all(
+    const folder = join(work, String(number).padStart(6, "0"));
+    const [first, ...others] = await Promise.all(
       ways.map((way, index) =>
-        inTurn(() => build(bun, root, group, join(folder, String(index).padStart(3, "0")), way)),
+        inTurn(() => build(bun, root, program, join(folder, String(index).padStart(3, "0")), way)),
       ),
     );
     rmSync(folder, { recursive: true, force: true });
-    if (built.includes(undefined) && group.length > 1) {
-      const half = Math.ceil(group.length / 2);
-      return void (await Promise.all([compare(group.slice(0, half)), compare(group.slice(half))]));
+    if (!first) {
+      notBuilt.push(program);
+      return onSettled(program, "not built");
     }
-    const [usual, ...others] = built;
-    if (!usual) {
-      notBuilt.push(group[0]);
-      return onSettled(group[0], "not built");
-    }
-    for (const program of group) {
-      const differences = others.map(other => (other ? firstDifference(usual.get(program)!, other.get(program)!) : "it does not build")); // prettier-ignore
-      const under = ways.slice(1).filter((_, index) => differences[index]).map(({ name }) => name); // prettier-ignore
-      if (under.length) moved.push({ program, under, first: differences.find(Boolean)! });
-      onSettled(program, under.length ? moved.at(-1)! : "same");
-    }
+    const differences = others.map(other => (other ? firstDifference(first, other) : "it does not build"));
+    const under = ways.slice(1).filter((_, index) => differences[index]).map(({ name }) => name); // prettier-ignore
+    if (under.length) moved.push({ program, under, first: differences.find(Boolean)! });
+    onSettled(program, under.length ? moved.at(-1)! : "same");
   }
-  const groups = Array.from({ length: Math.ceil(programs.length / together) }, (_, index) =>
-    programs.slice(index * together, (index + 1) * together),
-  );
-  await Promise.all(groups.map(compare));
+  await Promise.all(programs.map(compare));
   return { moved: moved.sort((a, b) => (a.program < b.program ? -1 : 1)), notBuilt: notBuilt.sort() };
 }
 
@@ -293,12 +252,8 @@ if (import.meta.main) {
     allowPositionals: true,
     options: {
       bun: { type: "string", default: process.execPath },
-      schedules: { type: "string", default: "8" },
-      numberings: { type: "string", default: "0" },
-      threads: { type: "string", default: "" },
-      "checker-passes": { type: "string", default: "" },
+      threads: { type: "string", default: "1,16,64" },
       jobs: { type: "string", default: String(Math.min(8, availableParallelism())) },
-      together: { type: "string", default: "40" },
       again: { type: "boolean", default: false },
       from: { type: "string" },
       same: { type: "string" },
@@ -314,17 +269,15 @@ if (import.meta.main) {
   const work = ownTemporaryFolder(mkdtempSync(join(tmpdir(), "same-code-")));
   const numbersIn = (list: string) => list.split(",").filter(Boolean).map(Number);
   const ways = [
-    ...schedules(Number(options.schedules)),
-    ...numberings(Number(options.numberings)),
+    usual,
     ...threadCounts(numbersIn(options.threads)),
-    ...checkerPasses(numbersIn(options["checker-passes"])),
     ...(options.again ? [{ name: "again", flags: [] }] : []),
   ];
   // A line as soon as a program is settled: a run over thousands that is cut short has said what it knew.
   if (options.same) writeFileSync(options.same, "");
-  const { moved, notBuilt } = await findMovedCode(resolve(options.bun), storedPrograms, programs, ways, work, Number(options.jobs), Number(options.together), (program, verdict) => {
+  const { moved, notBuilt } = await findMovedCode(resolve(options.bun), storedPrograms, programs, ways, work, Number(options.jobs), (program, verdict) => {
     if (verdict === "same") return void (options.same && appendFileSync(options.same, program + "\n"));
-    if (verdict === "not built") return console.log(`${program}: ${hasSeveralImages.has(program) ? "it starts a Worker from a file, which has an image too: not compared" : "it does not build"}`); // prettier-ignore
+    if (verdict === "not built") return console.log(`${program}: ${hasSeveralImages.has(program) ? "its executable holds several images: not compared" : "it does not build"}`); // prettier-ignore
     console.log(`${program}: under ${verdict.under.length} of ${ways.length - 1} (${verdict.under.join(" ")}): ${verdict.first}`);
   }); // prettier-ignore
   rmSync(work, { recursive: true, force: true });

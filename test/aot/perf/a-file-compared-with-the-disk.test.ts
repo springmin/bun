@@ -8,9 +8,17 @@ import { mkdirSync, writeFileSync } from "fs";
 import { bunEnv, bunExe, isASAN, isDebug, isMusl, tempDir } from "harness";
 import { join } from "path";
 import { slot, spawned } from "../harness/commands";
-import { withSteadyCollections } from "../harness/counted-run";
 import { describe, test } from "../supported";
 import { whyNoSteps } from "./step-idioms";
+
+// Otherwise what the collector's threads get done beside the program differs by some percent from run to run.
+const withSteadyCollections = {
+  BUN_GC_TIMER_DISABLE: "1",
+  BUN_JSC_percentCPUPerMBForEdenTimer: "0",
+  BUN_JSC_percentCPUPerMBForFullTimer: "0",
+  BUN_JSC_useConcurrentGC: "0",
+  BUN_JSC_numberOfGCMarkers: "1",
+};
 
 const files = 200;
 const most = 1400;

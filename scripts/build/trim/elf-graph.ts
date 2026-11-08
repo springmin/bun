@@ -162,6 +162,8 @@ function readLinkedSymbols(
     const type = symbols[at + 4]! & 15;
     if (symbols.readUInt16LE(at + 6) === 0 || type === 3 || type === 4 || type === 6) continue;
     const address = Number(symbols.readBigUInt64LE(at + 8));
+    // An object without bytes, as a static of a type without fields is. What stands at its address may be the neighbour of its section, so only the
+    // file that defines it says where it is.
     if (type === 1 && symbols.readBigUInt64LE(at + 16) === 0n && emptySections.has(address)) continue;
     const node = nodeAt(placedNodes, address);
     if (node < 0) continue;

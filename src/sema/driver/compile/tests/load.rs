@@ -1,9 +1,10 @@
 use super::support::{
     ClaimsNodeFs, DEPENDENCY_MANIFEST, GLOBAL_TYPES, HostScript, PROJECT, ScriptedHost,
-    SlowToQueueAgain, check_only, codes, from_bun_check, from_bun_check_without_configuration,
-    load, load_with_host, load_with_tsconfig_override, project_disk, with_host, with_program,
-    with_runtime_project,
+    SlowToQueueAgain, check_whole_files, codes, from_bun_check,
+    from_bun_check_without_configuration, load, load_in_place, load_with_host,
+    load_with_tsconfig_override, project_disk, with_host, with_program, with_runtime_project,
 };
+use crate::compile::BunTypes;
 use crate::{EntryPointFailure, Locator, global};
 use bun_sema::atom::{Atom, Interner};
 use bun_sema::bind::{bind, specifiers_of_closed_module};
@@ -136,6 +137,24 @@ fn configuration_error_of_runtime_project_is_internal() {
 }
 
 #[test]
+fn run_in_place_is_checked_by_configuration_in_working_directory() {
+    let legacy =
+        r#"{ "compilerOptions": { "noLib": true, "types": [], "experimentalDecorators": true } }"#;
+    let files = [
+        ("tsconfig.json", legacy),
+        ("main.ts", ""),
+        ("below/main.ts", ""),
+    ];
+    for (working_directory, is_legacy) in [(PROJECT, true), (&b"/project/below"[..], false)] {
+        load_in_place(&files, working_directory, |loaded| {
+            let program = loaded.expect("load_program failed");
+            let options = program.files().options;
+            assert_eq!(options.experimental_decorators, is_legacy);
+        });
+    }
+}
+
+#[test]
 fn tsconfig_override_replaces_nearest_configuration() {
     let no_roots = r#"{ "compilerOptions": { "noLib": true, "types": [] }, "files": [] }"#;
     let files = [("main.ts", ""), ("configs/tsconfig.json", no_roots)];
@@ -150,7 +169,6 @@ fn tsconfig_override_replaces_nearest_configuration() {
             });
         }
     }
-    // `bun run` and `bun test` go on without a configuration, not with the nearest one.
     let nearest = [("main.ts", ""), ("tsconfig.json", no_roots)];
     load_with_tsconfig_override(&nearest, "./main.ts", "missing.json", false, |loaded| {
         let program = loaded.expect("load_program failed");
@@ -219,8 +237,6 @@ fn tree_of_leaf_that_no_task_reads_is_freed() {
     });
 }
 
-// A project lists more than a build compiles. A listed file that exports all of another is as unread as any other that no file
-// that is read refers to, and so is what only it refers to.
 #[test]
 fn tree_of_file_with_export_star_that_no_task_reads_is_freed() {
     let files = [
@@ -263,9 +279,6 @@ fn tree_of_file_with_export_star_that_no_task_reads_is_freed() {
     });
 }
 
-// `checkExternalModuleExports` for a file with an `export *` reports at the declarations of what it exports again, so a file's
-// visit looks for such a file before it in program order. What a file imports comes before the file. So one that comes before what
-// it exports again is reached from there, and is read wherever that is.
 #[test]
 fn build_reports_the_same_beside_a_file_with_export_star_that_no_task_reads() {
     let first = ("a-first.ts", "export {};\n");
@@ -312,7 +325,7 @@ fn build_reports_the_same_beside_a_file_with_export_star_that_no_task_reads() {
     for (files, barrel, expected) in scenes {
         let codes = |files: &[(&str, &str)]| {
             with_program(files, &["./main.ts"], 1, |program| {
-                check_only(program).codes()
+                check_whole_files(program).codes()
             })
         };
         assert_eq!(codes(files), expected);
@@ -747,7 +760,8 @@ fn libraries_match_bun_check() {
 
         let configured = with_program(&files, &["./main.ts"], 1, |program| {
             assert!(!program.files().options.config_path.is_empty());
-            assert_eq!(program.loaded.has_bun_types_installed, has_bun_types);
+            let is_installed = matches!(program.loaded.bun_types, BunTypes::InstalledAndNotNamed);
+            assert_eq!(is_installed, has_bun_types);
             libraries_of(program.files().options)
         });
         let checked = from_bun_check(&files, |files| libraries_of(files.options));
@@ -758,7 +772,8 @@ fn libraries_match_bun_check() {
         let tool = "node_modules/tool/main.ts";
         let unconfigured = with_program(&files, &["./node_modules/tool/main.ts"], 1, |program| {
             assert!(program.files().options.config_path.is_empty());
-            assert_eq!(program.loaded.has_bun_types_installed, has_bun_types);
+            let is_installed = matches!(program.loaded.bun_types, BunTypes::InstalledAndNotNamed);
+            assert_eq!(is_installed, has_bun_types);
             libraries_of(program.files().options)
         });
         let checked = from_bun_check_without_configuration(&files, &[tool], |files| {
@@ -792,12 +807,10 @@ fn locator_names_file() {
 
 #[test]
 fn file_queued_again_is_read_and_parsed_again() {
-    const FILES: [(&str, &str); 2] = [
-        (
-            "main.ts",
-            "import \"./first\";\nvar flag = true;\nexport function which() { return flag ? 1 : 2; }\n",
-        ),
-        ("first.ts", "import { which } from \"./main\";\nwhich();\n"),
+    const FILES: [(&str, &str); 3] = [
+        ("package.json", r#"{ "name": "project", "type": "module" }"#),
+        ("main.ts", "import \"./first.cjs\";\n"),
+        ("first.cjs", "globalThis.seen = 1;\n"),
     ];
     for reads_on_other_threads in [false, true] {
         let (ended, has_ended) = std::sync::mpsc::channel();
@@ -808,10 +821,10 @@ fn file_queued_again_is_read_and_parsed_again() {
             };
             let host = SlowToQueueAgain(&disk, Default::default());
             let is_loaded = load_with_host(&host, &["./main.ts"]).is_ok();
-            let times_queued = ["main.ts", "first.ts"].map(|path| host.times_queued(path));
+            let times_queued = ["main.ts", "first.cjs"].map(|path| host.times_queued(path));
             let _ = ended.send((is_loaded, times_queued));
         });
         let outcome = has_ended.recv_timeout(std::time::Duration::from_secs(120));
-        assert_eq!(outcome, Ok((true, [2, 1])), "{reads_on_other_threads}");
+        assert_eq!(outcome, Ok((true, [1, 2])), "{reads_on_other_threads}");
     }
 }

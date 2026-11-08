@@ -41,7 +41,7 @@ test("behind", () => { console.log("ROW behind the failure"); });
   };
   const plain = await update([]);
   expect(plain).toEqual({ form: undefined, exitCode: 1, snap: before, ranBehindTheFailure: false });
-  expect(await update(["--aot", "--aot-memory-limit", "1MB"])).toEqual({ ...plain, form: "layers 2" });
+  expect(await update(["--aot"])).toEqual({ ...plain, form: "one program" });
 }, 240_000);
 
 test("the files run in plain's order, whichever part is built first", async () => {
@@ -65,5 +65,5 @@ test("${name}", () => { filler1(1); });
   };
   const plain = await orderOf([]);
   expect(plain).toEqual({ order: "abcd", exitCode: 0 });
-  expect(await orderOf(["--aot"], "TestRunLayers:2,TestRunPartFiles:1")).toEqual(plain);
+  expect(await orderOf(["--aot"], "TestRunLayers:0")).toEqual(plain);
 }, 240_000);

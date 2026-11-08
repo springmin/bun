@@ -8,7 +8,7 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { flagsOfVeryLargeProgram, writeEverydayIdioms } from "./everyday-idioms";
+import { writeEverydayIdioms } from "./everyday-idioms";
 import { writeTypedIdioms, writeUntypedIdioms } from "./untyped-idioms";
 
 const [name, ...rest] = process.argv.slice(2);
@@ -51,7 +51,7 @@ function run(cmd: string[], env: Record<string, string> = {}) {
 function bySymbol(bun: string, index: number) {
   const executable = join(folder, `built-by-${index}`);
   const entryPoint = join(sources[form], name + (form === "typed" ? ".ts" : ".js"));
-  run([bun, "build", "--compile", "--aot", ...(inVeryLargeProgram ? flagsOfVeryLargeProgram : []), entryPoint, "--outfile", executable]);
+  run([bun, "build", "--compile", "--aot", entryPoint, "--outfile", executable]);
   const data = `${executable}.data`;
   run(["perf", "record", "-q", "-e", "instructions:u", "-c", String(instructionsOfSample), "-o", data, executable], {
     AOT_PERF_TURNS: String(turns),

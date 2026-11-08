@@ -1,8 +1,7 @@
 // A setup file under `[test] preload` mocks a CommonJS package with a factory that gives no `default`, and a file of the project imports the
 // default. In `bun test` the mock stands in place of the package and answers for every name: the import links and the default is undefined. So a
 // call on it throws a TypeError in each test, and `typeof` says "undefined".
-// A compiled run refused the link instead (SyntaxError: Missing 'default' export), as `bun test` did before it followed Vitest on module mocks. Over
-// layers the package lies in another image than its importer, which asks the record of the file.
+// A compiled run refused the link instead (SyntaxError: Missing 'default' export), as `bun test` did before it followed Vitest on module mocks.
 import { afterAll, expect } from "bun:test";
 import { bunEnv, bunExe, tempDir } from "harness";
 import { test } from "../supported";
@@ -36,9 +35,8 @@ type Way = { flags: string[]; words?: string };
 type Run = { linesOf: Map<string, string[]>; exitCode: number };
 
 /**
- * Every way is one compiled run of the project, held to a plain run importer by importer. A run in layers compiles Bun's own library too, under a
- * sanitizer most of a minute of processor time, whatever the project holds. The ways are dealt to several test files, and each file makes the
- * plain run for itself. The runs come one behind the other: beside other files that build, more builds at once only make each test longer.
+ * Every way is one compiled run of the project, held to a plain run importer by importer. The runs come one behind the other: beside other files
+ * that build, more builds at once only make each test longer.
  */
 export function answersAsPlainBunTest(ways: Way[]) {
   let folder: ReturnType<typeof tempDir> | undefined;

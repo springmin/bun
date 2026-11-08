@@ -27,7 +27,6 @@ AOTFunctionTables.cpp | JSC::AOT::nameGivenTo | pending-call | JSC::AOT::ownText
 AOTFunctionTables.cpp | JSC::AOT::namesFramesAsWhenCreated | pending-call | JSC::AOT::functionName > JSC::AOT::functionName
 AOTFunctionTables.cpp | JSC::AOT::ownStringProperty | pending-call | JSC::AOT::ProgramStatics::readStringWithoutAllocating > JSC::JSString::tryGetValueWithoutGC
 AOTIterationOperations.cpp | JSC::AOT::operationAOTEnumeratorNext | unchecked-exit | JSC::AOT::findEnumeratedKey > JSC::AOT::findEnumeratedKey
-AOTJSONWriteOperations.cpp | JSC::AOT::appendJSONValueInFrame | unchecked-exit | JSC::AOT::appendJSONValue > JSC::AOT::appendJSONValue
 AOTModuleEvaluation.cpp | <lambda at AOTModuleEvaluation.cpp:274> | pending-call | JSC::AOT::Modules::throwEvaluationError > JSC::AOT::Modules::evaluateByCallingBody
 AOTModuleEvaluation.cpp | <lambda at AOTModuleEvaluation.cpp:274> | pending-call | JSC::AOT::Modules::throwEvaluationError > JSC::AOT::computeEvaluationList
 AOTModuleEvaluation.cpp | JSC::AOT::Modules::resumeDeferredLoadsWithoutImporter | unchecked-exit | JSC::AOT::Modules::resumeDeferredRequests > JSC::AOT::Modules::resumeDeferredRequests
@@ -69,16 +68,6 @@ AOTModules.cpp | JSC::AOT::importModule | pending-call | JSC::AOT::modulesForEva
 AOTModules.cpp | JSC::AOT::moduleNamespace | pending-call | JSC::AOT::modulesOrThrow > JSC::AOT::Modules::moduleNamespace
 AOTModules.cpp | JSC::AOT::moduleRecord | scope-while-pending | JSC::AOT::modulesForEvaluation > JSC::AOT::modulesForEvaluation
 AOTModules.cpp | JSC::AOT::requireModule | pending-call | JSC::AOT::modulesForEvaluation > JSC::AOT::Modules::require
-AOTNativeCallValidation.cpp | <lambda at AOTNativeCallValidation.cpp:1085> | pending-call | JSC::JSObject::getPropertySlot > JSC::PropertySlot::getValue
-AOTNativeCallValidation.cpp | JSC::AOT::NativeCallValidationScope::Checker::checkChanges | pending-call | JSC::AOT::NativeCallValidationScope::Checker::checkArrivedValue > JSC::AOT::NativeCallValidationScope::Checker::fail
-AOTNativeCallValidation.cpp | JSC::AOT::NativeCallValidationScope::Checker::checkOperandsOfUnknownFunction | pending-call | JSC::AOT::NativeCallValidationScope::Checker::fail > JSC::AOT::NativeCallValidationScope::Checker::fail
-AOTNativeCallValidation.cpp | JSC::AOT::NativeCallValidationScope::Checker::finish | pending-call | JSC::AOT::NativeCallValidationScope::Checker::checkChanges > JSC::AOT::NativeCallValidationScope::Checker::checkResult
-AOTNativeCallValidation.cpp | JSC::AOT::NativeCallValidationScope::Checker::finish | pending-call | JSC::AOT::NativeCallValidationScope::Checker::checkChanges > JSC::AOT::NativeCallValidationScope::Checker::describeCallee
-AOTNativeCallValidation.cpp | JSC::AOT::NativeCallValidationScope::Checker::finish | pending-call | JSC::AOT::NativeCallValidationScope::Checker::checkException > JSC::AOT::NativeCallValidationScope::Checker::checkChanges
-AOTNativeCallValidation.cpp | JSC::AOT::NativeCallValidationScope::Checker::finish | pending-call | JSC::AOT::NativeCallValidationScope::Checker::fail > JSC::AOT::NativeCallValidationScope::Checker::checkException
-AOTNativeCallValidation.cpp | JSC::AOT::NativeCallValidationScope::Checker::finish | pending-call | JSC::AOT::NativeCallValidationScope::Checker::fail > JSC::AOT::NativeCallValidationScope::Checker::fail
-AOTNativeCallValidation.cpp | JSC::AOT::NativeCallValidationScope::Checker::holdsUnderNamedMember | pending-call | JSC::PropertySlot::getValue > JSC::JSObject::getIndexQuickly
-AOTNativeCallValidation.cpp | JSC::AOT::noteNativeBindingResult | pending-call | JSC::JSObject::getIndexQuickly > JSC::JSObject::getIndexQuickly
 AOTObjectBuiltinOperations.cpp | <lambda at AOTObjectBuiltinOperations.cpp:362> | pending-call | JSC::JSObject::getDirectIndex > JSC::JSObject::getDirectIndex
 AOTObjectMethodTable.cpp | JSC::AOT::Object::putWithKnownField | unchecked-exit | JSC::AOT::Object::tryMoveFieldBackToSlot > JSC::AOT::Object::tryMoveFieldBackToSlot
 AOTPropertyCachesLeafOperations.cpp | JSC::AOT::findNameEqualToLongString | pending-call | JSC::AOT::findAtomEqualTo > JSC::AOT::findAtomEqualTo
@@ -86,7 +75,6 @@ AOTPropertyCachesLeafOperations.cpp | JSC::AOT::findNameEqualToLongString | pend
 AOTPropertyCachesLeafOperations.cpp | JSC::AOT::readByKey | pending-call | JSC::AOT::nameOfKeyForLeaf > JSC::AOT::readAndCache
 AOTPropertyCachesLeafOperations.cpp | JSC::AOT::readByKey | pending-call | JSC::AOT::nameOfKeyForLeaf > JSC::AOT::readGeneric
 AOTPropertyCachesLeafOperations.cpp | JSC::AOT::readByKey | pending-call | JSC::AOT::nameOfKeyForLeaf > JSC::JSObject::tryGetIndexQuickly
-AOTPropertyCachesLeafOperations.cpp | JSC::AOT::validateLookupResult | pending-call | JSC::JSObject::getPropertySlot > JSC::PropertySlot::getValue
 AOTPropertyCachesOperations.cpp | JSC::AOT::getAndCache | pending-call | JSC::AOT::Object::tryMoveFieldBackToSlot > JSC::JSValue::get
 AOTPropertyCachesOperations.cpp | JSC::AOT::getByVal | pending-call | JSC::JSObject::tryGetIndexQuickly > JSC::JSValue::get
 AOTPropertyCachesOperations.cpp | JSC::AOT::getByVal | unchecked-exit | JSC::JSObject::tryGetIndexQuickly > JSC::JSObject::tryGetIndexQuickly
@@ -109,8 +97,6 @@ AOTPropertyOperations.cpp | JSC::AOT::operationAOTGetSuperPropertyById | pending
 AOTPropertyWalk.cpp | <lambda at AOTPropertyWalk.cpp:989> | pending-call | JSC::AOT::tryDefineElementOfCompiledObject > JSC::AOT::Object::putByIndex
 AOTRemovableFeature.cpp | JSC::throwForRemovedCallee | pending-call | JSC::InternalFunction::name > JSC::Bun__throwForRemovedFunction
 AOTRuntimeReporter.cpp | JSC::AOT::RuntimeReporter::reportFailedCheck | pending-call | JSC::AOT::RuntimeReporter::findOrAddSite > JSC::AOT::describeKindOf
-AOTRuntimeValidation.cpp | JSC::AOT::contentsHaveType | pending-call | JSC::JSObject::tryGetIndexQuickly > JSC::JSObject::tryGetIndexQuickly
-AOTRuntimeValidation.cpp | JSC::AOT::operationAOTValidateLookup | pending-call | JSC::JSObject::getPropertySlot > JSC::PropertySlot::getValue
 AOTStackTrace.cpp | JSC::AOT::nameOfBuiltin | pending-call | JSC::AOT::findPrivateGlobalFunction > JSC::JSFunction::nameWithoutGC
 AOTStringBuilderStorage.cpp | JSC::AOT::StackStringBuilder::finish | pending-call | JSC::AOT::StackStringBuilder::moveToStorage > JSC::AOT::StringBuilderStorage::finish
 AOTStringBuilderStorage.cpp | JSC::AOT::StackStringBuilder::moveToStorage | pending-call | JSC::AOT::StringBuilderStorage::append > JSC::AOT::StringBuilderStorage::append

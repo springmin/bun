@@ -1,5 +1,4 @@
 // A program puts its own function and class under the global names setTimeout and URL. Bun's own modules keep the ones they were made with.
-// Alone: what the build knows to be replaced goes by every program of the executable
 import net from "node:net";
 import url from "node:url";
 import http from "node:http";

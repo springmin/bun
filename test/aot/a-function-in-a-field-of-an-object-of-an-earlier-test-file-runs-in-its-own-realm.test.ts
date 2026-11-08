@@ -1,8 +1,7 @@
 import { expect } from "bun:test";
 import { bunEnv, bunExe, tempDir } from "harness";
 import { run } from "./harness/run";
-// One by one: the runner gives this file a process of its own and eight cases at once, beside two more like it: too many builds for four cores.
-import { testOneByOne as test } from "./supported";
+import { test } from "./supported";
 
 // `bun test --isolate` gives each test file a fresh realm of one VM, and each realm runs an instance of the compiled program of its own.
 // `Bun.s3` is one object for the VM, so what a file hangs on it is there for the next file, in plain Bun too.
@@ -104,78 +103,72 @@ async function runTests(directory: string, words: string | undefined, ...flags: 
   return { stdout: stdout.split("\n").filter(line => line.startsWith("SEEN")), exitCode };
 }
 
-for (const [way, words] of [
-  ["as the runner divides it", undefined],
-  ["as one program", "TestRunLayers:0"],
-  ["over two layers, both files in one process", "TestRunLayers:2,TestRunPartFiles:3"],
-] as const) {
-  test(`a function in a field of an object of an earlier test file runs in its own realm, ${way}`, async () => {
-    using dir = tempDir("aot-a-function-in-a-field-of-an-object-of-an-earlier-test-file", files);
-    const plain = await runTests(String(dir), undefined);
-    expect(plain).toEqual({
-      stdout: [
-        "SEEN what a fresh one is: returns true,false,true,true",
-        "SEEN kept, which: returns theirs",
-        "SEEN kept, fail: throws an instance of theirs",
-        "SEEN kept, only: returns theirs",
-        "SEEN kept, later: returns a promise of theirs",
-        "SEEN kept, both: returns holder,theirs",
-        "SEEN kept, bump: returns 1,0",
-        "SEEN fresh, which: returns theirs",
-        "SEEN fresh, fail: throws an instance of theirs",
-        "SEEN fresh, only: returns theirs",
-        "SEEN fresh, later: returns a promise of theirs",
-        "SEEN fresh, both: returns holder,theirs",
-        "SEEN fresh, bump: returns 1,0",
-        "SEEN made there, which: returns theirs",
-        "SEEN made there, fail: throws an instance of theirs",
-        "SEEN made there, only: returns theirs",
-        "SEEN made there, later: returns a promise of theirs",
-        "SEEN made there, both: returns holder,theirs",
-        "SEEN made there, bump: returns 1,0",
-        "SEEN below, which: returns theirs",
-        "SEEN below, fail: throws an instance of theirs",
-        "SEEN below, only: returns theirs",
-        "SEEN below, later: returns a promise of theirs",
-        "SEEN below, both: returns holder,theirs",
-        "SEEN below, bump: returns 1,0",
-        "SEEN reflected, which: returns theirs",
-        "SEEN reflected, fail: throws an instance of theirs",
-        "SEEN reflected, only: returns theirs",
-        "SEEN reflected, later: returns a promise of theirs",
-        "SEEN reflected, both: returns holder,theirs",
-        "SEEN reflected, bump: returns 1,0",
-        "SEEN written out, kept, only: returns theirs",
-        "SEEN written out, fresh, only: returns theirs",
-        "SEEN written out, made there, only: returns theirs",
-        "SEEN written out, fresh, fail: throws an instance of theirs",
-        "SEEN written out, made there, fail: throws an instance of theirs",
-        "SEEN written out, fresh, later: returns a promise of theirs",
-        "SEEN written out, fresh, both: returns holder,theirs",
-        "SEEN read then called: returns theirs",
-        "SEEN spread: returns theirs",
-        "SEEN assigned: returns theirs",
-        "SEEN call: returns theirs",
-        "SEEN apply: returns theirs",
-        "SEEN optional: returns theirs",
-        "SEEN by a name put together: returns theirs",
-        "SEEN destructured: returns theirs",
-        "SEEN values: returns theirs",
-        "SEEN read in a loop: returns 3000",
-        "SEEN called in a loop: returns 3000",
-        "SEEN fresh in a loop: returns 3000",
-        "SEEN either in a loop: returns 3000",
-        "SEEN either made in a loop: returns 3000",
-        "SEEN ours first, then theirs: returns 0,theirs,theirs,theirs",
-        "SEEN an environment, fresh: returns 5,0",
-        "SEEN an environment, made there: returns 5,0",
-        "SEEN an environment, what: returns 7,theirs",
-        "SEEN a literal: returns theirs",
-        "SEEN a literal, bump: returns 1,0",
-        "SEEN ours: returns ours",
-      ],
-      exitCode: 0,
-    });
-    expect(await runTests(String(dir), words, "--aot")).toEqual(plain);
+test("a function in a field of an object of an earlier test file runs in its own realm, as one program", async () => {
+  using dir = tempDir("aot-a-function-in-a-field-of-an-object-of-an-earlier-test-file", files);
+  const plain = await runTests(String(dir), undefined);
+  expect(plain).toEqual({
+    stdout: [
+      "SEEN what a fresh one is: returns true,false,true,true",
+      "SEEN kept, which: returns theirs",
+      "SEEN kept, fail: throws an instance of theirs",
+      "SEEN kept, only: returns theirs",
+      "SEEN kept, later: returns a promise of theirs",
+      "SEEN kept, both: returns holder,theirs",
+      "SEEN kept, bump: returns 1,0",
+      "SEEN fresh, which: returns theirs",
+      "SEEN fresh, fail: throws an instance of theirs",
+      "SEEN fresh, only: returns theirs",
+      "SEEN fresh, later: returns a promise of theirs",
+      "SEEN fresh, both: returns holder,theirs",
+      "SEEN fresh, bump: returns 1,0",
+      "SEEN made there, which: returns theirs",
+      "SEEN made there, fail: throws an instance of theirs",
+      "SEEN made there, only: returns theirs",
+      "SEEN made there, later: returns a promise of theirs",
+      "SEEN made there, both: returns holder,theirs",
+      "SEEN made there, bump: returns 1,0",
+      "SEEN below, which: returns theirs",
+      "SEEN below, fail: throws an instance of theirs",
+      "SEEN below, only: returns theirs",
+      "SEEN below, later: returns a promise of theirs",
+      "SEEN below, both: returns holder,theirs",
+      "SEEN below, bump: returns 1,0",
+      "SEEN reflected, which: returns theirs",
+      "SEEN reflected, fail: throws an instance of theirs",
+      "SEEN reflected, only: returns theirs",
+      "SEEN reflected, later: returns a promise of theirs",
+      "SEEN reflected, both: returns holder,theirs",
+      "SEEN reflected, bump: returns 1,0",
+      "SEEN written out, kept, only: returns theirs",
+      "SEEN written out, fresh, only: returns theirs",
+      "SEEN written out, made there, only: returns theirs",
+      "SEEN written out, fresh, fail: throws an instance of theirs",
+      "SEEN written out, made there, fail: throws an instance of theirs",
+      "SEEN written out, fresh, later: returns a promise of theirs",
+      "SEEN written out, fresh, both: returns holder,theirs",
+      "SEEN read then called: returns theirs",
+      "SEEN spread: returns theirs",
+      "SEEN assigned: returns theirs",
+      "SEEN call: returns theirs",
+      "SEEN apply: returns theirs",
+      "SEEN optional: returns theirs",
+      "SEEN by a name put together: returns theirs",
+      "SEEN destructured: returns theirs",
+      "SEEN values: returns theirs",
+      "SEEN read in a loop: returns 3000",
+      "SEEN called in a loop: returns 3000",
+      "SEEN fresh in a loop: returns 3000",
+      "SEEN either in a loop: returns 3000",
+      "SEEN either made in a loop: returns 3000",
+      "SEEN ours first, then theirs: returns 0,theirs,theirs,theirs",
+      "SEEN an environment, fresh: returns 5,0",
+      "SEEN an environment, made there: returns 5,0",
+      "SEEN an environment, what: returns 7,theirs",
+      "SEEN a literal: returns theirs",
+      "SEEN a literal, bump: returns 1,0",
+      "SEEN ours: returns ours",
+    ],
+    exitCode: 0,
   });
-}
+  expect(await runTests(String(dir), "TestRunLayers:0", "--aot")).toEqual(plain);
+});

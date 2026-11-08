@@ -253,6 +253,7 @@ fn apply_bundler_options(ctx: &ContextData, this_transpiler: &mut Transpiler<'st
     } else {
         bun_ast::runtime::ReactCompilerMode::Disabled
     };
+    // `bun test --aot` compiles the components that `bun test` compiles, the same way.
     let runs_tests = (ctx.bundler_options.aot.as_ref()).is_some_and(|aot| aot.runs_tests);
     if let Some(scope) = (ctx.test_options.react_compiler.as_ref()).filter(|_| runs_tests) {
         this_transpiler.options.react_compiler = bun_ast::runtime::ReactCompilerMode::Client;
@@ -488,11 +489,7 @@ pub(super) fn request_from_context<'r>(
         entry_points.map(|path| -> &'static [u8] { arena.alloc_slice_copy(&path[..]) }),
     );
     let embeds_source_maps = transpiler.options.source_map != options::SourceMapOption::None;
-    // SAFETY: `env` is a process-lifetime singleton set in `Transpiler::init`.
-    let env = unsafe { &mut *transpiler.env };
-    // SAFETY: `create_context_data` set `ctx.log`, which lives as long as the process. The build
-    // writes to it through this reference or through the transpiler's pointer, never both at once.
-    let log = unsafe { &mut *ctx.log };
+    let env = transpiler.env;
 
     CompileRequest {
         origin,
@@ -548,9 +545,13 @@ pub(super) fn request_from_context<'r>(
                 jit_policy: ctx.bundler_options.compile_jit_policy,
             },
             assets: &ctx.bundler_options.compile_assets,
+            metafiles: [
+                &ctx.bundler_options.metafile,
+                &ctx.bundler_options.metafile_md,
+            ],
             embeds_source_maps,
         },
-        log,
+        log: ctx.log,
     }
 }
 

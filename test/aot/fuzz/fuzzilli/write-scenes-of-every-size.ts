@@ -1,5 +1,5 @@
 // Writes scenes whose one parameter is a size: how many cases a switch has, how many elements a list literal, how many fields an object, how many operands a call, how deep a chain of calls goes.
-// A compiler treats 8 of something otherwise than 9 of it. The sizes are drawn next to the numbers at which this one changes what it does (`bun build --aot-list=registry` lists them), one below, at and one above.
+// A compiler treats 8 of something otherwise than 9 of it. The sizes are drawn next to the numbers at which this one changes what it does, one below, at and one above.
 // Beside the size a scene is plain code as people write it, with one odd thing in one place: a value of another kind, a hole, a getter, a member that is missing.
 // One kind of scene has a declared type in place of a size, and one value that is not what the type says.
 // A scene prints once, at its end.

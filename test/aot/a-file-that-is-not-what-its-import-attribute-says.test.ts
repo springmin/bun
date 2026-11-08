@@ -75,11 +75,7 @@ async function seenIn(words: string | undefined, ...flags: string[]) {
 }
 
 test("a test run reads a file as the import asks", async () => {
-  const [plain, one, layers] = await Promise.all([
-    seenIn(undefined),
-    seenIn("TestRunLayers:0", "--aot"),
-    seenIn("TestRunLayers:2,TestRunPartFiles:4", "--aot"),
-  ]);
+  const [plain, one] = await Promise.all([seenIn(undefined), seenIn("TestRunLayers:0", "--aot")]);
   expect(plain.said).toContain("4 fail");
   expect(plain.said.filter(line => line.startsWith("SyntaxError: JSON Parse error")).length).toBe(4);
   expect(plain.exitCode).toBe(1);
@@ -94,5 +90,4 @@ test("a test run reads a file as the import asks", async () => {
     exitCode: 1,
   };
   expect(one).toEqual(byTheLanguage);
-  expect(layers).toEqual(byTheLanguage);
 }, 240_000);

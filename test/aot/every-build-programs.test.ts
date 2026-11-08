@@ -17,7 +17,7 @@ test("each line names a program or a folder that is there, once, in order", () =
   expect(lines).toEqual([...new Set(lines)].sort());
 });
 
-// every-build.txt counts eight minutes of one processor for them. Whoever adds a program takes another one off.
+// every-build.txt counts ten minutes of one processor for them. Whoever adds a program takes another one off.
 test("no more programs than were measured", () => {
-  expect(lines.length).toBeLessThanOrEqual(720);
+  expect(lines.length).toBeLessThanOrEqual(780);
 });

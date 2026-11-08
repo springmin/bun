@@ -8,6 +8,7 @@
 //! rechecks it for each candidate (`check_argument`). Whenever that leaves a candidate's applicability undecided,
 //! nothing is reported.
 
+use super::aot::DiagnosticSubject;
 use super::call::{Arg, CallLike, CallState};
 use super::explain::{Line, NOWHERE};
 use super::relate::Relation;
@@ -173,10 +174,7 @@ impl Checker<'_, '_> {
                 call_sigs.len(),
                 construct_sigs.len(),
             ) {
-                if has_type_args
-                    && !self.is_error_type(called)
-                    && !self.comes_out_of_another_image(file, data.callee)
-                {
+                if has_type_args && !self.is_error_type(called) {
                     let node_start = self.start_inside_parentheses(file, e);
                     self.error_at(
                         (file, node_start, self.end_inside_parentheses(file, e)),
@@ -222,7 +220,7 @@ impl Checker<'_, '_> {
             return;
         }
         if self.is_any(apparent) {
-            if has_type_args && !self.comes_out_of_another_image(file, data.callee) {
+            if has_type_args {
                 let node_start = self.start_inside_parentheses(file, e);
                 self.error_at(
                     (file, node_start, self.end_inside_parentheses(file, e)),
@@ -331,6 +329,9 @@ impl Checker<'_, '_> {
             self.related_to_invocation_error(at.0, target, apparent, construct, has_one_argument);
         if let Some(head) = head {
             diagnostic = self.new_diagnostic_chain(Some(diagnostic), at, head, &[]);
+        }
+        if construct && self.is_class_below_brought_class(at.0, target) {
+            diagnostic.subject = (diagnostic.subject).or(DiagnosticSubject::BroughtDeclaration);
         }
         self.add_diagnostic(diagnostic);
     }
@@ -638,14 +639,6 @@ impl Checker<'_, '_> {
 
     /// `isConstructorAccessible`. Returns `None` if it is, otherwise the constructor's accessibility modifiers, each of
     /// which is an error, and the class that declares it.
-    fn comes_out_of_another_image(&self, file: FileId, mut callee: ExprId) -> bool {
-        while let ExprKind::Dot { obj, .. } = self.hir(file).checked_kind(callee) {
-            callee = obj;
-        }
-        self.resolve_entity_name_expression(file, callee, SymFlags::VALUE)
-            .is_some_and(|symbol| self.files().stands_for_modules_in_other_images(symbol))
-    }
-
     pub(super) fn inaccessible_constructor(
         &mut self,
         file: FileId,
@@ -793,6 +786,21 @@ impl Checker<'_, '_> {
 
     /// `reportCallResolutionErrors`
     pub(super) fn report_call_resolution_errors(
+        &mut self,
+        s: &CallState<'_>,
+        sigs: &[SigId],
+        head: Option<u32>,
+    ) {
+        let from = self.reported.len();
+        self.report_call_resolution_errors_of(s, sigs, head);
+        if sigs.iter().any(|&sig| self.is_signature_brought(sig)) {
+            for diagnostic in self.reported.iter_mut().skip(from) {
+                diagnostic.subject = (diagnostic.subject).or(DiagnosticSubject::BroughtDeclaration);
+            }
+        }
+    }
+
+    fn report_call_resolution_errors_of(
         &mut self,
         s: &CallState<'_>,
         sigs: &[SigId],
@@ -1213,7 +1221,7 @@ impl Checker<'_, '_> {
         // declaration doesn't.
         let declares_this = hir[func].this_ty(hir).is_some();
         let has_this = match self.types().sig(sig) {
-            SigData::Synth { this, .. } => this.is_some(),
+            SigData::Synth(SynthSig { this, .. }) => this.is_some(),
             _ => declares_this,
         };
         let Some(param) = (actual + usize::from(has_this))

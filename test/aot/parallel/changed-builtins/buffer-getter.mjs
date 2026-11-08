@@ -1,4 +1,3 @@
-// Alone: whether the call is bound to the built-in is a fact about the whole program.
 // A member of a native module's object is changed, then used for the first time.
 import buffer from "node:buffer";
 const tell = act => { try { return String(act()); } catch (error) { return error.constructor.name; } };

@@ -38,7 +38,10 @@ const asksBehindMock = `async () => { console.log("SAID " + (await import("../sr
 const unspied = ["SAID realfarreal"];
 const spied = ["SAID farspied", "SAID farreal"];
 // `inSight`: the build opens nothing.
-const cases: Record<string, { file: string; said: string[]; inSight: boolean }> = {
+// `opensToday`: the file shows all that becomes of the object, and the build does not see it yet.
+// A mark does not see a number grow worse: `opensNoMoreThan` is the number in those words, and a case of its own holds the build to it.
+type Case = { file: string; said: string[]; inSight: boolean; opensToday?: string; opensNoMoreThan?: number };
+const cases: Record<string, Case> = {
   "names taken off Bun.jest() and exported": {
     file: `import { test } from "../support/names.js";\n${holds}test("t", ${reads});\n`,
     said: unspied,
@@ -73,6 +76,8 @@ const cases: Record<string, { file: string; said: string[]; inSight: boolean }> 
     file: `const { jest } = Bun;\n${holds}function runner() {\n  return jest(import.meta.path);\n}\nconst { test } = runner();\nconst { describe } = runner();\ndescribe("d", () => { test("t", ${reads}); });\n`,
     said: unspied,
     inSight: true,
+    opensToday: "9 variables in 4 files are opened and a spy may come under any name, nothing need be",
+    opensNoMoreThan: 9,
   },
   "the function returns the object or a copy of it": {
     file: `import { runner } from "../support/one-of-two.js";\n${holds}runner().test("t", ${spies(`runner(true).spyOn(held.lib, name).mockReturnValue("spied")`)});\n`,
@@ -99,8 +104,8 @@ const cases: Record<string, { file: string; said: string[]; inSight: boolean }> 
 export function runnerObject(part: number, of: number) {
   raiseDefaultTimeout(120_000);
   const mine = Object.entries(cases).filter((_, index) => index % of === part);
-  for (const [name, { file, said, inSight }] of mine) {
-    test(name, async () => {
+  for (const [name, { file, said, inSight, opensToday, opensNoMoreThan }] of mine) {
+    const runBothWays = async () => {
       using dir = tempDir("aot-runner-object", { ...shared, "test/a.test.js": file });
       const seenWith = async (...flags: string[]) => {
         const env = { ...bunEnv, BUN_JSC_logAOTPhaseTimes: "1" };
@@ -112,11 +117,30 @@ export function runnerObject(part: number, of: number) {
           opensNothing:
             opened.every(count => count === "0") && !lines.some(line => line.includes("a spy under any name true")),
           builds: opened.length > 0,
+          opened: Math.max(0, ...opened.map(Number)),
           exitCode,
         };
       };
-      expect(await seenWith()).toEqual({ said, opensNothing: true, builds: false, exitCode: 0 });
-      expect(await seenWith("--aot")).toEqual({ said, opensNothing: inSight, builds: true, exitCode: 0 });
+      return [await seenWith(), await seenWith("--aot")];
+    };
+    const withoutCount = ({ opened, ...rest }: Awaited<ReturnType<typeof runBothWays>>[number]) => rest;
+    let both: ReturnType<typeof runBothWays> | undefined;
+    test(name, async () => {
+      const [plain, compiled] = await (both ??= runBothWays());
+      expect(withoutCount(plain)).toEqual({ said, opensNothing: true, builds: false, exitCode: 0 });
+      const opensNothing = opensToday ? compiled.opensNothing : inSight;
+      expect(withoutCount(compiled)).toEqual({ said, opensNothing, builds: true, exitCode: 0 });
     });
+    // `failing`: it turns red the day the build sees it. Then take the words out of the row.
+    if (opensToday) {
+      test.failing(`${name}: ${opensToday}`, async () => {
+        expect((await (both ??= runBothWays()))[1].opensNothing).toBe(inSight);
+      });
+    }
+    if (opensNoMoreThan !== undefined) {
+      test(`${name}: no more than ${opensNoMoreThan} variables are opened`, async () => {
+        expect((await (both ??= runBothWays()))[1].opened).toBeLessThanOrEqual(opensNoMoreThan);
+      });
+    }
   }
 }

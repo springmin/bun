@@ -1127,6 +1127,7 @@ export const linkerFlags: Flag[] = [
     flag: c => (icfMode(c) === "safe" ? "/OPT:SAFEICF" : "/OPT:NOICF"),
     when: c => c.windows,
     desc: "Identical-code-folding (safe in release)",
+    toolchain: true,
   },
   {
     flag: c => [`/opt:lldlto=${ltoLevel(c)}`, `/opt:lldltocgo=${ltoLevel(c)}`],

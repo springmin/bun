@@ -77,6 +77,5 @@ test("a file that a plugin answers for takes its importers in the program above 
     results: ["pass leaves an import that never settles", "pass the next file loads the modules"],
     exitCode: 0,
   });
-  const compiled = await runTests(String(dir), "--aot", "--aot-memory-limit", "1MB");
-  expect(compiled).toEqual({ programs: "2", seen: plain.seen });
+  expect((await runTests(String(dir), "--aot")).seen).toEqual(plain.seen);
 });

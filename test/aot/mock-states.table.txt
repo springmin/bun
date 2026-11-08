@@ -10,7 +10,7 @@
 #   in place while another waits          a second mock waits for the next load
 #   in place over a module that has run   later importers get the mock; whoever was linked before keeps the module
 #   fills                                 the names of the module hold what the mock gave, and its body never runs
-#   laid over                             the body had run; the values of the mock are stored over its own, which are kept
+#   laid over                             the body had run; the values of the mock are stored over its own, which are kept. (body linked): it waits for an import whose body is up the stack, and runs at its turn
 #   failed                                the factory threw or rejected, and an error is kept
 #   ended                                 the mock has ended; whoever was linked against it reads it until a load comes to the module
 #   ended while another waits            the ended mock still stands, and a new one waits for the next load
@@ -21,7 +21,14 @@
 # A call that meets no compiled module: no compiled module (the loader holds it | nothing holds it) x <call>, <factory>.
 # The marks: `ok` . `?none`: a side is no state . `?end-leaves`: the end of a mock leaves the module mocked . `?new`: appended by BUN_AOT_REWRITE_MOCK_STATES=1, not yet looked at.
 # A landing that cures a doubted line takes it out; one that adds a step adds its line, with `ok` if a test against `bun test` stands behind it.
+ok ES none (body linked) x jest.mock, a factory
+ok ES runs (body evaluated) > didEndMock > ES none (body failed)
+ok ES runs (body failed) > setMock > ES in place (body evaluated)
+ok ES in place (body evaluated) > didEndMock > ES none (body evaluated)
 ok CommonJS none (body linked) > deferMock > CommonJS waits (body linked)
+ok CommonJS none (body evaluated) > deferMock, asks again > CommonJS waits (body evaluated)
+ok CommonJS runs (body evaluated) > runBodyOfRequiredFileAheadOfMock > CommonJS none (body evaluated)
+ok CommonJS runs (body evaluated) > setMock > CommonJS in place (body evaluated)
 ok CommonJS runs (body evaluated) > deferMock > CommonJS waits (body evaluated)
 ?none ES NONE OF THEM (body linked) [ to-run waited error-kept ] > deferMock > ES waits (body linked)
 ?none ES ended (body evaluated) > deferMock > ES NONE OF THEM (body evaluated) [ mocked to-run waited in-place to-let-go ]
@@ -128,6 +135,7 @@ ok ES fills (body linked) > didMockModule > ES fills (body linked)
 ok ES fills (body unlinked) > didMockModule > ES fills (body unlinked)
 ok ES laid over (body awaiting) > didMockModule > ES laid over (body awaiting)
 ok ES laid over (body evaluated) > didMockModule > ES laid over (body evaluated)
+ok ES laid over (body linked) > didMockModule > ES laid over (body linked)
 ok library none (body evaluated) > didMockModule > library none (body evaluated)
 ok library none (body unlinked) > didMockModule > library none (body unlinked)
 ok CommonJS in place (body evaluated) > exportsBeforeMock > CommonJS in place (body evaluated)
@@ -315,6 +323,7 @@ ok ES fills (body linked) > willMockModule > ES fills (body linked)
 ok ES fills (body unlinked) > willMockModule > ES fills (body unlinked)
 ok ES laid over (body evaluated) > willMockModule > ES laid over (body evaluated)
 ok ES none (body awaiting) > willMockModule > ES laid over (body awaiting)
+ok ES none (body linked) > willMockModule > ES laid over (body linked)
 ok ES none (body evaluated) > willMockModule > ES laid over (body evaluated)
 ?none ES none (body linked) > willMockModule > ES NONE OF THEM (body linked) [ mocked laid-over ]
 ok ES none (body linked) > willMockModule > ES fills (body linked)

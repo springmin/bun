@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { beforeAll, testOneByOne as test } from "../supported";
 import { run } from "./run";
 
-// A layered test run has three images in one realm: the packages with Bun's library, what else the test files import, and the test files.
+// A test run is built as one program. The files of this project lie in three layers: packages, what else the test files import, and the test files.
 // Here classes, closures, objects with typed fields, errors, iterators, proxies, modules and the library's own state go from each to the others, each body seven times.
 // A check prints what it saw, so a wrong value shows where no `expect` asks for it. The files are packages and test files only in the copy that is run.
 const folder = join(import.meta.dir, "..", "three-layers");
@@ -44,10 +44,7 @@ async function seenIn(words: string | undefined, flags: string[] = [], more: Rec
 
 type Way = { words?: string; env?: Record<string, string> };
 
-/**
- * Every way is a compiled run of the whole project, held to a plain run. Under a sanitizer the builds of one way take minutes of
- * processor time, so the ways are dealt to several test files, and each file makes the plain run for itself.
- */
+/** Every way is a compiled run of the whole project, held to a plain run. */
 export function answerAsPlainBunTest(ways: Record<string, Way>) {
   let plain: Awaited<ReturnType<typeof seenIn>>;
   beforeAll(async () => {
@@ -59,7 +56,7 @@ export function answerAsPlainBunTest(ways: Record<string, Way>) {
     expect(plain.failed).toEqual([]);
   });
 
-  test.each(Object.entries(ways))("three layers answer as plain bun test: %s", async (way, { words, env }) => {
+  test.each(Object.entries(ways))("the project answers as plain bun test: %s", async (way, { words, env }) => {
     const compiled = await seenIn(words, ["--aot"], env);
     if (compiled.stopped.length) console.error(`${way}: the run was stopped:\n${compiled.stopped.join("\n")}`);
     expect(compiled).toEqual(plain);

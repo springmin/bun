@@ -6,50 +6,70 @@ import { test } from "./supported";
 
 // A require() that goes into a context of node:vm is called by a text that the build hasn't read. An executable refuses the file that the text names, unless it
 // holds it. The build can't know the name, so it says that a loader has left, and what helps. Both things that it advises work.
+// Each program asks for two files: held/a.js, which its build gets as an entry point, and lib/a.js, which only the disk has.
 const files: Record<string, string> = {
+  "held/a.js": `module.exports = "held";`,
   "lib/a.js": `module.exports = "a";`,
   "made.mjs": `import vm from "node:vm";
     import { createRequire } from "node:module";
-    console.log(vm.runInNewContext("require('./lib/a.js')", { require: createRequire(import.meta.url) }));`,
+    const context = { require: createRequire(import.meta.url) };
+    console.log(vm.runInNewContext("require('./held/a.js')", context));
+    console.log(vm.runInNewContext("require('./lib/a.js')", context));`,
   "own.cjs": `const vm = require("node:vm");
+    console.log(vm.runInNewContext("require('./held/a.js')", { require }));
     console.log(vm.runInNewContext("require('./lib/a.js')", { require }));`,
+  "both.mjs": `import "./made.mjs";
+    import "./own.cjs";`,
   "quiet.mjs": `import vm from "node:vm";
     console.log(vm.runInNewContext("one + 1", { one: 1 }));`,
 };
 const warning = "TS100064: the program hands a require() to code that the compiler can't read";
 
+/** Builds in a folder of the files, with the executable elsewhere. Answers how often the build warned. */
+function project() {
+  const dir = tempDir("aot-require-in-vm", files);
+  const elsewhere = tempDir("aot-require-in-vm-elsewhere", {});
+  const executable = join(String(elsewhere), "program");
+  return {
+    directory: String(dir),
+    elsewhere: String(elsewhere),
+    executable,
+    async build(...operands: string[]) {
+      const command = [bunExe(), "build", "--compile", "--aot", ...operands, "--outfile", executable];
+      const built = await run(command, String(dir), bunEnv);
+      expect(built.exitCode).toBe(0);
+      return (built.stdout + built.stderr).split(warning).length - 1;
+    },
+    [Symbol.dispose]() {
+      dir[Symbol.dispose]();
+      elsewhere[Symbol.dispose]();
+    },
+  };
+}
+
 test.each(["made.mjs", "own.cjs"])(
   "the build says that the require() of %s leaves for a text it can't read",
   async entry => {
-    using dir = tempDir("aot-require-in-vm", files);
-    using elsewhere = tempDir("aot-require-in-vm-elsewhere", {});
-    const directory = String(dir);
-    const executable = join(String(elsewhere), "program");
-    const build = async (...flags: string[]) => {
-      const built = await run(
-        [bunExe(), "build", "--compile", "--aot", entry, ...flags, "--outfile", executable],
-        directory,
-        bunEnv,
-      );
-      expect(built.exitCode).toBe(0);
-      return (built.stdout + built.stderr).split(warning).length - 1;
-    };
-
-    expect(await build()).toBe(1);
-    const refused = await run([executable], directory, bunEnv);
-    expect(refused.stderr).toContain("it isn't in this executable");
-    expect({ stdout: refused.stdout, exitCode: refused.exitCode }).toEqual({ stdout: "", exitCode: 1 });
-
-    expect(await build("lib/a.js")).toBe(1);
-    const held = await run([executable], String(elsewhere), bunEnv);
-    expect({ stdout: held.stdout, exitCode: held.exitCode }).toEqual({ stdout: "a\n", exitCode: 0 });
-
-    expect(await build("--aot-allow-code-from-disk")).toBe(0);
-    const read = await run([executable], directory, bunEnv);
-    expect({ stdout: read.stdout, exitCode: read.exitCode }).toEqual({ stdout: "a\n", exitCode: 0 });
+    using made = project();
+    expect(await made.build(entry, "held/a.js")).toBe(1);
+    const besideItsFiles = await run([made.executable], made.directory, bunEnv);
+    expect(besideItsFiles.stderr).toContain("it isn't in this executable");
+    expect({ stdout: besideItsFiles.stdout, exitCode: besideItsFiles.exitCode }).toEqual({
+      stdout: "held\n",
+      exitCode: 1,
+    });
+    const moved = await run([made.executable], made.elsewhere, bunEnv);
+    expect({ stdout: moved.stdout, exitCode: moved.exitCode }).toEqual({ stdout: "held\n", exitCode: 1 });
   },
-  240_000,
+  120_000,
 );
+
+test("with --aot-allow-code-from-disk the build has nothing to warn of, and the files load", async () => {
+  using made = project();
+  expect(await made.build("both.mjs", "--aot-allow-code-from-disk")).toBe(0);
+  const read = await run([made.executable], made.directory, bunEnv);
+  expect({ stdout: read.stdout, exitCode: read.exitCode }).toEqual({ stdout: "held\na\nheld\na\n", exitCode: 0 });
+}, 240_000);
 
 // Native code calls a loader that it is handed, and runs nothing that nobody has read.
 test.each([

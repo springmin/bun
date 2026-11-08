@@ -4,15 +4,13 @@ import { run } from "./harness/run";
 import { test } from "./supported";
 
 // A test holds code as text and runs it, and the code mocks a module under a path that the text does not spell. The build reads the text: any module may be mocked
-// then. A text that only goes into a file which nothing can run opens none.
-const filler = Array.from({ length: 6000 }, (_, i) => `export function filler${i}(x) { return x + ${i}; }\n`).join("");
-const importsFiller = `import { filler1 } from "./filler.mjs"; void filler1;\n`;
+// then. A text that only goes into a file which nothing can run opens none. Which texts do is asked of the look through the test files itself:
+// a_text_that_is_run_and_mocks_by_a_made_path_may_mock_any_module() in src/aot/load/look_tests.rs. Here: the run goes by that answer.
 const code = "`Bun.jest(globalThis.libPath).mock.module(globalThis.libPath, () => ({ answer: () => 'mocked' }))`";
 const project = (imports: string, runs: string) => ({
   "package.json": `{ "name": "p", "type": "module" }`,
-  "filler.mjs": filler,
   "lib.js": `export function answer() { return "real"; }`,
-  "a.test.js": `${importsFiller}import { test } from "bun:test";
+  "a.test.js": `import { test } from "bun:test";
 ${imports}
 globalThis.libPath = import.meta.dir + "/lib.js";
 const code = ${code};
@@ -21,7 +19,7 @@ test("a", async () => {
   console.log("SEEN a " + (await import("./lib.js")).answer());
 });`,
   // The next test file of the realm mocks nothing.
-  "z.test.js": `${importsFiller}import { test } from "bun:test";
+  "z.test.js": `import { test } from "bun:test";
 import { answer } from "./lib.js";
 test("z", async () => console.log("SEEN z " + answer() + " " + (await import("./lib.js")).answer()));`,
 });
@@ -39,37 +37,12 @@ const mayBeMocked = (lines: string[]) =>
     .filter(found => found && Number(found[1]) < 100)
     .reduce((sum, found) => sum + Number(found![2]), 0);
 
-const ways = {
-  "an indirect eval": ["", `(0, eval)(code);`],
-  "the URL of a Blob": ["", `await import(URL.createObjectURL(new Blob([code], { type: "text/javascript" })));`],
-  "a module object": [
-    `import Module from "node:module";`,
-    `new Module(import.meta.dir + "/virtual.cjs")._compile(code, import.meta.dir + "/virtual.cjs");`,
-  ],
-};
-test.each(Object.keys(ways))(
-  "%s runs the text",
-  async way => {
-    using dir = tempDir("aot-mocks-in-run-text", project(...(ways[way as keyof typeof ways] as [string, string])));
-    const plain = seen(await printed(String(dir), [], ""));
-    expect(plain[0]).toBe("SEEN a mocked");
-    expect(plain.length).toBe(2);
-    const one = await printed(String(dir), ["--aot"], "TestRunLayers:0");
-    expect(seen(one)).toEqual(plain);
-    expect(mayBeMocked(one)).toBeGreaterThan(0);
-    const layers = await printed(String(dir), ["--aot", "--aot-memory-limit", "1MB"], "TestRunSaysItsForm");
-    expect(layers.filter(line => line.startsWith("AOT test run |")).join()).toContain("| layers 2 |");
-    expect(seen(layers)).toEqual(plain);
-  },
-  600000,
-);
-
-test("the text goes into a file that nothing can run", async () => {
-  const writes = `writeFileSync(import.meta.dir + "/notes.txt", code);`;
-  using dir = tempDir("aot-mocks-in-run-text", project(`import { writeFileSync } from "node:fs";`, writes));
+test("an indirect eval runs the text", async () => {
+  using dir = tempDir("aot-mocks-in-run-text", project("", `(0, eval)(code);`));
   const plain = seen(await printed(String(dir), [], ""));
-  expect(plain[0]).toBe("SEEN a real");
+  expect(plain[0]).toBe("SEEN a mocked");
+  expect(plain.length).toBe(2);
   const one = await printed(String(dir), ["--aot"], "TestRunLayers:0");
   expect(seen(one)).toEqual(plain);
-  expect(mayBeMocked(one)).toBe(0);
+  expect(mayBeMocked(one)).toBeGreaterThan(0);
 }, 600000);

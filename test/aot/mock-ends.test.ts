@@ -21,7 +21,7 @@ const files = Object.assign(
 const inOrder = ordered.flatMap(({ id }) => [`./test/${id}.test.js`, `./test/${id}.test.next.test.js`]);
 const list = join(import.meta.dir, "mock-ends.known.txt");
 const known = readFileSync(list, "utf8").split("\n");
-const ways: Record<string, string> = { "one-program": "TestRunLayers:0", "two-layers": "TestRunLayers:2" };
+const ways: Record<string, string> = { "one-program": "TestRunLayers:0" };
 
 async function seenByNextFiles(dir: string, words?: string) {
   const env = { ...bunEnv, NO_COLOR: "1", ...(words && { BUN_DEBUG_TEST_AOT_WORDS: words }) };

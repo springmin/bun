@@ -10,11 +10,18 @@ import { bunEnv, bunExe, isASAN, isDebug, isLinux, tempDir } from "harness";
 import { join } from "path";
 import { measureCommand } from "../analysis-scaling/measure-check";
 import { built, slot, spawned, withoutDebugInformation } from "../harness/commands";
-import { withSteadyCollections } from "../harness/counted-run";
 import { describe, test } from "../supported";
 import { pushes, rows, writeProgram, yardstick, type Row } from "./first-executions";
 
 const items = 250;
+// A collection starts only when enough has been allocated, never on a timer, and runs entirely on the program's thread. With the collector's helper threads on, the instruction count differs from run to run.
+const withSteadyCollections = {
+  BUN_GC_TIMER_DISABLE: "1",
+  BUN_JSC_percentCPUPerMBForEdenTimer: "0",
+  BUN_JSC_percentCPUPerMBForFullTimer: "0",
+  BUN_JSC_useConcurrentGC: "0",
+  BUN_JSC_numberOfGCMarkers: "1",
+};
 const skipped = isDebug || isASAN ? "a debug or ASAN build counts other instructions" : !isLinux ? "instructions are counted on Linux" : undefined;
 if (skipped) console.error(`SKIPPED: test/aot/perf/first-executions-against-plain-bun.measure.ts: ${skipped}`);
 

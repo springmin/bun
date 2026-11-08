@@ -1,13 +1,12 @@
 mod support;
 use support::*;
 
-use bun_sema::erasure::keep_only_comments_beside_types;
+use bun_sema::erasure::{ReplacedText, find_type_ranges_beside, keep_only_comments_beside_types};
 use std::borrow::Cow;
 use std::sync::Mutex;
 
 type Row = (&'static str, &'static str);
 
-/// TypeScript, and the same code as JavaScript.
 const EXACT_PAIRS: &[Row] = &[
     (
         r#"function f(a: number, b?: string): void { let c: number = a; }"#,
@@ -36,6 +35,10 @@ const EXACT_PAIRS: &[Row] = &[
     (
         r#"function t(this: Window, a: number) {}"#,
         r#"function t(a) {}"#,
+    ),
+    (
+        r#"function s(a: { new (b: number): object; (b: string): string }): { (b: number): number; [key: string]: number; (b: string): string } { return a; }"#,
+        r#"function s(a) { return a; }"#,
     ),
     (
         r#"abstract class C<T> extends B<T> implements I { declare x: number; abstract y: number; abstract n(): void; private p = 1; readonly z: string = "a"; protected static w?: number; v!: number; public override m(): void {} m2(a: number): void; m2(a: any) {} [k: string]: any; }"#,
@@ -136,13 +139,30 @@ const TYPED_TEXTS: &[&str] = &[
     "class A // c\u{2028}implements I {}",
     "#!x\u{2028}function f(): T {}",
     "function f()\u{a0}: T {}",
+    "class A extends B { constructor(public a: T, private readonly b?: U, protected c = a, override d = 1) { super() } }",
+    "class A { constructor(public get: T, readonly set: T, private async: T, protected \\u0061: T) {} }",
 ];
 
 const KEPT_TEXT_ROWS: &[(&str, &str, &str)] = &[
     (
         "a.ts",
+        "class C { a = b\n  public [k]?: T\n  c = d\n  private readonly *[e]() {}\n  f = g\n  protected in = 1 }",
+        "class C { a = b\n  ;[k]\n  c = d\n  ;*[e]() {}\n  f = g\n  ;in = 1 }",
+    ),
+    (
+        "a.ts",
+        "class C { a = b\n  static readonly [k] = 1\n  c = d\n  public static readonly *[e]() {}\n  static override in = 2 }",
+        "class C { a = b\n  static [k] = 1\n  c = d\n  static *[e]() {}\n  static in = 2 }",
+    ),
+    (
+        "a.ts",
         "const f = () => <Foo>{}; function g(a: unknown) { return<number>a; } const h = <T>i;",
         "const f = () => ({}); function g(a) { return a; } const h = i;",
+    ),
+    (
+        "a.ts",
+        "if (a) type T = 1;\nb(); if (c) d(); else interface I {}\ne(); for (;;) declare const f: T;\ng(); h: type U = 2;\ni();",
+        "if (a) ;\nb(); if (c) d(); else ;\ne(); for (;;) ;\ng(); h: ;\ni();",
     ),
     (
         "a.ts",
@@ -157,7 +177,47 @@ const KEPT_TEXT_ROWS: &[(&str, &str, &str)] = &[
     (
         "a.ts",
         "class A { constructor(private readonly x: T, public y?: U) {} }",
-        "class A { constructor(x, y) {} }",
+        "class A { x; y; constructor(x, y) { this.x = x; this.y = y;} }",
+    ),
+    (
+        "a.ts",
+        "class A { z = 1; m() {} constructor(a: T, public x: T) { f(); } }",
+        "class A { x; z = 1; m() {} constructor(a, x) { this.x = x; f(); } }",
+    ),
+    (
+        "a.ts",
+        "class A { declare d: T; constructor(x: T); constructor(public x: any) {} }",
+        "class A { x;   constructor(x) { this.x = x;} }",
+    ),
+    (
+        "a.ts",
+        "class B extends A { constructor(a: T, private b = 1) { super(a); f(); } }",
+        "class B extends A { b; constructor(a, b = 1) { super(a); this.b = b; f(); } }",
+    ),
+    (
+        "a.ts",
+        "class B extends A { constructor(protected b: T) { f()\n super(b) // c\n } }",
+        "class B extends A { b; constructor(b) { f()\n super(b); this.b = b; // c\n } }",
+    ),
+    (
+        "a.ts",
+        "class B extends A { constructor(override b: T) { if (b) { super(); } } }",
+        "class B extends A { b; constructor(b) { this.b = b; if (b) { super(); } } }",
+    ),
+    (
+        "a.ts",
+        "const C = class { constructor(readonly x = class { constructor(public y: T) {} }) {} };",
+        "const C = class { x; constructor(x = class { y; constructor(y) { this.y = y;} }) { this.x = x;} };",
+    ),
+    (
+        "a.ts",
+        "class A{constructor(public x:T){<T>function(){}()}}",
+        "class A{x; constructor(x){ this.x = x;(function(){}())}}",
+    ),
+    (
+        "a.ts",
+        "class A { constructor(public { a }: T, b: T) {} static constructor(c: T) {} }",
+        "class A { constructor({ a }, b) {} static constructor(c) {} }",
     ),
     (
         "a.ts",
@@ -205,6 +265,16 @@ const KEPT_TEXT_ROWS: &[(&str, &str, &str)] = &[
         "let x = a\n;\n(x)",
     ),
     ("a.ts", "let x = <A>{} as B\n(x)", "let x = ({});\n(x)"),
+    (
+        "a.ts",
+        "x || a + b as number * c; a * b satisfies T ** c; a ** b as T ** c; a < b as any + c; a + b as T as U % c; a - b as T >> c;",
+        "x || (a + b) * c; (a * b) ** c; (a ** b) ** c; (a < b) + c; (a + b) % c; a - b >> c;",
+    ),
+    (
+        "a.ts",
+        "a as T * c; a * b as T + c; a + b as T - c; (a + b) as T * c; a + b as number < c; a + (b as T) * c; a + b as T /* d */ / c;",
+        "a * c; a * b + c; a + b - c; (a + b) * c; a + b < c; a + (b) * c; (a + b) /* d */ / c;",
+    ),
     (
         "a.ts",
         "let x = a\ndeclare const d: number\n`${x}`\ntype T = 1\ny()",
@@ -309,6 +379,10 @@ fn syntax_that_emits_code_is_kept_without_its_types() {
             let mut typed = parse_typescript(w, path, text.as_bytes());
             let kept = remove_types(&typed);
             assert_eq!(String::from_utf8_lossy(&kept), expected, "{text}");
+            let packed = find_type_ranges(&typed).pack();
+            let mut unpacked = vec![0; packed.kept_len(text.len())];
+            packed.remove_from(text.as_bytes(), &mut unpacked);
+            assert_eq!(unpacked, kept, "{text}");
             keep_only_comments_beside_types(&mut typed, w.arena);
             assert_eq!(remove_types(&typed), kept, "{text}");
         }
@@ -353,6 +427,83 @@ fn offsets_follow_removed_ranges() {
 }
 
 #[test]
+fn what_is_added_belongs_to_what_stands_in_front_of_it() {
+    let text = "class A{m(){}constructor(public x:T){function f(){}}}";
+    with_workspace(|w| {
+        let typed = parse_typescript(w, "a.ts", text.as_bytes());
+        let ranges = find_type_ranges(&typed);
+        let kept = ranges.remove_from(text.as_bytes());
+        let expected = "class A{x; m(){}constructor(x){ this.x = x;function f(){}}}";
+        assert_eq!(String::from_utf8_lossy(&kept), expected);
+        for part in ["m(){}", "function f(){}"] {
+            let start = text.find(part).unwrap() as u32;
+            let end = ranges.map_end(start + part.len() as u32) as usize;
+            let mapped = &kept[ranges.map_start(start) as usize..end];
+            assert_eq!(String::from_utf8_lossy(mapped), part);
+        }
+    });
+}
+
+#[test]
+fn a_part_that_the_caller_replaces_goes_with_the_types_in_it() {
+    let text = "const f = (): T => [(E as any).A, <T>E.B as T, E!.C.d, (<any>E).A!, E.B, -E.D]; class A{constructor(public x = E.A){E.B}}";
+    let expected = "const f = () => [5, \"a longer text\", 7 .d, 5, \"a longer text\", (-9)]; class A{x; constructor(x = 5){ this.x = x;\"a longer text\"}}";
+    let values = [
+        ("(E as any).A", "5"),
+        ("(<any>E).A", "5"),
+        ("E.A", "5"),
+        ("E.B", "\"a longer text\""),
+        ("E!.C", "7 "),
+        ("E.D", "9"),
+        ("-E.D", "(-9)"),
+    ];
+    with_workspace(|w| {
+        let typed = parse_typescript(w, "a.ts", text.as_bytes());
+        let places = values.iter().flat_map(|&(read, value)| {
+            let places = text.match_indices(read);
+            places.map(move |(start, _)| ReplacedText {
+                start: start as u32,
+                end: (start + read.len()) as u32,
+                text: value.as_bytes().into(),
+            })
+        });
+        let ranges = find_type_ranges_beside(&typed, places.collect());
+        let kept = ranges.remove_from(text.as_bytes());
+        assert_eq!(String::from_utf8_lossy(&kept), expected);
+        let arrow_end = text.find(';').unwrap() as u32;
+        let arrow = &kept[ranges.map_start(10) as usize..ranges.map_end(arrow_end) as usize];
+        let expected_arrow = &expected[10..expected.find(';').unwrap()];
+        assert_eq!(String::from_utf8_lossy(arrow), expected_arrow);
+    });
+}
+
+#[test]
+fn text_that_the_caller_adds_behind_a_part_is_the_end_of_that_part() {
+    let text = "enum E { C = f() + A}";
+    let at = |part: &str| text.find(part).unwrap() as u32;
+    let part = |start: u32, end: u32, text: &str| ReplacedText {
+        start,
+        end,
+        text: text.as_bytes().into(),
+    };
+    let end = text.len() as u32;
+    let parts = vec![
+        part(end - 1, end, "])(E ||= {});"),
+        part(end - 1, end - 1, "] = \"C\""),
+        part(at("A}"), end - 1, "E.A"),
+        part(at("C ="), at("f()"), "E[E[\"C\"] = "),
+        part(0, at("C ="), "let E; ((E) => ["),
+        part(end - 1, end - 1, "] = \"C\""),
+    ];
+    with_workspace(|w| {
+        let typed = parse_typescript(w, "a.ts", text.as_bytes());
+        let kept = find_type_ranges_beside(&typed, parts).remove_from(text.as_bytes());
+        let expected = "let E; ((E) => [E[E[\"C\"] = f() + E.A] = \"C\"])(E ||= {});";
+        assert_eq!(String::from_utf8_lossy(&kept), expected);
+    });
+}
+
+#[test]
 fn javascript_has_no_type_ranges() {
     with_workspace(|w| {
         for &(_, javascript) in EXACT_PAIRS {
@@ -368,7 +519,6 @@ fn javascript_has_no_type_ranges() {
     });
 }
 
-// What is left is JavaScript, or TypeScript syntax that emits code and has no types left in it.
 #[test]
 fn test_programs_without_type_ranges_are_javascript() {
     let different = Mutex::new(Vec::new());

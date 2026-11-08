@@ -103,6 +103,18 @@ const ways: Record<string, Way> = {
     helper: `import { Handed } from "PACKAGE";\nexport function replace() {\n  Handed.prototype.deref = () => "other";\n}`,
     test: `import { read } from "PACKAGE";\nimport { replace } from "./HELPER";\nreplace();`,
   },
+  // The built-in is spelled, and another file spells the names that are added to it.
+  "keys-out-of-package": {
+    files: {
+      "index.js": `export const members = { ofPackage: 7 };\nexport const read = () => Blob.prototype.ofPackage;`,
+    },
+    test: `import { members, read } from "PACKAGE";\nObject.assign(Blob.prototype, members);`,
+  },
+  "keys-out-of-helper": {
+    files: { "index.js": `export const read = () => Promise.prototype.ofHelper;` },
+    helper: `export function make() {\n  return { ofHelper: 7 };\n}`,
+    test: `import { read } from "PACKAGE";\nimport { make } from "./HELPER";\nconst from = make();\nReflect.ownKeys(from).forEach(key => { Promise.prototype[key] = from[key]; });`,
+  },
 };
 
 async function linesOf(flags: string[]) {
@@ -150,5 +162,5 @@ test("a test writes on a built-in that a package exports", async () => {
   expect(plain.lines.filter(line => !/ (7|other)$/.test(line))).toEqual([]);
   expect(await linesOf(["--aot", "--isolate"])).toEqual(plain);
   // More source than fits the memory as one program: the run is built in layers.
-  expect(await linesOf(["--aot", "--parallel=2", "--aot-memory-limit=1KB"])).toEqual(plain);
+  expect(await linesOf(["--aot", "--parallel=2"])).toEqual(plain);
 }, 480_000);

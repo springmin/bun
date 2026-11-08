@@ -1,10 +1,9 @@
 // Each file of the program makes a Worker from text and prints what the Worker reports.
-import { expect } from "bun:test";
+import { expect, test } from "bun:test";
 import { canTrim } from "../bundler/compile-trim-features";
 import { unsupported } from "./harness/compiler";
 import { run } from "./harness/run";
 import { sharedBuilds } from "./harness/shared-builds";
-import { test } from "./listed";
 
 const text = `postMessage("ran")`;
 const listen = (name: string) => `
@@ -29,7 +28,6 @@ worker.on("error", error => console.log("eval: true of node:worker_threads", "er
 `,
 };
 
-// The build cannot know these texts, so it compiles none of them.
 const made = `Buffer.from(${JSON.stringify(text)}).toString()`;
 const filesWithTextMadeAtRunTime = {
   "made-at-run-time.js": `import "./made-blob-url.js";\nimport "./made-evaluated.js";\n`,
@@ -89,7 +87,7 @@ test.skipIf(!canTrim || !!unsupported)(
 );
 
 test.skipIf(!canTrim || !!unsupported)(
-  "only a program that may start a Worker from text that the build has not seen keeps the transpiler",
+  "a program that starts a Worker from text keeps the transpiler, and the build says why",
   async () => {
     const report = async (entry: string) => {
       const { stdout, stderr } = await build(entry, ...trimmedWithReport);
@@ -100,6 +98,6 @@ test.skipIf(!canTrim || !!unsupported)(
       };
     };
     expect(await report("made-at-run-time.js")).toEqual({ keepsTranspiler: true, saysWhy: true });
-    expect(await report("program.js")).toEqual({ keepsTranspiler: false, saysWhy: false });
+    expect(await report("program.js")).toEqual({ keepsTranspiler: true, saysWhy: true });
   },
 );

@@ -1,6 +1,6 @@
 // The main loop: takes programs from the sources, has a runner judge them, and turns each failure into a stored
-// finding: confirmed, reduced, attributed to a pass or a flow result, and deduplicated against the findings already
-// stored.
+// finding: confirmed, reduced, attributed to the verifiers, the facts or the written types, and deduplicated against
+// the findings already stored.
 import {
   appendFileSync,
   existsSync,
@@ -14,7 +14,6 @@ import {
 import { join } from "path";
 import { withoutInstallingPackages } from "../harness/without-installing-packages";
 import {
-  runtimeChecksVariable,
   verifierFlags,
   withoutVerifiersFlag,
   runEnvFlag,
@@ -60,9 +59,7 @@ export interface Settings {
   known: string[];
   minFreeBytes: number;
   reduceSeconds: number;
-  /**
-   * Whether to search for the switches that make a finding go away, which takes a dozen builds or more. Default: yes.
-   */
+  /** Whether to search for the switches that make a finding go away, which takes a build each. Default: yes. */
   attribute?: boolean;
   /** Maximum number of programs in one build. */
   batch?: number;
@@ -235,11 +232,20 @@ export async function fuzz(settings: Settings): Promise<Summary> {
    * were removed.
    */
   const metadataOf = (
-    { plainEnvironment, entryPoints, runsInOwnFolder, meant, unstablePlainOutput, mayBeRefused }: Program,
+    {
+      plainEnvironment,
+      entryPoints,
+      runsInOwnFolder,
+      meant,
+      unstablePlainOutput,
+      followsExecutableWithoutCompiler,
+      mayBeRefused,
+    }: Program,
     { files }: Whole,
   ): Partial<Program> => ({
     ...(plainEnvironment && { plainEnvironment }),
     ...(unstablePlainOutput && { unstablePlainOutput }),
+    ...(followsExecutableWithoutCompiler && { followsExecutableWithoutCompiler }),
     ...(mayBeRefused && { mayBeRefused }),
     ...(entryPoints?.some(path => files?.[path] !== undefined) && {
       entryPoints: entryPoints.filter(path => files?.[path] !== undefined),
@@ -275,8 +281,9 @@ export async function fuzz(settings: Settings): Promise<Summary> {
           seconds,
         });
 
-  // Finds the switches that make the failure go away. Where a build is cheap every switch is tried; otherwise one is
-  // found by bisection. The search gets as long as a reduction: every attempt at a hang takes a run's whole time limit.
+  // Finds what the failure goes away without: the verifiers, the facts, and anything else that switches() names. Where
+  // a build is cheap every name is tried; elsewhere a list of several names is halved while one half is enough. The
+  // search gets as long as a reduction: every attempt at a hang takes a run's whole time limit.
   async function guilty(
     runner: Runner,
     folder: string,
@@ -284,7 +291,7 @@ export async function fuzz(settings: Settings): Promise<Summary> {
     mode: Mode,
     failure: Failure,
   ): Promise<string[]> {
-    // A different failure does not clear a switch: the build may reject the flags, or fail without the pass.
+    // A different failure does not clear a switch: the build may reject the flags, or fail without what they turn off.
     const goesAway = async (flags: string[]) =>
       (await alone(runner, folder, program, [...mode.flags, ...flags])).verdict.kind === "same";
     const { flowResults, passes } = await runner.switches();
@@ -292,16 +299,11 @@ export async function fuzz(settings: Settings): Promise<Summary> {
     const found: string[] = [];
     // The compiler's verifiers are on in every mode. A build that they stop, and that ends without them, is one that no
     // user sees stop; what the executable then does is not asked: the program was reduced to whatever still stops the
-    // build. They are meant to change no byte of an executable. Where a check at run time reports in the executable built
-    // with them and not in the one built without, they did, and again it is no user's executable that is at fault.
-    if (
-      mode.flags.includes(verifierFlags) &&
-      /^(internal compiler error|build |validation failure)/.test(failure.kind)
-    ) {
+    // build.
+    if (mode.flags.includes(verifierFlags) && /^(internal compiler error|build )/.test(failure.kind)) {
       const flags = [...mode.flags.filter(flag => flag !== verifierFlags), withoutVerifiersFlag];
       const without = await alone(runner, folder, program, flags);
-      if (failure.kind === "validation failure" ? without.verdict.kind === "same" : without.compiled?.run)
-        found.push("the verifiers");
+      if (without.compiled?.run) found.push("the verifiers");
     }
     const withoutFlow = await goesAway(runner.withoutFlowResults);
     if (withoutFlow) found.push("flow-results");
@@ -636,20 +638,6 @@ export async function fuzz(settings: Settings): Promise<Summary> {
       elsewhere[other.name] = isFinding(there) ? `${there.kind}: ${there.detail}` : there.kind;
     }
 
-    // A validating build checks at run time what the compiler proved. If the default build is wrong and the validating
-    // build reports nothing, a check is missing.
-    const validating = mode.name === "default" ? runner.modes(small).find(each => each.name === "validate") : undefined;
-    const validated =
-      validating && !isLate() ? (await alone(runner, folder, small, validating.flags)).verdict : undefined;
-    if (validated)
-      elsewhere["validating build"] = !isFinding(validated)
-        ? validated.kind === "same"
-          ? "right"
-          : validated.why
-        : sameFailure(verdict, validated)
-          ? "SILENT: it fails in the same way"
-          : `${validated.kind}: ${validated.detail}`;
-
     const byShape =
       verdict.kind === "different output" ||
       verdict.kind === "different exit code" ||
@@ -683,7 +671,7 @@ export async function fuzz(settings: Settings): Promise<Summary> {
     writeProgram(target, "original", withPrint(generated));
     // The same program in the format of ../parallel, ready to land with its fix: its first lines hold what the build
     // and the runs need.
-    const flags = mode.flags.filter(flag => isBuildFlag(flag) && (flag !== verifierFlags || !final.compiled?.run));
+    const flags = mode.flags.filter(isBuildFlag);
     const head = [
       flags.length ? `// Flags: ${flags.join(" ")}` : "",
       small.entryPoints?.length
@@ -692,7 +680,6 @@ export async function fuzz(settings: Settings): Promise<Summary> {
       ...mode.flags
         .filter(flag => flag.startsWith(runEnvFlag))
         .map(flag => `// Env of the executable: ${flag.slice(runEnvFlag.length)}`),
-      verdict.detail.includes(runtimeChecksVariable) ? `// Env of the executable: ${runtimeChecksVariable}` : "",
       final.plain.exitCode ? `// Exit code: ${final.plain.exitCode}` : "",
     ];
     const whole = withPrint(small);
@@ -732,10 +719,7 @@ export async function fuzz(settings: Settings): Promise<Summary> {
         name,
         verdict.detail,
         Object.entries(elsewhere)
-          .map(
-            ([where, what]) =>
-              `${where === "validating build" ? "the" : "on the"} ${where}${where === "validating build" ? "" : " runner"}: ${what}`,
-          )
+          .map(([where, what]) => `on the ${where} runner: ${what}`)
           .join("; "),
       ].join("\t") + "\n",
     );

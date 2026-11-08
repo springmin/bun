@@ -21,7 +21,7 @@ pub fn is_exported(hir: &File<'_>, bound: &Bound<'_>, symbol: SymbolId) -> bool 
 
 type FindWritten<'a> = &'a dyn Fn(Atom) -> Vec<ExprId>;
 
-pub(super) fn find_names_exported_for(
+pub fn find_names_exported_for(
     hir: &File<'_>,
     bound: &Bound<'_>,
     function: FnId,
@@ -71,7 +71,7 @@ pub(super) fn find_names_exported_for(
     exported.map(|&(export, _)| export).collect()
 }
 
-pub(super) fn find_parameter_named(
+pub fn find_parameter_named(
     hir: &File<'_>,
     bound: &Bound<'_>,
     mention: ExprId,
@@ -99,7 +99,6 @@ pub(super) fn find_parameter_named(
     is_settled.then_some((function, place))
 }
 
-/// `BoundIn::finds_itself`, which walks the file.
 fn finds_itself(
     hir: &File<'_>,
     bound: &Bound<'_>,
@@ -157,7 +156,6 @@ fn find_only_name_of(
 ) -> Option<SymbolId> {
     let name = find_name_of(hir, bound, function, find_written)?;
     let mut hoisted = bound.runtime.annex_b_functions().iter();
-    // `arguments.callee` and evaluated text hand the function on without its name.
     let other_ways = FunctionFlags::USES_ARGUMENTS | FunctionFlags::HAS_DIRECT_EVAL;
     let is_only_name = name.is_some()
         && !bound.function_flags(function).intersects(other_ways)
@@ -190,7 +188,6 @@ fn find_arguments_where_written(
     is_only_call.then(|| hir[call].args)
 }
 
-// `function load(name) { return require(name); }`, where every mention of `load` calls it: what the calls pass for `name`.
 pub fn find_values_of_parameter(
     hir: &File<'_>,
     bound: &Bound<'_>,
@@ -204,7 +201,6 @@ pub fn find_values_of_parameter(
     })
 }
 
-/// `find_written` answers with the places where a name is written.
 pub fn find_values_passed_for(
     hir: &File<'_>,
     bound: &Bound<'_>,
@@ -212,7 +208,7 @@ pub fn find_values_passed_for(
     mention: ExprId,
     find_written: FindWritten<'_>,
 ) -> Option<SmallVec<[ExprId; 4]>> {
-    let (values, path) =
+    let (values, path, _) =
         find_values_passed_for_pattern(hir, bound, decisions, mention, find_written)?;
     path.is_empty().then_some(values)
 }
@@ -223,7 +219,7 @@ pub(super) fn find_values_passed_for_pattern(
     decisions: &Decisions<'_>,
     mention: ExprId,
     find_written: FindWritten<'_>,
-) -> Option<(SmallVec<[ExprId; 4]>, SmallVec<[Atom; 2]>)> {
+) -> Option<(SmallVec<[ExprId; 4]>, SmallVec<[Atom; 2]>, bool)> {
     let Binding::Symbol(parameter) = bound.binding(mention) else {
         return None;
     };
@@ -263,6 +259,8 @@ pub(super) fn find_values_passed_for_pattern(
         return None;
     }
     let is_spread = |it: ExprId| matches!(hir[it].kind, ExprKind::Spread(_));
+    let has_default = hir[id].default.is_some();
+    let mut is_left_out = false;
     let mut values: SmallVec<[ExprId; 4]> = SmallVec::new();
     if hir[id].default.is_some() {
         values.push(hir[id].default);
@@ -273,8 +271,10 @@ pub(super) fn find_values_passed_for_pattern(
         if passed.clone().any(is_spread) {
             return None;
         }
-        values.extend(passed.nth(index));
-        return Some((values, path));
+        let value = passed.nth(index);
+        is_left_out |= value.is_none() && !has_default;
+        values.extend(value);
+        return Some((values, path, is_left_out));
     };
     let text = bound.symbol(name).name;
     for callee in find_written(text) {
@@ -294,7 +294,9 @@ pub(super) fn find_values_passed_for_pattern(
         if hir[call].callee != callee || passed.clone().any(is_spread) {
             return None;
         }
-        values.extend(passed.nth(index));
+        let value = passed.nth(index);
+        is_left_out |= value.is_none() && !has_default;
+        values.extend(value);
     }
-    Some((values, path))
+    Some((values, path, is_left_out))
 }

@@ -1,5 +1,3 @@
-// The helpers of TypeScript, Babel, SWC, esbuild, rolldown and Bun that the compiler reads, in every form that was published.
-
 use super::{PublishedFunction, Reference};
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
@@ -90,6 +88,18 @@ impl Shape {
             Shape::TypeofAnswersSymbolForSymbols => Helper::Typeof,
             Shape::CreateClassDefinesBothSides => Helper::CreateClass,
             Shape::CreateClassDefinesBothSidesAndLocksPrototype => Helper::CreateClass,
+            Shape::CommonJsRunsCallbackOnce => Helper::CommonJs,
+            Shape::CommonJsRunsCallbackOnceThenDropsIt => Helper::CommonJs,
+            Shape::CommonJsRunsFirstKeyOnce => Helper::CommonJs,
+            Shape::CommonJsRunsFirstOwnNameOnce => Helper::CommonJs,
+            Shape::CommonJsRunsFirstOwnNameOnceThenDropsIt => Helper::CommonJs,
+            Shape::CommonJsRunsFirstOwnNameAgainAfterThrow => Helper::CommonJs,
+            Shape::EsmRunsFunctionOnce => Helper::Esm,
+            Shape::EsmRunsFunctionOnceRethrows => Helper::Esm,
+            Shape::EsmRunsFirstKeyOnce => Helper::Esm,
+            Shape::EsmRunsFirstOwnNameOnce => Helper::Esm,
+            Shape::EsmRunsFirstOwnNameOnceRethrows => Helper::Esm,
+            Shape::RequireFactoryPrefersRequire => Helper::Require,
             Shape::CreateBindingDefinesGetter => Helper::CreateBinding,
             Shape::CreateBindingReusesDescriptor => Helper::CreateBinding,
             Shape::CreateBindingCopiesValue => Helper::CreateBinding,
@@ -105,18 +115,6 @@ impl Shape {
             Shape::ExportDefinesGettersAndBoundSetters => Helper::Export,
             Shape::ExportSetterStoresBoundReturnValue => Helper::ExportSetter,
             Shape::ReturnValueReturnsArgument => Helper::ReturnValue,
-            Shape::CommonJsRunsCallbackOnce => Helper::CommonJs,
-            Shape::CommonJsRunsCallbackOnceThenDropsIt => Helper::CommonJs,
-            Shape::CommonJsRunsFirstKeyOnce => Helper::CommonJs,
-            Shape::CommonJsRunsFirstOwnNameOnce => Helper::CommonJs,
-            Shape::CommonJsRunsFirstOwnNameOnceThenDropsIt => Helper::CommonJs,
-            Shape::CommonJsRunsFirstOwnNameAgainAfterThrow => Helper::CommonJs,
-            Shape::EsmRunsFunctionOnce => Helper::Esm,
-            Shape::EsmRunsFunctionOnceRethrows => Helper::Esm,
-            Shape::EsmRunsFirstKeyOnce => Helper::Esm,
-            Shape::EsmRunsFirstOwnNameOnce => Helper::Esm,
-            Shape::EsmRunsFirstOwnNameOnceRethrows => Helper::Esm,
-            Shape::RequireFactoryPrefersRequire => Helper::Require,
             Shape::CopyPropertiesDefinesGettersForOwnNamesTheTargetLacks => Helper::CopyProperties,
             Shape::ToCommonJsCopiesOntoNewMarkedObject => Helper::ToCommonJs,
             Shape::ToEsModuleShowsUnmarkedValueAsDefault => Helper::ToEsModule,
@@ -293,12 +291,6 @@ pub(super) static PUBLISHED_FUNCTIONS: &[PublishedFunction] = &[
         text: "function _typeof(obj) {\n\"@babel/helpers - typeof\";\nif (typeof Symbol === \"function\" && typeof Symbol.iterator === \"symbol\") {\n_typeof = function _typeof(obj) {\nreturn typeof obj;\n};\n} else {\n_typeof = function _typeof(obj) {\nreturn obj && typeof Symbol === \"function\" && obj.constructor === Symbol && obj !== Symbol.prototype ? \"symbol\" : typeof obj;\n};\n}\nreturn _typeof(obj);\n}",
         references: &[],
         origin: "babel 7.8 to 7.15",
-    },
-    PublishedFunction {
-        shape: Shape::TypeofAnswersSymbolForSymbols,
-        text: "function _typeof(o) {\n\"@babel/helpers - typeof\";\nreturn module.exports = _typeof = \"function\" == typeof Symbol && \"symbol\" == typeof Symbol.iterator ? function (o) {\nreturn typeof o;\n} : function (o) {\nreturn o && \"function\" == typeof Symbol && o.constructor === Symbol && o !== Symbol.prototype ? \"symbol\" : typeof o;\n}, module.exports.__esModule = true, module.exports[\"default\"] = module.exports, _typeof(o);\n}",
-        references: &[],
-        origin: "@babel/runtime 7.16 and after, its CommonJS file",
     },
     PublishedFunction {
         shape: Shape::ExportStarBindsNamesTheTargetLacks,

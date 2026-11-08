@@ -1,4 +1,3 @@
-// Flags: --aot-validate
 class Kind { tag = "c"; }
 let held: any;
 function sort(value: Kind | unknown[] | string | null): any { if (value instanceof Array) { held = value; } else { held = value; } return "end"; }

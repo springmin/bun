@@ -1,53 +1,41 @@
-//! `import.meta.glob()`. Bun's parser expands the call, and the same object is written into the tree that is compiled.
-
+use bstr::BStr;
 use bun_ast::runtime::ReactCompilerMode;
 use bun_ast::{Loc, Source};
-use bun_core::Mutex;
-use bun_js_parser::{ImportMetaGlobFiles, InvalidImportMetaGlob};
-use bun_react_compiler::diagnostics::CompilerError;
-use bun_react_compiler::{AddedImport, CompiledFunction, Observer};
-use bun_sema::atom::{Atom, Interner, known};
+use bun_core::fmt::format_json_string_utf8;
+use bun_js_parser::{ExpandedImportMetaGlob, ImportMetaGlobFiles, InvalidImportMetaGlob};
+use bun_sema::atom::{Atom, Interner};
 use bun_sema::hir::{
     Call, CallId, Chain, ExprId, ExprKind, File, FileBuilder, Flags, FnBody, FnKind, Func, Import,
-    ImportId, ImportSpec, Keyword, ListAt, NameKind, Param, ParamId, PatKind, Prop, PropKey,
-    PropKind, ResolutionMode, Span, SpecifierKind, SpecifierUse, StmtId, StmtKind, TextRange,
-    TypeNodeId, TypeNodeKind, rare,
+    ImportEquals, ImportEqualsTarget, ImportId, ImportSpec, Keyword, ListAt, NameKind, Param,
+    ParamId, PatKind, Prop, PropKey, PropKind, ResolutionMode, Span, SpecifierKind, SpecifierUse,
+    StmtId, StmtKind, TextRange, TypeNodeId, TypeNodeKind, rare,
 };
-use bun_sema::module_format::ModuleFormat;
-use bun_sema::resolve::{TransformRequest, TreeChange};
+use bun_sema::resolve::{EarlyTransformRequest, TreeChange};
 use bun_sema::session::Arena;
 use bun_sema_driver::host::to_native;
 
 use crate::diagnostics::LoadMessages;
 use crate::load::is_in_node_modules;
-use crate::load::react_compiler::module_items::{
-    POSITION, finish_file, put_around_body, write_declaration,
-};
+use crate::load::react_compiler::module_items::{POSITION, finish_file, put_around_body};
 use crate::load::source_provider::{ComponentFile, ModuleName, SourceProvider};
 use crate::load::sources::{ParsedSource, SourceKind};
 
-// No program can write such a name.
+#[cfg(test)]
+mod tests;
+
 const LOCAL_NAME_PREFIX: &[u8] = b"%glob:";
+const EXPORT_OF_EAGER_ENTRY: &str = "entry";
 const EAGER_IN_COMMON_JS: &[u8] = b"The \"import.meta.glob\" option \"eager\" needs import statements, so it can't be used in a CommonJS module";
 const NOT_CALLED_DIRECTLY: &[u8] =
     b"\"import.meta.glob\" is expanded at transpile time, so call it directly and pass literals";
 
-struct Nobody;
-
-impl Observer for Nobody {
-    fn function_compiled(&mut self, _: &CompiledFunction<'_>) {}
-    fn imports_added(&mut self, _: &[AddedImport<'_>]) {}
-    fn compilation_failed(&mut self, _: &CompilerError) {}
-}
-
-struct CallOfGlob {
+struct WrittenCall {
     expression: ExprId,
     call: CallId,
-    /// Where `import` stands, which is where Bun's parser says the call starts.
     start: u32,
 }
 
-fn find_calls(hir: &File<'_>, glob: Atom) -> Vec<CallOfGlob> {
+fn find_calls(hir: &File<'_>, glob: Atom) -> Vec<WrittenCall> {
     let expressions = (0..).map(ExprId).zip(hir.exprs.iter());
     let calls = expressions.filter_map(|(expression, node)| {
         let ExprKind::Call(call) = node.kind else {
@@ -66,7 +54,7 @@ fn find_calls(hir: &File<'_>, glob: Atom) -> Vec<CallOfGlob> {
         let is_glob = name == glob
             && hir[call].chain == Chain::No
             && matches!(object.kind, ExprKind::ImportMeta);
-        is_glob.then_some(CallOfGlob {
+        is_glob.then_some(WrittenCall {
             expression,
             call,
             start: object.pos,
@@ -78,8 +66,9 @@ fn find_calls(hir: &File<'_>, glob: Atom) -> Vec<CallOfGlob> {
 struct Writer<'a, 's> {
     file: FileBuilder,
     atoms: &'a Interner<'s>,
-    imports: Vec<StmtId>,
+    head: Vec<StmtId>,
     is_common_js: bool,
+    add_module: &'a dyn Fn(&[u8], Vec<u8>),
     pos: u32,
     end: u32,
 }
@@ -94,7 +83,6 @@ impl Writer<'_, '_> {
         self.expression(ExprKind::String(text))
     }
 
-    /// The parser lists every specifier for the type checker, which resolves no other.
     fn specifier(&mut self, path: &[u8], kind: SpecifierKind) -> ExprId {
         self.file.specifier_uses.push(SpecifierUse {
             spec: self.atoms.intern(path),
@@ -110,13 +98,20 @@ impl Writer<'_, '_> {
         self.file.ty(kind, self.pos, self.end)
     }
 
-    /// The types of the call are those of Vite's declarations, which say nothing of the files.
-    fn untyped(&mut self, expr: ExprId) -> ExprKind {
+    fn as_any(&mut self, expr: ExprId) -> ExprKind {
         let ty = self.any();
         ExprKind::As { expr, ty }
     }
 
-    fn object(&mut self, properties: &[(Atom, NameKind, ExprId)]) -> ExprId {
+    fn untyped(&mut self, expr: ExprId) -> ExprId {
+        if self.file.is_js {
+            return expr;
+        }
+        let kind = self.as_any(expr);
+        self.expression(kind)
+    }
+
+    fn object_kind(&mut self, properties: &[(Atom, NameKind, ExprId)]) -> ExprKind {
         let properties: Vec<Prop> = properties
             .iter()
             .map(|&(key, name_kind, value)| Prop {
@@ -130,8 +125,12 @@ impl Writer<'_, '_> {
                 postfix_token: 0,
             })
             .collect();
-        let properties = self.file.add_props(&properties);
-        self.expression(ExprKind::Object(properties))
+        ExprKind::Object(self.file.add_props(&properties))
+    }
+
+    fn object(&mut self, properties: &[(Atom, NameKind, ExprId)]) -> ExprId {
+        let kind = self.object_kind(properties);
+        self.expression(kind)
     }
 
     fn object_of(&mut self, key: &[u8], value: ExprId) -> ExprId {
@@ -177,7 +176,11 @@ impl Writer<'_, '_> {
         self.expression(ExprKind::Fn(function))
     }
 
-    /// `import(path).then(m => m.name)`
+    fn attributes(&mut self, import_type: &[u8]) -> ExprId {
+        let import_type = self.text(import_type);
+        self.object_of(b"type", import_type)
+    }
+
     fn then_export(&mut self, import: ExprId, name: &[u8]) -> ExprId {
         let parameter = self.atoms.intern(b"m");
         let ty = match self.file.is_js {
@@ -201,12 +204,7 @@ impl Writer<'_, '_> {
         self.expression(ExprKind::Call(call))
     }
 
-    fn attributes(&mut self, import_type: &[u8]) -> ExprId {
-        let import_type = self.text(import_type);
-        self.object_of(b"type", import_type)
-    }
-
-    fn lazy_import(&mut self, files: &ImportMetaGlobFiles, path: &[u8]) -> ExprId {
+    fn lazy_entry(&mut self, files: &ImportMetaGlobFiles, path: &[u8]) -> ExprId {
         let mut args = vec![self.specifier(path, SpecifierKind::ImportCall)];
         if let Some(import_type) = files.import_type {
             let attributes = self.attributes(import_type);
@@ -220,31 +218,31 @@ impl Writer<'_, '_> {
         self.arrow(Span::EMPTY, FnBody::Expr(value))
     }
 
-    /// A bundle loads the module at the same place, the head of the file's body.
-    fn require(&mut self, files: &ImportMetaGlobFiles, path: &[u8], local: Atom) {
-        let (pos, end) = (self.pos, self.end);
-        (self.pos, self.end) = (POSITION, POSITION);
-        let require = self.expression(ExprKind::Ident(known::require));
-        let path = self.specifier(path, SpecifierKind::RequireCall);
-        let call = self.call(require, &[path]);
-        let mut value = self.expression(ExprKind::Call(call));
-        if !files.import.is_empty() {
-            value = self.member(value, &files.import);
-        }
-        let pat = (self.file).pat(PatKind::Ident(local), POSITION, POSITION);
-        let statement = write_declaration(&mut self.file, pat, value);
-        self.imports.push(statement);
-        (self.pos, self.end) = (pos, end);
+    fn write_require(&mut self, files: &ImportMetaGlobFiles, path: &[u8], local: Atom) {
+        let import_type = files.import_type.unwrap_or_default();
+        let specifier = [LOCAL_NAME_PREFIX, import_type, b":", path].concat();
+        (self.add_module)(&specifier, write_module_of_eager_entry(import_type, path));
+        let spec = self.atoms.intern(&specifier);
+        self.file.specifier_uses.push(SpecifierUse {
+            spec,
+            pos: POSITION,
+            kind: SpecifierKind::Require,
+            mode: ResolutionMode::None,
+        });
+        let declaration = self.file.add_import_equals(ImportEquals {
+            name: local,
+            name_pos: POSITION,
+            target: ImportEqualsTarget::Require(spec),
+            expression: ExprId::NONE,
+            flags: Flags::empty(),
+            stmt: StmtId::NONE,
+        });
+        let statement = (self.file).stmt(StmtKind::ImportEquals(declaration), POSITION);
+        self.file[declaration].stmt = statement;
+        self.head.push(statement);
     }
 
-    fn static_import(&mut self, files: &ImportMetaGlobFiles, path: &[u8]) -> ExprId {
-        // A file may be expanded twice, and the tree only grows.
-        let number = self.file.exprs.len().to_string();
-        let local = (self.atoms).intern(&[LOCAL_NAME_PREFIX, number.as_bytes()].concat());
-        if self.is_common_js {
-            self.require(files, path, local);
-            return self.expression(ExprKind::Ident(local));
-        }
+    fn write_import(&mut self, files: &ImportMetaGlobFiles, path: &[u8], local: Atom) {
         let import = ImportId(self.file.imports.len() as u32);
         let is_namespace = files.import.is_empty();
         let named = match is_namespace {
@@ -264,7 +262,7 @@ impl Writer<'_, '_> {
             Some(import_type) => self.attributes(import_type),
             None => ExprId::NONE,
         };
-        self.file.add_import(Import {
+        let added = self.file.add_import(Import {
             spec: self.atoms.intern(path),
             default: Atom::NONE,
             default_pos: POSITION,
@@ -282,11 +280,29 @@ impl Writer<'_, '_> {
             attributes,
             loaded_as: Atom::NONE,
         });
+        debug_assert_eq!(added, import);
         self.file.has_module_syntax = true;
         self.file.is_forced_module = false;
         let statement = self.file.stmt(StmtKind::Import(import), POSITION);
-        self.imports.push(statement);
-        self.expression(ExprKind::Ident(local))
+        self.head.push(statement);
+    }
+
+    fn eager_entry(&mut self, files: &ImportMetaGlobFiles, path: &[u8]) -> ExprId {
+        let number = self.file.exprs.len().to_string();
+        let local = (self.atoms).intern(&[LOCAL_NAME_PREFIX, number.as_bytes()].concat());
+        match self.is_common_js {
+            true => self.write_require(files, path, local),
+            false => self.write_import(files, path, local),
+        }
+        let entry = self.expression(ExprKind::Ident(local));
+        if !self.is_common_js {
+            return entry;
+        }
+        let entry = self.member(entry, EXPORT_OF_EAGER_ENTRY.as_bytes());
+        match files.import.is_empty() {
+            true => entry,
+            false => self.member(entry, &files.import),
+        }
     }
 
     fn write_files(&mut self, expression: ExprId, files: &ImportMetaGlobFiles) {
@@ -296,39 +312,19 @@ impl Writer<'_, '_> {
                 let zero = self.file.number(0.0);
                 self.expression(ExprKind::Number(zero))
             } else if files.eager {
-                self.static_import(files, path)
+                self.eager_entry(files, path)
             } else {
-                self.lazy_import(files, path)
+                self.lazy_entry(files, path)
             };
             properties.push((self.atoms.intern(key), NameKind::StringLiteral, value));
         }
-        let object = self.object(&properties);
-        self.file[expression].kind = match self.file.is_js {
-            true => self.file[object].kind,
-            false => self.untyped(object),
+        let kind = if self.file.is_js {
+            self.object_kind(&properties)
+        } else {
+            let object = self.object(&properties);
+            self.as_any(object)
         };
-    }
-
-    /// The call stays, so its arguments are evaluated first, and its callee throws.
-    fn write_throw(&mut self, call: CallId, message: &[u8]) {
-        let callee = self.throwing_function(message);
-        self.file[call].callee = callee;
-        self.file[call].type_args = ListAt::EMPTY;
-    }
-
-    /// `import.meta.glob = () => { throw .. }`, so `typeof import.meta.glob` is "function" as under `bun test`.
-    fn write_definition(&mut self) -> StmtId {
-        (self.pos, self.end) = (POSITION, POSITION);
-        let mut object = self.expression(ExprKind::ImportMeta);
-        if !self.file.is_js {
-            let untyped = self.untyped(object);
-            object = self.expression(untyped);
-        }
-        let target = self.member(object, b"glob");
-        let value = self.throwing_function(NOT_CALLED_DIRECTLY);
-        let op = None;
-        let assignment = self.expression(ExprKind::Assign { op, target, value });
-        self.file.stmt(StmtKind::Expr(assignment), POSITION)
+        self.file[expression].kind = kind;
     }
 
     fn throwing_function(&mut self, message: &[u8]) -> ExprId {
@@ -339,13 +335,36 @@ impl Writer<'_, '_> {
         let error = self.expression(ExprKind::New(error));
         let statement = self.file.stmt(StmtKind::Throw(error), self.pos);
         let body = self.file.list(&[statement]);
-        let mut callee = self.arrow(Span::EMPTY, FnBody::Block(body));
-        if !self.file.is_js {
-            let untyped = self.untyped(callee);
-            callee = self.expression(untyped);
-        }
-        callee
+        let function = self.arrow(Span::EMPTY, FnBody::Block(body));
+        self.untyped(function)
     }
+
+    fn write_throw(&mut self, call: CallId, message: &[u8]) {
+        let callee = self.throwing_function(message);
+        self.file[call].callee = callee;
+        self.file[call].type_args = ListAt::EMPTY;
+    }
+
+    fn write_definition(&mut self) -> StmtId {
+        (self.pos, self.end) = (POSITION, POSITION);
+        let object = self.expression(ExprKind::ImportMeta);
+        let object = self.untyped(object);
+        let target = self.member(object, b"glob");
+        let value = self.throwing_function(NOT_CALLED_DIRECTLY);
+        let op = None;
+        let assignment = self.expression(ExprKind::Assign { op, target, value });
+        self.file.stmt(StmtKind::Expr(assignment), POSITION)
+    }
+}
+
+fn write_module_of_eager_entry(import_type: &[u8], path: &[u8]) -> Vec<u8> {
+    let quote = |text: &[u8]| format_json_string_utf8(text, Default::default()).to_string();
+    let attributes = match import_type {
+        [] => String::new(),
+        _ => format!(" with {{ type: {} }}", quote(import_type)),
+    };
+    let path = quote(path);
+    format!("export * as {EXPORT_OF_EAGER_ENTRY} from {path}{attributes};\n").into_bytes()
 }
 
 fn warn(messages: &LoadMessages, path: &[u8], text: &[u8], invalid: &InvalidImportMetaGlob) {
@@ -357,27 +376,16 @@ fn warn(messages: &LoadMessages, path: &[u8], text: &[u8], invalid: &InvalidImpo
         start: invalid.start,
     };
     messages.with_log(|log| {
-        let message = bstr::BStr::new(&invalid.message);
+        let message = BStr::new(&invalid.message);
         log.add_warning_fmt(Some(&source), loc, format_args!("{message}"));
     });
 }
 
-pub(crate) fn expand_calls<'s>(
+fn ask_parser(
     provider: &dyn SourceProvider,
-    messages: &LoadMessages,
-    arena: &'s Arena,
-    atoms: &Interner<'s>,
-    request: &mut TransformRequest<'_, 's>,
+    request: &EarlyTransformRequest<'_, '_>,
     source: &ParsedSource,
-    runs_tests: bool,
-) -> TreeChange {
-    if request.hir.rare_syntax & rare::IMPORT_META == 0 || source.kind != SourceKind::Program {
-        return TreeChange::Unchanged;
-    }
-    let calls = find_calls(request.hir, atoms.intern(b"glob"));
-    if calls.is_empty() {
-        return TreeChange::Unchanged;
-    }
+) -> Vec<ExpandedImportMetaGlob> {
     let module = match &source.plugin_module {
         Some(module) => ModuleName {
             namespace: &module.namespace,
@@ -388,45 +396,62 @@ pub(crate) fn expand_calls<'s>(
             path: to_native(request.path),
         },
     };
-    let expanded = Mutex::new(Vec::new());
-    let file = ComponentFile {
+    provider.expand_globs(&ComponentFile {
         module,
         contents: &request.hir.text,
         loader: source.loader,
         mode: ReactCompilerMode::Disabled,
         settings: request.settings,
         is_entry_point: request.import_meta_main != Some(false),
-        can_import_macros: (request.hir.imports.iter()).any(|it| it.attributes.is_some()),
-        expanded_globs: Some(&expanded),
-    };
-    provider.compile_components(&file, &mut Nobody);
-    let expanded = std::mem::take(&mut *expanded.lock());
-    if expanded.is_empty() {
+    })
+}
+
+pub(crate) fn expand_calls<'s>(
+    provider: &dyn SourceProvider,
+    messages: &LoadMessages,
+    runs_tests: bool,
+    arena: &'s Arena,
+    atoms: &Interner<'s>,
+    request: &mut EarlyTransformRequest<'_, 's>,
+    source: &ParsedSource,
+    add_module: &dyn Fn(&[u8], Vec<u8>),
+) -> TreeChange {
+    if request.hir.rare_syntax & rare::IMPORT_META == 0 || source.kind != SourceKind::Program {
         return TreeChange::Unchanged;
     }
-    let is_common_js = request.analysis.module_format == ModuleFormat::CommonJs;
+    let calls = find_calls(request.hir, atoms.intern(b"glob"));
+    if calls.is_empty() {
+        return TreeChange::Unchanged;
+    }
+    let expanded = ask_parser(provider, request, source);
+    let find_expanded = |call: &WrittenCall| {
+        let mut expanded = expanded.iter();
+        expanded.find(|it| u32::try_from(it.start) == Ok(call.start))
+    };
+    if !calls.iter().any(|call| find_expanded(call).is_some()) {
+        return TreeChange::Unchanged;
+    }
+    let is_common_js = !request.takes_import_statements;
     let mut writer = Writer {
         file: FileBuilder::from_file(request.hir),
         atoms,
-        imports: Vec::new(),
+        head: Vec::new(),
         is_common_js,
-        pos: 0,
-        end: 0,
+        add_module,
+        pos: POSITION,
+        end: POSITION,
     };
-    let mut change = TreeChange::Unchanged;
     let mut is_expanded = false;
     for call in &calls {
-        let Some(found) = (expanded.iter()).find(|it| it.start as u32 == call.start) else {
+        let Some(found) = find_expanded(call) else {
             continue;
         };
-        change = TreeChange::Changed;
         let written = writer.file[call.expression];
         (writer.pos, writer.end) = (written.pos, written.end);
         match &found.result {
-            // `bun test` transpiles a file by itself, and a CommonJS file takes no import statement. A bundle has `require`, which takes no attribute.
             Ok(files)
                 if is_common_js
-                    && (runs_tests || files.import_type.is_some())
+                    && (runs_tests || source.plugin_module.is_some())
                     && files.eager
                     && !files.only_keys
                     && !files.entries.is_empty() =>
@@ -443,17 +468,12 @@ pub(crate) fn expand_calls<'s>(
             }
         }
     }
-    if change == TreeChange::Unchanged {
-        return change;
-    }
     if runs_tests && is_expanded {
         let definition = writer.write_definition();
-        writer.imports.insert(0, definition);
+        writer.head.insert(0, definition);
     }
-    let Writer {
-        mut file, imports, ..
-    } = writer;
-    put_around_body(&mut file, &imports, &[]);
+    let Writer { mut file, head, .. } = writer;
+    put_around_body(&mut file, &head, &[]);
     *request.hir = finish_file(file, arena, atoms);
-    change
+    TreeChange::Changed
 }

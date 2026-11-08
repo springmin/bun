@@ -10,7 +10,10 @@ const attempt = (statement: string) =>
 const attemptToAdd = (statement: string) =>
   `try {\n  ${statement};\n  console.log(new Response("").upper());\n} catch (error) {\n  console.log(error.constructor.name);\n}\n`;
 
-type Program = { source: string; files?: Record<string, string>; warnings: string[]; stdout: string };
+const attemptToAddToFunctions = (statement: string) =>
+  `try {\n  ${statement};\n  console.log((() => 1).upper());\n} catch (error) {\n  console.log(error.constructor.name);\n}\n`;
+
+type Program = { source: string; files?: Record<string, string>; code?: string; warnings: string[]; stdout: string };
 const programs: Record<string, Program> = {
   "a descriptor that gets its value behind the literal": {
     source:
@@ -147,27 +150,54 @@ const programs: Record<string, Program> = {
     warnings: [],
     stdout: "up\n",
   },
+  // The build reads the literal that the file exports, so it knows the name as it knows one of a literal beside the call.
   "a name that the object lacks, out of another file": {
     source: attemptToAdd(`Object.assign(Response.prototype, require("./helpers.cjs"))`),
     files: { "helpers.cjs": `module.exports = { upper: () => "up" };\n` },
-    warnings: ["main.mjs:2:10"],
-    stdout: "TypeError\n",
+    warnings: [],
+    stdout: "up\n",
   },
   "a name that the object lacks, stored behind the literal": {
     source:
       `const helpers = {};\nhelpers.upper = () => "up";\n` + attemptToAdd(`Object.assign(Response.prototype, helpers)`),
+    warnings: [],
+    stdout: "up\n",
+  },
+  "a name that Function.prototype lacks, out of another file": {
+    source: attemptToAddToFunctions(`Object.assign(Function.prototype, require("./helpers.cjs"))`),
+    files: { "helpers.cjs": `module.exports = { upper: () => "up" };\n` },
+    warnings: ["main.mjs:2:10"],
+    stdout: "TypeError\n",
+  },
+  "a name that Function.prototype lacks, stored behind the literal": {
+    source:
+      `const helpers = {};\nhelpers.upper = () => "up";\n` +
+      attemptToAddToFunctions(`Object.assign(Function.prototype, helpers)`),
     warnings: ["main.mjs:4:10"],
     stdout: "TypeError\n",
   },
   "mock.method() of node:test": {
+    // The build does not follow the object into Bun's own code, which makes the write: docs/compiler/compatibility.mdx, "Built-in objects are read-only".
     source: `import { mock } from "node:test";\n` + attempt(`mock.method(Date.prototype, "getTime", () => 7)`),
-    warnings: ["main.mjs:3:8"],
+    warnings: [],
     stdout: "TypeError\n",
+  },
+  "the functions that the loader asks are stored": {
+    source: `import Module from "node:module";\nconst { require: load, } = Module.prototype;\nModule.prototype.require = function (name) {\n  return load.call(this, name);\n};\nconst same = Module;\nsame._resolveFilename = Module._resolveFilename;\nconsole.log("stored");\n`,
+    code: "TS100080",
+    warnings: ["main.mjs:3:1", "main.mjs:7:1"],
+    stdout: "stored\n",
+  },
+  "the functions that the loader asks are read, and stored where nothing comes": {
+    source: `import Module from "node:module";\nfunction nobodyCalls() {\n  Module.prototype.require = () => {};\n}\nconsole.log(typeof Module.prototype.require, typeof Module._resolveFilename);\n`,
+    code: "TS100080",
+    warnings: [],
+    stdout: "function function\n",
   },
 };
 
-for (const [name, { source, files, warnings, stdout }] of Object.entries(programs)) {
-  test(`TS100014: ${name}`, async () => {
+for (const [name, { source, files, code = "TS100014", warnings, stdout }] of Object.entries(programs)) {
+  test(`${code}: ${name}`, async () => {
     using dir = tempDir("aot-locked-built-in-write-warnings", { "main.mjs": source, ...files });
     const cwd = String(dir);
     const executable = join(cwd, "main");
@@ -177,7 +207,9 @@ for (const [name, { source, files, warnings, stdout }] of Object.entries(program
     });
     const said = built.stdout + built.stderr;
     expect({
-      warnings: [...said.matchAll(/TS100014: [^\n]*\n\s+at \S*?(main\.mjs:\d+:\d+)/g)].map(match => match[1]),
+      warnings: [...said.matchAll(new RegExp(code + String.raw`: [^\n]*\n\s+at \S*?(main\.mjs:\d+:\d+)`, "g"))].map(
+        match => match[1],
+      ),
       exitCode: built.exitCode,
     }).toEqual({ warnings, exitCode: 0 });
     expect((await run([executable], cwd)).stdout).toBe(stdout);
@@ -188,14 +220,22 @@ test("a test adds a name through Object.assign()", async () => {
   using dir = tempDir("aot-locked-built-in-write-warnings", {
     "main.test.mjs": `import { expect, test } from "bun:test";\nconst make = () => ({ upper: () => "up" });\ntest("t", () => {\n  Object.assign(Response.prototype, make());\n  expect(new Response("").upper()).toBe("up");\n});\n`,
   });
-  for (const words of ["TestRunLayers:0", "TestRunLayers:2"]) {
-    const env = { ...bunEnv, NO_COLOR: "1", BUN_DEBUG_TEST_AOT_WORDS: words };
-    const ran = await run([bunExe(), "test", "--aot", "./main.test.mjs"], String(dir), env);
-    expect({ warned: (ran.stdout + ran.stderr).includes("TS100014"), exitCode: ran.exitCode }).toEqual({
-      warned: false,
-      exitCode: 0,
-    });
-  }
+  const ran = await run([bunExe(), "test", "--aot", "./main.test.mjs"], String(dir), { ...bunEnv, NO_COLOR: "1" });
+  expect({ warned: (ran.stdout + ran.stderr).includes("TS100014"), exitCode: ran.exitCode }).toEqual({
+    warned: false,
+    exitCode: 0,
+  });
+}, 240_000);
+
+test("a test lays names out of a list on Object.prototype", async () => {
+  using dir = tempDir("aot-locked-built-in-write-warnings", {
+    "main.test.mjs": `import { expect, test } from "bun:test";\ntest("t", () => {\n  for (const name of ["upper", "lower"]) {\n    Object.prototype[name] = () => name;\n    expect({}[name]()).toBe(name);\n    delete Object.prototype[name];\n  }\n});\n`,
+  });
+  const ran = await run([bunExe(), "test", "--aot", "./main.test.mjs"], String(dir), { ...bunEnv, NO_COLOR: "1" });
+  expect({ warned: (ran.stdout + ran.stderr).includes("TS100014"), exitCode: ran.exitCode }).toEqual({
+    warned: false,
+    exitCode: 0,
+  });
 }, 240_000);
 
 test("a test replaces a member through Object.assign()", async () => {

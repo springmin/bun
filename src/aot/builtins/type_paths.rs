@@ -1,7 +1,7 @@
 use super::table::{self, BuiltinClass, BuiltinId, BuiltinKind, ClassData, Platforms, TypeName};
 use bun_sema::check::aot::{
-    BuiltinClassIndex, BuiltinTypeClass, BuiltinTypePath, BuiltinTypeSymbols, BuiltinValueIndex,
-    BuiltinValuePath, Denotation,
+    BuiltinClassIndex, BuiltinTypeClass, BuiltinTypePath, BuiltinValueIndex, BuiltinValuePath,
+    Denotation,
 };
 use bun_sort_by_number::SortByNumber;
 use smallvec::SmallVec;
@@ -60,21 +60,6 @@ pub fn type_name_of(class: BuiltinTypeClass) -> Option<&'static TypeName> {
     data.type_names.get(class.type_name as usize)
 }
 
-fn declared_denotation_of(class: BuiltinTypeClass) -> Option<Denotation> {
-    let data = table::class_data(builtin_class_of(class.class)?);
-    let name = data.type_names.get(class.type_name as usize)?;
-    Some(declared_denotation(data, name))
-}
-
-pub fn count_types_degraded_to_views(types: &BuiltinTypeSymbols) -> u64 {
-    let classes = types.classes().map(|(_, class)| class);
-    let degraded = classes.filter(|&class| {
-        class.denotation == Denotation::View
-            && declared_denotation_of(class) == Some(Denotation::Exact)
-    });
-    degraded.count() as u64
-}
-
 struct ValueSpan {
     id: BuiltinId,
     module: Option<&'static str>,
@@ -97,7 +82,6 @@ fn can_have_call_signatures(kind: BuiltinKind) -> bool {
     )
 }
 
-// The module, and the names from the last to the first.
 type PublishedPath = (Option<&'static str>, SmallVec<[&'static str; 4]>);
 
 fn find_published_path(id: BuiltinId) -> Option<PublishedPath> {
@@ -123,7 +107,6 @@ fn find_published_path(id: BuiltinId) -> Option<PublishedPath> {
 
 const SETS_OF_PLATFORMS: usize = 1 << Platforms::all().bits().count_ones();
 
-// The table is the same for every build of the process.
 static PATHS: [OnceLock<BuiltinValuePaths>; SETS_OF_PLATFORMS] =
     [const { OnceLock::new() }; SETS_OF_PLATFORMS];
 static LISTS: [OnceLock<Vec<BuiltinValuePath<'static>>>; SETS_OF_PLATFORMS] =
@@ -163,7 +146,6 @@ impl BuiltinValuePaths {
         paths
     }
 
-    // An object with a second name, as `self` is `globalThis`, has its members under that name too, and a declaration file can give them signatures of their own there.
     fn add_members_under_second_names(&mut self, platform: Platforms) {
         for second_name in BuiltinId::ALL {
             let Some(object) = table::entry(second_name).same_object_as else {

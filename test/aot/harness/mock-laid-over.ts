@@ -178,7 +178,7 @@ export function modules(): Map<string, Project> {
   for (const kind of ["project", "typed-package", "untyped-package"]) {
     const [spec, files] = filesOfModule(kind);
     const look = `async function look(moment) {
-  const readers = { before, namespace, captured, "extends": extended, barrel: { read: () => ({ fn: tried(() => barrel.fn()), default: tried(() => barrel.default()), starred: tried(() => barrel.starred), keys: Object.keys(barrel).sort().join("+") }) },
+  const readers = { before, namespace, captured, "extends": extended, barrel: { read: () => ({ fn: tried(() => barrel.fn()), default: tried(() => barrel.default()), starred: tried(() => barrel.starred), "space.inner": tried(() => barrel.space.inner), "again.inner": tried(() => barrel.again.inner), keys: Object.keys(barrel).sort().join("+") }) },
     ...(moment === "0 loaded" ? {} : { after: await import("../readers/after.ts"), "after namespace": await import("../readers/after-namespace.ts") }),
     "import()": { read: await (async () => { const ns = await import("${spec}"); return () => ({ ...${offNamespace}, ${keys} }); })().catch(e => () => ({ load: "threw " + String(e.message).slice(0, 60) })) },
     "require()": { read: () => { const ns = import.meta.require("${spec}"); return { ...${offNamespace}, ${keys} }; } } };
@@ -430,16 +430,23 @@ export function packed(all: Map<string, Project>, columns: string[]): Project {
 /**
  * The cell in which real programs live: the module has run, then a mock is laid over it. What `bun test` prints is the specification, key by key.
  * In front of a merge: the columns as one project, twice: without a preload that lays a mock, and with, as large programs run. Four runs. A mock call in any preload
- * changes how the whole run answers: a fault of another column went out of sight beside one. AOT_WHOLE_GRIDS=1, on a bench: all 696 projects, each alone.
+ * changes how the whole run answers: a fault of another column went out of sight beside one. AOT_WHOLE=1, on a bench: all 696 projects, each alone.
  * mock-laid-over.known.txt holds every key that differs, a line `<project> | <reader> | <export>: <loud | SILENT> | <what is printed> | at <the moments>`: a line that is
  * cured, one that changes and a new one all fail. BUN_AOT_REWRITE_MOCK_LAID_OVER=1 writes the lines of what ran anew.
+ * One file took five minutes, and CI's runner tries a file that fails four times. So `parts` files share the projects, each a stretch of the sorted names, and the packed
+ * runs go with the first.
  */
-export function mockLaidOver() {
+export function mockLaidOver(part: number, parts: number) {
   const all = new Map([...modules(), ...builtinModules()]);
-  const withoutMockingPreload = witnesses.filter(column => !column.includes(".laid-by-preload."));
-  test("the columns of real programs and a witness for each fault", () => judge("packed", packed(all, withoutMockingPreload), 5000), 300_000);
-  test("the same beside preloads that lay mocks", () => judge("packed beside preloads that mock", packed(all, witnesses), 5000), 300_000);
-  if (runsWholeGrids) for (const [name, project] of all) test(name, () => judge(name, project, 10), 180_000);
+  if (part === 1) {
+    const withoutMockingPreload = witnesses.filter(column => !column.includes(".laid-by-preload."));
+    test("the columns of real programs and a witness for each fault", () => judge("packed", packed(all, withoutMockingPreload), 5000), 300_000);
+    test("the same beside preloads that lay mocks", () => judge("packed beside preloads that mock", packed(all, witnesses), 5000), 300_000);
+  }
+  const names = [...all.keys()].sort();
+  const stretch = Math.ceil(names.length / parts);
+  const mine = names.slice((part - 1) * stretch, part * stretch);
+  if (runsWholeGrids) for (const name of mine) test(name, () => judge(name, all.get(name)!, 10), 180_000);
   afterAll(() => {
     if (!rewrite) return;
     const now = readFileSync(list, "utf8").split("\n");

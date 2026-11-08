@@ -1,4 +1,3 @@
-// Flags: --aot-heat=ReadOffStructure
 // As walked-m1.js: the name that a walk hands out is kept in a member; one kind of name a file.
 const TABLE = { [-0]: 1 };
 function make() { return { q: "start", n: 0 }; }

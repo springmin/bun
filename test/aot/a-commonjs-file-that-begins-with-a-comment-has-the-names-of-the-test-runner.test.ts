@@ -45,34 +45,30 @@ const testFiles = Object.keys(files)
   .filter(name => name.includes(".test."))
   .map(name => `./${name}`);
 
-const forms = { "one program": "TestRunLayers:0", "two layers": "TestRunLayers:2,TestRunPartFiles:1" };
-
-// The test files don't see one another, so one run holds them all. Over layers each is a part of its own.
-for (const [title, words] of Object.entries(forms)) {
-  test(title, async () => {
-    using dir = tempDir("a-commonjs-file-that-begins-with-a-comment", files);
-    const seen = async (...flags: string[]) => {
-      const env = { ...bunEnv, BUN_DEBUG_TEST_AOT_WORDS: words };
-      const { stdout, stderr, exitCode } = await run([bunExe(), "test", ...flags, ...testFiles], String(dir), env);
-      const lines = stdout
-        .split("\n")
-        .filter(line => line.startsWith("SEEN"))
-        .sort();
-      return { lines, stderr: exitCode ? stderr : "", exitCode };
-    };
-    const plain = await seen();
-    expect(plain).toEqual({
-      lines: [
-        "SEEN behind-a-line object function function",
-        "SEEN docblock object function function",
-        "SEEN module object function function",
-        "SEEN one-line object function function",
-        "SEEN package object object",
-        "SEEN two-comments object function function",
-      ],
-      stderr: "",
-      exitCode: 0,
-    });
-    expect(await seen("--aot")).toEqual(plain);
+// The test files don't see one another, so one run holds them all.
+test("one program", async () => {
+  using dir = tempDir("a-commonjs-file-that-begins-with-a-comment", files);
+  const seen = async (...flags: string[]) => {
+    const env = { ...bunEnv, BUN_DEBUG_TEST_AOT_WORDS: "TestRunLayers:0" };
+    const { stdout, stderr, exitCode } = await run([bunExe(), "test", ...flags, ...testFiles], String(dir), env);
+    const lines = stdout
+      .split("\n")
+      .filter(line => line.startsWith("SEEN"))
+      .sort();
+    return { lines, stderr: exitCode ? stderr : "", exitCode };
+  };
+  const plain = await seen();
+  expect(plain).toEqual({
+    lines: [
+      "SEEN behind-a-line object function function",
+      "SEEN docblock object function function",
+      "SEEN module object function function",
+      "SEEN one-line object function function",
+      "SEEN package object object",
+      "SEEN two-comments object function function",
+    ],
+    stderr: "",
+    exitCode: 0,
   });
-}
+  expect(await seen("--aot")).toEqual(plain);
+});

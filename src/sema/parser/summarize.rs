@@ -89,7 +89,7 @@ struct ParseSettings<'a> {
     compiles: bool,
     /// `Options::reads_as_bun_run`
     reads_as_bun_run: bool,
-    /// `Options::keeps_function_directives`
+    /// `Options::ignores_pure_comments`
     ignores_pure_comments: bool,
     /// `Options::skips_function_blocks`
     skips_function_blocks: bool,
@@ -576,8 +576,7 @@ impl<'s> Summary<'_, 's> {
         match self {
             Summary::InArena(file) => *file,
             Summary::InPlace(file) => {
-                let (mut in_arena, emptied) = core::mem::take(file).into_arena(arena, session);
-                *file = emptied;
+                let mut in_arena = file.move_to_arena(arena, session);
                 in_arena.finish_nodes();
                 in_arena
             }

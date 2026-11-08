@@ -11,7 +11,7 @@ import { describe, test } from "./supported";
 const rewrite = !!process.env.BUN_AOT_REWRITE_MOCK_SWEEP;
 const whole = rewrite || !!process.env.BUN_AOT_WHOLE_MOCK_SWEEP;
 const projects = [...mockSweep()].filter((_, index) => whole || index % 5 === 0);
-const ways = whole ? ["one", "two"] : ["one"];
+const ways = ["one"];
 
 const list = join(import.meta.dir, "mock-sweep.known.txt");
 const lines = readFileSync(list, "utf8").split("\n");
@@ -20,7 +20,6 @@ const wavering = new Set(lines.filter(line => line.startsWith("~ ")).map(line =>
 const found = new Map<string, string[]>();
 
 const env = { ...bunEnv, NO_COLOR: "1" };
-const twoLayers = { ...env, BUN_FEATURE_FLAG_INTERNAL_FOR_TESTING: "1", BUN_DEBUG_TEST_AOT_WORDS: "TestRunLayers:2" };
 const oneThread = { ...env, BUN_FEATURE_FLAG_DISABLE_ASYNC_TRANSPILER: "1" };
 
 async function printed(cmd: string[], cwd: string, env: Record<string, string | undefined>) {
@@ -41,7 +40,7 @@ export function sweepMocks(part: number, parts: number) {
         for (let i = 0; i < 3; i++) plain.add(await printed([bunExe(), "test", "."], cwd, i < 2 ? env : oneThread));
         const differs: string[] = [];
         for (const way of ways) {
-          const compiled = await printed([bunExe(), "test", "--aot", "."], cwd, way === "one" ? env : twoLayers);
+          const compiled = await printed([bunExe(), "test", "--aot", "."], cwd, env);
           if (!plain.has(compiled)) differs.push(way);
         }
         found.set(name, differs);

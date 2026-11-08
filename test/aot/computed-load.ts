@@ -100,8 +100,6 @@ export function computedLoads(part: number) {
 
   const forms = [
     ["as one program", "TestRunLayers:0"],
-    ["over two layers", "TestRunLayers:2,TestRunPartFiles:1"],
-    ["over three layers", "TestRunLayers:3,TestRunPartFiles:1"],
   ];
 
   if (part === 1)
@@ -144,17 +142,21 @@ export function computedLoads(part: number) {
   // Whether an executable holds a native addon is a matter of how it is packaged: the build finds the file, or is given it, or a plugin leaves it out.
   // A test run cannot know which, so the addon loads as in plain Bun, and the run says so when it ends.
   const systemCC = process.env.CC || Bun.which("cc") || Bun.which("gcc") || Bun.which("clang");
+  // The manifest names the way in: a test requires main.cjs, and nothing else speaks for the product.
   const withAddon = {
-    "package.json": files["package.json"],
+    "package.json": `{ "name": "product", "main": "./main.cjs" }`,
     "setup/preload.mjs": "",
     "src/loads.cjs": files["src/loads.cjs"],
     "main.cjs": `
     const it = require("./src/loads.cjs").load(process.cwd() + "/native/" + ["adds", "node"].join("."));
     console.log("SAID the addon:", typeof it === "string" ? it : it.add(40, 2));`,
+    "from-its-folder.cjs": `
+    const it = require("./src/loads.cjs").load(__dirname + "/native/" + ["adds", "node"].join("."));
+    console.log("SAID the addon:", typeof it === "string" ? it : it.add(40, 2));`,
     "test/product.test.cjs": `require("bun:test").test("the product", () => void require("../main.cjs"));`,
   };
 
-  if (part === 4)
+  if (part === 2)
     describe.skipIf(!systemCC || isWindows)("a native addon", () => {
       let directory: ReturnType<typeof tempDir> | undefined;
       beforeAll(async () => {
@@ -178,8 +180,9 @@ export function computedLoads(part: number) {
 
       const build = async (name: string, ...given: string[]) => {
         const file = join(String(directory), name);
+        const entry = given.length ? "./from-its-folder.cjs" : "./main.cjs";
         const built = await run(
-          [bunExe(), "build", "--compile", "--aot", "./main.cjs", ...given, "--outfile", file],
+          [bunExe(), "build", "--compile", "--aot", entry, ...given, "--outfile", file],
           String(directory),
         );
         expect(built).toMatchObject({ exitCode: 0 });

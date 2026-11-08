@@ -38,8 +38,6 @@ pub(crate) struct Timings {
     workers: u32,
     /// Cost assigned to files with no entry when packing shards.
     median: u32,
-    /// Nine files in ten take no longer.
-    slow: u32,
 }
 
 impl Timings {
@@ -51,11 +49,10 @@ impl Timings {
         for path in paths {
             Self::load_one(path, &mut map, &mut growth, &mut workers);
         }
-        let (median, slow) = {
+        let median = {
             let mut known: Vec<u32> = map.values().to_vec();
             index_sort::sort_slice_unstable_by(&mut known, |a, b| a.cmp(b));
-            let at = |index: usize| known.get(index).copied().unwrap_or(0);
-            (at(known.len() / 2), at(known.len() * 9 / 10))
+            known.get(known.len() / 2).copied().unwrap_or(0)
         };
         Timings {
             path: paths[0].clone(),
@@ -65,7 +62,6 @@ impl Timings {
             measured_growth: StringArrayHashMap::new(),
             workers,
             median,
-            slow,
         }
     }
 
@@ -145,7 +141,7 @@ impl Timings {
         self.workers
     }
 
-    /// Only a compiled run says: what the table has stays through a plain one.
+    /// Only a compiled run says, and only a compiled run writes it.
     pub(crate) fn record_workers(&mut self, workers: u32) {
         self.workers = workers;
     }
@@ -172,7 +168,9 @@ impl Timings {
         let key = Self::key_for(abs_path);
         let _ = self.map.put(&key, ms);
         let _ = self.measured.put(&key, ms);
-        if let Some(&megabytes) = self.growth.get(&key) {
+        if crate::cli::run_compiled::runs_compiled_code()
+            && let Some(&megabytes) = self.growth.get(&key)
+        {
             let _ = self.measured_growth.put(&key, megabytes);
         }
     }
@@ -210,21 +208,12 @@ impl Timings {
         let _ = self.measured_growth.put(&key, megabytes);
     }
 
-    /// Puts the heavy files first, in the order they have, and says how many they are.
-    pub(crate) fn move_heavy_first(&self, files: &mut [Interned]) -> usize {
-        let (heavy, light): (Vec<Interned>, Vec<Interned>) =
-            (files.iter().copied()).partition(|file| self.is_heavy(file.as_bytes()));
-        files[..heavy.len()].copy_from_slice(&heavy);
-        files[heavy.len()..].copy_from_slice(&light);
-        heavy.len()
-    }
-
     pub(crate) fn record_since(&mut self, abs_path: &[u8], started_ms: i64) {
         let elapsed = (bun_core::time::milli_timestamp() - started_ms).max(0);
         self.record(abs_path, u32::try_from(elapsed).unwrap_or(u32::MAX));
     }
 
-    /// For a file that did not run to its end: its worker crashed, or it had no program. How long that took says nothing about the
+    /// For a file that did not run to its end: its worker crashed. How long that took says nothing about the
     /// file, and a time that is too short starts it late in the next run, where it runs alone at the end. It keeps the time that
     /// the table has, if any.
     pub(crate) fn keep(&mut self, abs_path: &[u8]) {
@@ -235,12 +224,6 @@ impl Timings {
         if let Some(&megabytes) = self.growth.get(&key) {
             let _ = self.measured_growth.put(&key, megabytes);
         }
-    }
-
-    /// For work that is dealt out ahead of the run: a file that nobody has timed is better taken for slow than for fast.
-    pub(crate) fn costs_where_unknown_is_slow(&self, files: &[Interned]) -> Vec<u64> {
-        let cost = |file: &Interned| self.get(file.as_bytes()).unwrap_or(self.slow).max(1);
-        files.iter().map(|file| u64::from(cost(file))).collect()
     }
 
     fn cost(&self, abs_path: &[u8]) -> u64 {
@@ -313,7 +296,10 @@ impl Timings {
     /// run ran; otherwise everything read is carried through so a local partial
     /// run doesn't shrink the table.
     pub(crate) fn write(&mut self, only_measured: bool) {
-        let workers = self.workers;
+        let workers = match crate::cli::run_compiled::runs_compiled_code() {
+            true => self.workers,
+            false => 0,
+        };
         let (map, growth) = if only_measured {
             (&mut self.measured, &mut self.measured_growth)
         } else {

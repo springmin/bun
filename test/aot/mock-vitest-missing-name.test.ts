@@ -52,7 +52,7 @@ async function run(dir: string, flags: string[], words = "") {
   return { lines: stdout.split("\n").filter(line => line.startsWith("OUT")), exitCode };
 }
 
-test("every read is as in plain bun test, as one program and over layers", async () => {
+test("every read is as in plain bun test", async () => {
   using folder = tempDir("aot-mock-vitest-missing-name", files);
   const dir = String(folder);
   const plain = await run(dir, []);
@@ -65,6 +65,4 @@ test("every read is as in plain bun test, as one program and over layers", async
     exitCode: 0,
   });
   expect(await run(dir, ["--aot"], "TestRunLayers:0")).toEqual(plain);
-  expect(await run(dir, ["--aot"], "TestRunLayers:2,TestRunPartFiles:1")).toEqual(plain);
-  expect(await run(dir, ["--aot"], "TestRunLayers:3,TestRunPartFiles:1")).toEqual(plain);
 }, 240_000);

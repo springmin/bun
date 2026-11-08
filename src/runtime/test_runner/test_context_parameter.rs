@@ -17,6 +17,7 @@ pub(crate) enum ContextParameter {
     RestProperty,
     /// Not an object pattern. Holds the name if it's a plain identifier.
     Other(Option<Box<[u8]>>),
+    /// A function compiled ahead of time, in a build that holds no function source.
     TextLeftOut,
 }
 
@@ -58,6 +59,7 @@ impl ContextParameter {
             .unwrap_or(ContextParameter::Other(None))
     }
 
+    /// The text of a function that `bun test --aot` compiled is the whole function as it's written, without its types.
     #[cold]
     fn of_compiled(function: JSValue, index: usize) -> ContextParameter {
         let mut is_text_left_out = false;
@@ -69,6 +71,7 @@ impl ContextParameter {
             };
         }
         let whole = whole.to_utf8();
+        // A method parses in an object or a class and nowhere else. `this.#x` needs a class.
         let around: [(&[u8], &[u8], bool); 4] = [
             (b"(", b")", false),
             (b"({", b"})", false),

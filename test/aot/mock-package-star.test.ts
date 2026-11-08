@@ -1,9 +1,10 @@
 import { expect } from "bun:test";
 import { bunEnv, bunExe, tempDir } from "harness";
+import { afterAll } from "./harness/default-timeout";
 import { run } from "./harness/run";
 import { test } from "./supported";
 
-// barrel.js hands on a package and a file of the project by `export *`, and both have x. Over layers the package lies in a program below the barrel's.
+// barrel.js hands on a package and a file of the project by `export *`, and both have x.
 // While a mock stands in place of the package the first star that has a name gives it; without the mock x is ambiguous and nobody has it.
 const project = (stars: string) => ({
   "package.json": `{ "name": "p", "type": "module" }`,
@@ -54,21 +55,49 @@ const projects = {
   "the mock is laid over a file of the project, its star last": laidOver(inProject(last)),
 };
 
-for (const [name, files] of Object.entries(projects)) {
+// Each project is a folder of one project, with its own packages below it, and says its folder in what it prints: two runs for all of them.
+// But one: on a build in front of the cures it differed from plain Bun by itself and no longer beside the others.
+const standsAlone = "a file of the project in place of the package, its star last";
+const folders = Object.keys(projects).map((name, index) => [name, `p${index}`]);
+const dirs: ReturnType<typeof tempDir>[] = [];
+afterAll(() => dirs.forEach(dir => dir[Symbol.dispose]()));
+const filesOf = (alone: boolean) =>
+  Object.fromEntries(
+    folders
+      .filter(([name]) => (name === standsAlone) === alone)
+      .flatMap(([name, folder]) =>
+        Object.entries(projects[name]).map(([path, text]) => [
+          `${folder}/${path}`,
+          text.replaceAll(`"SEEN `, `"SEEN ${folder} `),
+        ]),
+      ),
+  );
+const made = new Map<boolean, string>();
+const runs = new Map<string, Promise<{ lines: string[]; exitCode: number | null }>>();
+const ran = (alone: boolean, flags: string[]) =>
+  runs.getOrInsertComputed(`${alone} ${flags}`, async () => {
+    const cwd = made.getOrInsertComputed(alone, () => {
+      dirs.push(
+        tempDir("aot-mock-package-star", { "package.json": `{ "name": "all", "type": "module" }`, ...filesOf(alone) }),
+      );
+      return String(dirs.at(-1));
+    });
+    const { stdout, exitCode } = await run([bunExe(), "test", ...flags], cwd, bunEnv);
+    return { lines: stdout.split("\n"), exitCode };
+  });
+
+for (const [name, folder] of folders) {
   test.concurrent(
-    `${name}: as plain Bun, as one program and in two layers`,
+    `${name}: compiled as under plain Bun`,
     async () => {
-      using dir = tempDir("aot-mock-package-star", files);
-      const seen = async (flags: string[], words: string) => {
-        const env = { ...bunEnv, BUN_DEBUG_TEST_AOT_WORDS: words };
-        const { stdout, exitCode } = await run([bunExe(), "test", ...flags], String(dir), env);
-        return { lines: stdout.split("\n").filter(line => line.startsWith("SEEN")), exitCode };
+      const seen = async (flags: string[]) => {
+        const { lines, exitCode } = await ran(name === standsAlone, flags);
+        return { lines: lines.filter(line => line.startsWith(`SEEN ${folder} `)), exitCode };
       };
-      const plain = await seen([], "");
+      const plain = await seen([]);
       expect(plain.lines.length).toBe(3);
-      expect(await seen(["--aot"], "TestRunLayers:0")).toEqual(plain);
-      expect(await seen(["--aot"], "TestRunLayers:2")).toEqual(plain);
+      expect(await seen(["--aot"])).toEqual(plain);
     },
-    120_000,
+    240_000,
   );
 }

@@ -327,6 +327,23 @@ const wrongEntries: WrongEntry[] = [
     }),
   },
   {
+    title: "Bun.inspect.table that names nothing of the options where they stand second",
+    path: "Bun.inspect.table",
+    mode: "Call",
+    column: "parameters[1].protocols",
+    applyTo: overload => ({
+      ...overload,
+      parameters: overload.parameters.map((parameter, index) =>
+        index === 1
+          ? {
+              ...parameter,
+              namedMembers: parameter.namedMembers.filter(name => !/^(depth|colors|sorted|compact)$/.test(name)),
+            }
+          : parameter,
+      ),
+    }),
+  },
+  {
     title: "a native function of the library that calls nothing of what its operand holds",
     path: "native:NewCppFunction:BunCompiledModules.cpp:jsFunctionCallOwnFunctionsWithoutParameters",
     mode: "Call",
@@ -372,7 +389,7 @@ function defineWrongEntryTests(): void {
 }
 
 function defineDescriptionTests(): void {
-  const programs = join(import.meta.dir, "../parallel/builtin-modules");
+  const programs = join(import.meta.dir, "differential");
   describe("the processes that make the calls describe a rejected value without running code of the program:", () => {
     for (const program of ["rejected-argument-description", "rejected-argument-fields-nobody-reads"]) {
       test(program, async () => {

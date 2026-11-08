@@ -7,7 +7,7 @@
 //   mutation          a stored program from ../parallel with something done to it (mutate.ts)
 //   grammar           a random program built from a pool of language features (grammar.ts)
 //   stored-programs   the stored programs unchanged, for runs that vary how a program is built
-//   stored-programs-in-hot-loop   the stored programs with their top-level code made hot at default flags (hot-loop-with-cold-ballast.ts)
+//   stored-programs-in-hot-loop   the stored programs with their top-level code moved into a function that a loop calls (hot-loop-with-cold-ballast.ts)
 //
 // Every source also exists in two variants:
 //
@@ -560,8 +560,8 @@ const asOwnCopies =
 
 /**
  * The four-callers variant of a source: what the program does at its top is done by four functions, each called twice (see
- * four-callers.ts). In the mode "large" its functions are then compiled as the hot part of a very large program; as
- * generated, called from the top alone, they are compiled as its cold part.
+ * four-callers.ts). Nothing that they do is then done only once, and what they call has four callers. As generated, the top
+ * of the file does it, which runs once.
  */
 const asFourCallers =
   (source: Source): Source =>
@@ -649,7 +649,7 @@ function mutation(root: string, rejected: Set<string>): Source | undefined {
   };
 }
 
-function storedPrograms(
+export function storedPrograms(
   root: string,
   source: string,
   pick: (seed: number, count: number) => number,
@@ -659,19 +659,22 @@ function storedPrograms(
   if (!files.length) return;
   return (seed, runner) => {
     if (runner.name !== "product") return;
-    const path = files[pick(seed, files.length)];
-    const stored = textOf(path);
-    if (stored.length > 60_000 || differsByDesign.test(stored)) return;
-    const extension = path.endsWith(".ts") ? "ts" : "js";
-    const text = rewrite(stored, extension);
-    if (text === undefined) return;
-    return {
-      source,
-      seed,
-      text: extension === "js" && !/^(import|export)\b/m.test(text) ? scriptMarker + text : text,
-      extension,
-      notes: relative(root, path),
-    };
+    // A refused file is drawn again a prime stride further on: the next file would get every seed of a refused family.
+    for (let draw = 0; draw < files.length; draw++) {
+      const path = files[pick(seed + draw * 1_000_003, files.length)];
+      const stored = textOf(path);
+      if (stored.length > 60_000 || differsByDesign.test(stored)) continue;
+      const extension = path.endsWith(".ts") ? "ts" : "js";
+      const text = rewrite(stored, extension);
+      if (text === undefined) continue;
+      return {
+        source,
+        seed,
+        text: extension === "js" && !/^(import|export)\b/m.test(text) ? scriptMarker + text : text,
+        extension,
+        notes: relative(root, path),
+      };
+    }
   };
 }
 
@@ -775,6 +778,8 @@ const standAlone = new Set([
   "crossed-ingredients",
   "a-store-through-a-second-name-between-two-reads",
   "locals-that-change-their-kind-compared-in-loops",
+  "loops-fed-unexpected-kinds",
+  "one-value-under-several-names",
 ]);
 const flagsOfSource: Record<string, string[]> = {
   "unseen-code-mutates-arguments": ["--aot-allow-code-from-disk"],
@@ -1137,6 +1142,8 @@ async function singleFileSources(programsRoot: string, rejected: Set<string>): P
     "loop-tests-whose-answer-is-read-again",
     "hidden-writes",
     "crossed-ingredients",
+    "loops-fed-unexpected-kinds",
+    "one-value-under-several-names",
   ])
     sources[name] = productSource(name, generateOf(name), never);
   const named =

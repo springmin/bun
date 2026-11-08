@@ -69,9 +69,6 @@ test("come from the mock under plain Bun", () => {
   });
 });
 
-test.each([
-  ["as one program", "TestRunLayers:0"],
-  ["over layers", "TestRunLayers:2,TestRunPartFiles:1"],
-])("come from the mock, %s", async (_, words) => {
+test.each([["as one program", "TestRunLayers:0"]])("come from the mock, %s", async (_, words) => {
   expect(await run(String(dir), ["--aot"], words)).toEqual(plain);
 });

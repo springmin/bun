@@ -96,10 +96,7 @@ async function printedBy(directory: string, words: string, ...flags: string[]) {
   return { printed: stdout.replace(/^bun test .*\n/, ""), exitCode };
 }
 
-const ways = [
-  ["as one program", "TestRunLayers:0"],
-  ["over two layers", "TestRunLayers:2,TestRunPartFiles:1"],
-];
+const ways = [["as one program", "TestRunLayers:0"]];
 
 test.each(ways)("the accessor of the test answers, %s", async (_, words) => {
   using directory = tempDir("accessor-in-place-of-proto", files);

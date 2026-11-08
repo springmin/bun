@@ -51,8 +51,6 @@ test.each(["ts", "js"])(
     expect(plain.rows.slice(0, 4)).toEqual(["ROW 0 dev", "ROW 1 not prod", "ROW 2 ssr", "ROW 3 x"]);
     expect(plain.rows.length).toBe(reads.length + 1);
     expect(await rowsOf(["--aot"], "TestRunLayers:0")).toEqual(plain);
-    expect(await rowsOf(["--aot", "--isolate"], "TestRunLayers:0")).toEqual(plain);
-    expect(await rowsOf(["--aot", "--parallel=2"], "TestRunLayers:2,TestRunPartFiles:1")).toEqual(plain);
   },
   240_000,
 );

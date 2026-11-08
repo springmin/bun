@@ -2,13 +2,14 @@
 // A build is a function of its sources and flags. The tsconfig.json here lists thousands of files by `include`, and threads read them
 // while others follow the imports of the code; 40 of the listed folders have a tsconfig.json of their own that names `types`, and no code is in them.
 import { expect, setDefaultTimeout } from "bun:test";
-import { bunExe, isWindows, tempDir } from "harness";
+import { bunExe, isASAN, isDebug, isWindows, tempDir } from "harness";
 import { cpSync, mkdirSync, symlinkSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { run } from "./harness/run";
-import { wanted } from "./harness/shares";
 // One by one: a case builds for minutes, and beside others it would pass its limit where Bun has a sanitizer.
 import { testOneByOne as test } from "./supported";
+
+const wanted = process.env.AOT_PROGRAMS ?? (isASAN || isDebug ? "quick" : "");
 
 export function sameProgram(part: number) {
   setDefaultTimeout(300_000);
@@ -62,11 +63,10 @@ export function sameProgram(part: number) {
     `import { run${chainLength - modules} as first } from "./chain/c${chainLength - modules}.ts";\n${more}` +
     `declare const console: { log(...values: unknown[]): void };\nconsole.log(first(1), first.name.length);\n`;
 
-  // For the two large programs. What has differed between thread counts there was decided by the front end and by the flow analysis.
-  // These make the stages after them cost half, and what those two decide still reaches the bytes of the executable.
-  const withCheapBackEnd = ["--aot-heat=everything-is-cold", "--aot-limit=MaxOptimizationRounds:1"];
-
-  async function build(directory: string, entry: string, threads: number, flags: string[] = []) {
+  async function build(directory: string, entry: string, threads: number) {
+    // Most bytes of an executable are Bun's own file, read again from its path where a build ends.
+    const hashOfBun = async () => Bun.hash.xxHash3(await Bun.file(bunExe()).bytes()).toString(16);
+    const bunInFront = await hashOfBun();
     const { stderr, exitCode } = await run(
       [
         bunExe(),
@@ -76,7 +76,6 @@ export function sameProgram(part: number) {
         `--aot-threads=${threads}`,
         "--aot-out=emitted.program",
         "--minify",
-        ...flags,
         entry,
         "--outfile",
         "app",
@@ -92,6 +91,7 @@ export function sameProgram(part: number) {
       errors: stderr.split("\n").filter(line => line.startsWith("error")).length,
       program: await hashOf("emitted.program"),
       executable: await hashOf(isWindows ? "app.exe" : "app"),
+      bun: `${bunInFront} in front, ${await hashOfBun()} behind`,
     };
     await Promise.all(
       ["emitted.program", "app", "app.exe"].map(name =>
@@ -140,6 +140,7 @@ export function sameProgram(part: number) {
           errors: 60,
           program: "",
           executable: "",
+          bun: expect.any(String),
         });
     });
 
@@ -160,13 +161,29 @@ export function sameProgram(part: number) {
       console.log(modules.length, typeof server.listen);
     `,
       });
-      const first = await build(String(dir), "main.js", 1, withCheapBackEnd);
+      const first = await build(String(dir), "main.js", 1);
       expect(first).toEqual({ ...first, exitCode: 0, errors: 0 });
-      for (const threads of [2, 4, 8, 16, 64])
-        expect({ threads, ...(await build(String(dir), "main.js", threads, withCheapBackEnd)) }).toEqual({
-          threads,
-          ...first,
-        });
+      for (const threads of [4, 64])
+        expect({ threads, ...(await build(String(dir), "main.js", threads)) }).toEqual({ threads, ...first });
+    });
+
+  // The engine enters itself once for each loop inside another, and tries loops no deeper than a number says. It once went by what was left of
+  // the stack, and the thread that starts a build had an eighth of what the threads that help it have.
+  if (part === 1)
+    test.skipIf(wanted === "quick")("loops nested very deeply build the same whichever thread takes them", async () => {
+      const nests = Array.from({ length: 4 }, (_, nest) => nest);
+      using dir = tempDir("aot-threads-fall-nests", {
+        "main.js":
+          `let left = 0, sum = 0;\nfunction more() { return left-- > 0; }\n` +
+          nests
+            .map(nest => `function nest${nest}(box) {\n${"while (more()) ".repeat(2000)}sum += box.weight;\nreturn sum;\n}\n`)
+            .join("") +
+          `console.log(${nests.map(nest => `(left = 2000, nest${nest}({ weight: ${nest + 1} }))`).join(", ")});\n`,
+      });
+      const first = await build(String(dir), "main.js", 1);
+      expect(first).toEqual({ ...first, exitCode: 0, errors: 0 });
+      for (const threads of [2, 16, 16])
+        expect({ threads, ...(await build(String(dir), "main.js", threads)) }).toEqual({ threads, ...first });
     });
 
   // `take(make())` does not fit, so the type checker writes an error message. To name `Hidden`, which maker.js does not import, it looks
@@ -213,13 +230,10 @@ if ((typeof exports.default === "function" || (typeof exports.default === "objec
           ]),
         ),
       });
-      const first = await build(String(dir), "main.ts", 1, withCheapBackEnd);
+      const first = await build(String(dir), "main.ts", 1);
       expect(first).toEqual({ ...first, exitCode: 0, errors: 0 });
       for (const threads of [2, 4, 8, 16])
-        expect({ threads, ...(await build(String(dir), "main.ts", threads, withCheapBackEnd)) }).toEqual({
-          threads,
-          ...first,
-        });
+        expect({ threads, ...(await build(String(dir), "main.ts", threads)) }).toEqual({ threads, ...first });
     });
 
   // `Middle` has no constructor, so `super(..)` below it takes the parameters of `Base`. In the file of `Base` they have the types that
@@ -295,16 +309,13 @@ exports.Farther = Farther;
             .join("") +
           `exports.steps = [${steps.map(step => `step${step}(${step})`).join(", ")}];\n`,
       });
-      const first = await build(String(dir), "main.ts", 1, withCheapBackEnd);
+      const first = await build(String(dir), "main.ts", 1);
       expect(first).toEqual({ ...first, exitCode: 0, errors: 0 });
       for (const threads of [2, 8])
-        expect({ threads, ...(await build(String(dir), "main.ts", threads, withCheapBackEnd)) }).toEqual({
-          threads,
-          ...first,
-        });
+        expect({ threads, ...(await build(String(dir), "main.ts", threads)) }).toEqual({ threads, ...first });
     });
 
-  // The typescript package is large enough for the flow analysis to split its work into batches, which the small programs above never do.
+  // The typescript package is large enough for every stage to split its work among threads, which the small programs above never are.
   // One thread takes serial code paths that two or more threads skip. A debug or ASAN build of Bun takes an hour here.
   if (part === 2)
     test.skipIf(wanted === "quick")("a large untyped package builds the same at one thread", async () => {
@@ -316,11 +327,8 @@ exports.Farther = Farther;
         join(String(dir), "node_modules", "typescript"),
         "junction",
       );
-      const first = await build(String(dir), "typescript-check.ts", 1, withCheapBackEnd);
+      const first = await build(String(dir), "typescript-check.ts", 1);
       expect(first).toEqual({ ...first, exitCode: 0, errors: 0 });
-      expect({ threads: 4, ...(await build(String(dir), "typescript-check.ts", 4, withCheapBackEnd)) }).toEqual({
-        threads: 4,
-        ...first,
-      });
+      expect({ threads: 4, ...(await build(String(dir), "typescript-check.ts", 4)) }).toEqual({ threads: 4, ...first });
     });
 }

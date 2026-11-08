@@ -4,7 +4,6 @@
 // (a-test-that-requires-a-file-writes-to-a-standard-stream.test.ts). It asked the first half alone: "TypeError: This standard stream was made without its other members".
 import { expect } from "bun:test";
 import { bunEnv, bunExe, tempDir } from "harness";
-import { waysFor } from "./harness/ways";
 import { test } from "./supported";
 
 const rewritten = `
@@ -16,7 +15,7 @@ const ways = {
   "by a promise": `await fs.promises.writeFile(path, NEW);`,
 };
 
-async function linesOf(way: string, flags: string[], words?: string) {
+async function linesOf(way: string, flags: string[]) {
   using dir = tempDir("aot-rewritten-file-and-streams", {
     "m.cjs": `exports.a = "first";\n`,
     "a.test.mjs": `
@@ -31,24 +30,22 @@ async function linesOf(way: string, flags: string[], words?: string) {
         console.error("OUT", require("./m.cjs").a);
       });`,
   });
-  const env = words ? { ...bunEnv, BUN_DEBUG_TEST_AOT_WORDS: words } : bunEnv;
   await using run = Bun.spawn({
     cmd: [bunExe(), "test", ...flags, "--isolate"],
     cwd: String(dir),
-    env,
+    env: bunEnv,
     stdio: ["ignore", "pipe", "pipe"],
   });
   const [stderr, exitCode] = await Promise.all([run.stderr.text(), run.exited]);
   return { lines: stderr.split("\n").filter(line => /^(OUT|error)/.test(line)), exitCode };
 }
 
-test.concurrent.each(Object.entries(ways).map(([name, way], index) => [name, way, index] as const))(
+test.concurrent.each(Object.entries(ways))(
   "%s",
-  async (_, way, index) => {
+  async (_, way) => {
     const plain = await linesOf(way, []);
     expect(plain).toEqual({ lines: ["OUT first", "OUT 0,function,function,true"], exitCode: 0 });
-    for (const words of waysFor([undefined, "TestRunLayers:2"], index === 0))
-      expect(await linesOf(way, ["--aot"], words)).toEqual(plain);
+    expect(await linesOf(way, ["--aot"])).toEqual(plain);
   },
   240_000,
 );

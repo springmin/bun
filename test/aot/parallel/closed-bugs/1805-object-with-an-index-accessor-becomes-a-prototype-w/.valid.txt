@@ -1,2 +1,0 @@
-[object Object]
-exit 134

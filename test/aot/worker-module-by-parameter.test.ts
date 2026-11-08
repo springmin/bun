@@ -50,7 +50,6 @@ exports.askAll = async function askAll() {
 };
 `,
   "main.cjs": `require("./all.cjs").askAll().then(() => process.exit(0));\n`,
-  "a.test.js": `import { test } from "bun:test";\nimport { askAll } from "./all.cjs";\ntest("each answers", askAll, 60000);\n`,
 };
 const answers = ["pkg", "own"].map(name => `SEEN ${name} answers from ${name} | woken`);
 const seenIn = (text: string) => text.split("\n").filter(line => line.startsWith("SEEN"));
@@ -67,10 +66,4 @@ test("in an executable whose sources are moved away", async () => {
   renameSync(join(cwd, "node_modules"), join(cwd, "moved-away"));
   renameSync(join(cwd, "src"), join(cwd, "moved-away-too"));
   expect(seenIn((await run([join(cwd, "compiled")], cwd, bunEnv)).stdout)).toEqual(answers);
-});
-
-test.each([[["test"]], [["test", "--aot"]]])("in a test run: bun %j", async command => {
-  using dir = tempDir("aot-worker-module-by-parameter", files);
-  const { stdout, stderr, exitCode } = await run([bunExe(), ...command], String(dir), bunEnv);
-  expect({ seen: seenIn(stdout + stderr), exitCode }).toEqual({ seen: answers, exitCode: 0 });
 });

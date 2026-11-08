@@ -10,8 +10,9 @@ use crate::bind::{
 use crate::fold::Decisions;
 use crate::hir::{
     BinOp, Branches, Call, Chain, ExprId, ExprKind, File, Flags, FnBody, FnId, FnKind, IdList,
-    MemberKey, NodeData, PatKind, StmtKind, UnOp,
+    ImportedRequire, MemberKey, NodeData, OtherValues, PatKind, StmtKind, UnOp,
 };
+use crate::util::FxHashSet;
 use smallvec::SmallVec;
 
 fn is_node_module(specifier: Atom) -> bool {
@@ -34,8 +35,6 @@ pub(crate) fn settled_symbol(hir: &File<'_>, bound: &Bound<'_>, e: ExprId) -> Op
     }
 }
 
-/// The module that an import names, and the export it takes, or none for the whole module.
-/// `import { x }` without `from` is a syntax error that the parser recovers from: it names no module.
 pub(crate) fn find_imported_export(
     hir: &File<'_>,
     bound: &Bound<'_>,
@@ -74,6 +73,7 @@ pub(super) struct StepsLeft {
     bindings: usize,
     pub(super) passes_get_builtin_module: bool,
     passes_choices: bool,
+    passes_and: bool,
 }
 
 impl StepsLeft {
@@ -83,8 +83,24 @@ impl StepsLeft {
         bindings: LONGEST_CHAIN_OF_BINDINGS,
         passes_get_builtin_module: true,
         passes_choices: true,
+        passes_and: true,
     };
 
+    fn proofs_alone(self) -> StepsLeft {
+        StepsLeft {
+            passes_choices: false,
+            passes_and: false,
+            ..self
+        }
+    }
+
+    fn most_other_values(self) -> OtherValues {
+        match (self.passes_choices, self.passes_and) {
+            (true, _) => OtherValues::Any,
+            (false, true) => OtherValues::Falsy,
+            (false, false) => OtherValues::None,
+        }
+    }
     pub(super) fn without_choices(self) -> StepsLeft {
         StepsLeft {
             passes_choices: false,
@@ -107,6 +123,7 @@ pub(super) struct Text<'a, 'h, 'b, 'd> {
 }
 
 impl<'a, 'h, 'b, 'd> Text<'a, 'h, 'b, 'd> {
+    #[inline]
     pub(super) fn of(
         hir: &'a File<'h>,
         bound: &'a Bound<'b>,
@@ -140,7 +157,6 @@ impl<'a, 'h, 'b, 'd> Text<'a, 'h, 'b, 'd> {
         }
     }
 
-    // `const { b } = require("k").a; b.c` reads `c`, `b` and `a` off the exports of "k".
     fn find_names_read_off_module(
         self,
         e: ExprId,
@@ -189,7 +205,6 @@ impl<'a, 'h, 'b, 'd> Text<'a, 'h, 'b, 'd> {
         None
     }
 
-    // `fileURLToPath` for `require("url").fileURLToPath`. A request in `e` is a step: the `require` that it calls may be made of what is asked for here.
     fn find_export_read_off_module(
         self,
         e: ExprId,
@@ -225,11 +240,7 @@ impl<'a, 'h, 'b, 'd> Text<'a, 'h, 'b, 'd> {
     }
 }
 
-pub(crate) fn may_be_modified(
-    hir: &File<'_>,
-    bound: &Bound<'_>,
-    variable: CommonJsVariable,
-) -> bool {
+pub fn may_be_modified(hir: &File<'_>, bound: &Bound<'_>, variable: CommonJsVariable) -> bool {
     let variable = Binding::CommonJs(variable);
     let mut stores = bound.runtime.unbound_name_stores().iter();
     stores.any(|&(target, _)| bound.binding(target) == variable)
@@ -298,6 +309,10 @@ fn is_only_called_or_read(
 }
 
 pub fn may_require_get_members(hir: &File<'_>, bound: &Bound<'_>) -> bool {
+    bound.may_require_get_members(|| compute_may_require_get_members(hir, bound))
+}
+
+fn compute_may_require_get_members(hir: &File<'_>, bound: &Bound<'_>) -> bool {
     let own_require = Binding::CommonJs(CommonJsVariable::Require);
     let mut names = bound.ident_bindings().iter();
     bound.import_meta_may_be_modified()
@@ -312,13 +327,11 @@ pub fn may_require_get_members(hir: &File<'_>, bound: &Bound<'_>) -> bool {
         })
 }
 
-// Also in a variable: `const __filename = fileURLToPath(import.meta.url)`, as an ES module makes itself the name that a CommonJS file has.
 pub(crate) fn names_own_file(hir: &File<'_>, bound: &Bound<'_>, e: ExprId) -> bool {
     let text = Text::of(hir, bound, None);
     names_own_file_behind(text, e, LONGEST_CHAIN_OF_BINDINGS, StepsLeft::ALL)
 }
 
-// Two variables may name each other: `const a = fileURLToPath(b), b = new URL(a)`.
 fn names_own_file_behind(
     text: Text<'_, '_, '_, '_>,
     e: ExprId,
@@ -348,7 +361,6 @@ fn is_written_as_own_file(
     let Some(conversions_left) = conversions_left.checked_sub(1) else {
         return false;
     };
-    // `fileURLToPath(import.meta.url)`, `new URL(import.meta.url)`
     if let Some((url, MemberKey::Name(known::href))) = hir.member_key(e) {
         return settled_chain(hir, bound, url).any(|url| {
             let makes_url = match expr_kind(hir, url) {
@@ -572,6 +584,71 @@ fn may_name_own_file(
     })
 }
 
+pub fn is_call_of_create_require(hir: &File<'_>, bound: &Bound<'_>, call: ExprId) -> bool {
+    find_arguments_of_create_require(Text::of(hir, bound, None), call, StepsLeft::ALL).is_some()
+}
+
+pub fn is_create_require_called_through_call(
+    hir: &File<'_>,
+    bound: &Bound<'_>,
+    call: ExprId,
+) -> bool {
+    let Some(ExprKind::Call(written)) = expr_kind(hir, hir.skip_type_assertions(call)) else {
+        return false;
+    };
+    find_arguments_of_create_require(Text::of(hir, bound, None), call, StepsLeft::ALL)
+        .is_some_and(|given| given.len != hir[written].args.len)
+}
+
+pub fn find_base_that_a_call_made_of_own_file(
+    hir: &File<'_>,
+    bound: &Bound<'_>,
+    call: ExprId,
+) -> Option<usize> {
+    let text = Text::of(hir, bound, None);
+    let ExprKind::Call(written) = expr_kind(hir, call)? else {
+        return None;
+    };
+    let given = find_arguments_of_create_require(text, call, StepsLeft::ALL)?;
+    let base = hir.ids(given).next()?;
+    let names_own_file =
+        |conversions_left| names_own_file_behind(text, base, conversions_left, StepsLeft::ALL);
+    (names_own_file(LONGEST_CHAIN_OF_BINDINGS) && !names_own_file(0))
+        .then(|| (given.start - hir[written].args.start) as usize)
+}
+
+pub fn may_call_have_made_base_of_require(hir: &File<'_>, bound: &Bound<'_>, made: ExprId) -> bool {
+    let chain = settled_chain(hir, bound, made).take(LONGEST_CHAIN_OF_BINDINGS);
+    chain.last().is_none_or(|call| {
+        !is_call_of_create_require(hir, bound, call)
+            || find_base_that_a_call_made_of_own_file(hir, bound, call).is_some()
+    })
+}
+
+pub fn may_call_have_made_path(hir: &File<'_>, bound: &Bound<'_>, path: ExprId) -> bool {
+    !is_written_out_of_texts(Text::of(hir, bound, None), path, LONGEST_CHAIN_OF_BINDINGS)
+}
+
+fn is_written_out_of_texts(text: Text<'_, '_, '_, '_>, e: ExprId, parts_left: usize) -> bool {
+    let Text { hir, bound, .. } = text;
+    let Some(parts_left) = parts_left.checked_sub(1) else {
+        return false;
+    };
+    let is_text = |part: ExprId| is_written_out_of_texts(text, part, parts_left);
+    let e = follow_settled_bindings(hir, bound, e);
+    match expr_kind(hir, e) {
+        Some(ExprKind::String(_)) => true,
+        Some(ExprKind::Binary {
+            op: BinOp::Add,
+            left,
+            right,
+        }) => is_text(left) && is_text(right),
+        Some(ExprKind::Template { exprs }) => hir.ids(exprs).all(is_text),
+        Some(ExprKind::Call(_)) => false,
+        _ => names_own_folder(text, e, StepsLeft::ALL),
+    }
+}
+
 pub fn find_holder_of_require_made_for_choice(
     hir: &File<'_>,
     bound: &Bound<'_>,
@@ -595,6 +672,7 @@ pub fn find_holder_of_require_made_for_choice(
         return None;
     }
     let text = Text::of(hir, bound, None);
+    let given = find_arguments_of_create_require(text, call, StepsLeft::ALL)?;
     if find_made_require(text, call, StepsLeft::ALL).is_some() {
         return None;
     }
@@ -602,7 +680,7 @@ pub fn find_holder_of_require_made_for_choice(
     let ExprKind::Call(written) = expr_kind(hir, call)? else {
         return None;
     };
-    let given = find_arguments_of_create_require(text, call, StepsLeft::ALL)?;
+
     Some((holder, (given.start - hir[written].args.start) as usize))
 }
 
@@ -612,8 +690,8 @@ pub enum OwnRequire {
     Made,
     MadeForPath(ExprId),
     MadeForChoice(SymbolId),
-    // Imported from the file at this path, which exports its own `require`.
     OfOtherFile(Atom),
+    MadeInOtherFile(Atom),
 }
 
 const LONGEST_CHAIN_OF_BINDINGS: usize = 8;
@@ -773,6 +851,22 @@ pub fn find_own_require(
     follow_to_own_require(Text::of(hir, bound, decisions), e, StepsLeft::ALL)
 }
 
+pub fn find_other_values_of_own_require(
+    hir: &File<'_>,
+    bound: &Bound<'_>,
+    decisions: Option<&Decisions<'_>>,
+    e: ExprId,
+) -> OtherValues {
+    let text = Text::of(hir, bound, decisions);
+    let finds = |left: StepsLeft| follow_to_own_require(text, e, left).is_some();
+    if finds(StepsLeft::ALL.proofs_alone()) {
+        OtherValues::None
+    } else if finds(StepsLeft::ALL.without_choices()) {
+        OtherValues::Falsy
+    } else {
+        OtherValues::Any
+    }
+}
 pub(super) fn follow_to_own_require(
     text: Text<'_, '_, '_, '_>,
     e: ExprId,
@@ -807,12 +901,12 @@ pub(super) fn follow_to_own_require(
             e = hir.skip_type_assertions(result);
             continue;
         }
-        // `module && module.require`, `(0, require)`: what can be called is the right side.
         if let Some(ExprKind::Binary {
-            op: BinOp::And | BinOp::Comma,
+            op: op @ (BinOp::And | BinOp::Comma),
             right,
             ..
         }) = expr_kind(hir, e)
+            && (op == BinOp::Comma || left.passes_and)
         {
             e = hir.skip_type_assertions(right);
             continue;
@@ -840,7 +934,6 @@ pub(super) fn follow_to_own_require(
                 return sides.into_iter().any(is_own).then_some(OwnRequire::OfFile);
             }
         }
-        // `const load = module.require; load.call(module, "a")`
         if let Some((object, MemberKey::Name(known::require))) = hir.member_key(e)
             && is_free_common_js(
                 hir,
@@ -859,8 +952,11 @@ pub(super) fn follow_to_own_require(
             if let Some(made) = find_require_made_for_choice(text, e, holder, left) {
                 return Some(made);
             }
-            if let Some(path) = find_imported_require(hir, bound, e) {
-                return Some(OwnRequire::OfOtherFile(path));
+            if let Some(imported) = find_imported_require(hir, bound, e, left) {
+                return Some(match imported.is_made {
+                    true => OwnRequire::MadeInOtherFile(imported.path),
+                    false => OwnRequire::OfOtherFile(imported.path),
+                });
             }
             return is_parameter_with_require_of_file(e).then_some(OwnRequire::OfFile);
         };
@@ -870,13 +966,23 @@ pub(super) fn follow_to_own_require(
     None
 }
 
-fn path_of_imported_require(hir: &File<'_>, specifier: Atom, export: Atom) -> Option<Atom> {
-    let mut imported = hir.imported_requires.iter();
-    let found = imported.find(|it| it.specifier == specifier && it.export == export)?;
-    Some(found.path)
+fn find_imported_require_named(
+    hir: &File<'_>,
+    specifier: Atom,
+    export: Atom,
+    left: StepsLeft,
+) -> Option<ImportedRequire> {
+    let (imported, places) = (&hir.imported_requires, &hir.places_of_imported_requires);
+    let found = ImportedRequire::find_by_names(imported, places, specifier, export)?;
+    (found.other_values <= left.most_other_values()).then_some(*found)
 }
 
-fn find_require_imported_as(hir: &File<'_>, bound: &Bound<'_>, symbol: SymbolId) -> Option<Atom> {
+fn find_require_imported_as(
+    hir: &File<'_>,
+    bound: &Bound<'_>,
+    symbol: SymbolId,
+    left: StepsLeft,
+) -> Option<ImportedRequire> {
     let mut declarations = bound.symbol(symbol).decls.iter();
     let (import, export) = declarations.find_map(|&declaration| match declaration {
         Decl::ImportSpec(spec) => {
@@ -887,16 +993,21 @@ fn find_require_imported_as(hir: &File<'_>, bound: &Bound<'_>, symbol: SymbolId)
     })?;
     match hir[import].type_only {
         true => None,
-        false => path_of_imported_require(hir, hir[import].spec, export),
+        false => find_imported_require_named(hir, hir[import].spec, export, left),
     }
 }
 
-fn find_imported_require(hir: &File<'_>, bound: &Bound<'_>, e: ExprId) -> Option<Atom> {
+fn find_imported_require(
+    hir: &File<'_>,
+    bound: &Bound<'_>,
+    e: ExprId,
+    left: StepsLeft,
+) -> Option<ImportedRequire> {
     if hir.imported_requires.is_empty() {
         return None;
     }
     let Some((object, MemberKey::Name(export))) = hir.member_key(e) else {
-        return find_require_imported_as(hir, bound, settled_symbol(hir, bound, e)?);
+        return find_require_imported_as(hir, bound, settled_symbol(hir, bound, e)?, left);
     };
     let namespace = settled_symbol(hir, bound, hir.skip_type_assertions(object))?;
     let mut declarations = bound.symbol(namespace).decls.iter();
@@ -904,29 +1015,34 @@ fn find_imported_require(hir: &File<'_>, bound: &Bound<'_>, e: ExprId) -> Option
         Decl::ImportNamespace(import) => (!hir[import].type_only).then_some(import),
         _ => None,
     })?;
-    path_of_imported_require(hir, hir[import].spec, export)
+    find_imported_require_named(hir, hir[import].spec, export, left)
 }
 
-// A `require` that a file exports, and the path of the file that it resolves from. `None` is the exporting file.
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub struct ExportedRequire {
     pub export: Atom,
     pub path: Option<Atom>,
+    pub is_made: bool,
+    pub other_values: OtherValues,
 }
+
+type WrittenRequire = (Option<Atom>, bool);
 
 fn find_require_written_as(
     hir: &File<'_>,
     bound: &Bound<'_>,
     decisions: &Decisions<'_>,
     e: ExprId,
-) -> Option<Option<Atom>> {
-    match find_own_require(hir, bound, Some(decisions), e)? {
+    left: StepsLeft,
+) -> Option<WrittenRequire> {
+    match follow_to_own_require(Text::of(hir, bound, Some(decisions)), e, left)? {
         OwnRequire::OfFile => {
-            (!may_be_modified(hir, bound, CommonJsVariable::Require)).then_some(None)
+            (!may_be_modified(hir, bound, CommonJsVariable::Require)).then_some((None, false))
         }
-        OwnRequire::Made => Some(None),
+        OwnRequire::Made => Some((None, true)),
         OwnRequire::MadeForPath(_) | OwnRequire::MadeForChoice(_) => None,
-        OwnRequire::OfOtherFile(path) => Some(Some(path)),
+        OwnRequire::OfOtherFile(path) => Some((Some(path), false)),
+        OwnRequire::MadeInOtherFile(path) => Some((Some(path), true)),
     }
 }
 
@@ -935,27 +1051,28 @@ fn find_require_held_by(
     bound: &Bound<'_>,
     decisions: &Decisions<'_>,
     symbol: SymbolId,
-) -> Option<Option<Atom>> {
+    left: StepsLeft,
+) -> Option<WrittenRequire> {
     let stability = bound.binding_stability(symbol);
     match (stability, bound.binding_initializer(hir, symbol)) {
         (BindingStability::Stable, BindingInitializer::Expression(source)) => {
-            find_require_written_as(hir, bound, decisions, source)
+            find_require_written_as(hir, bound, decisions, source, left)
         }
         (BindingStability::Linked, BindingInitializer::Import) => {
-            find_require_imported_as(hir, bound, symbol).map(Some)
+            let imported = find_require_imported_as(hir, bound, symbol, left)?;
+            Some((Some(imported.path), imported.is_made))
         }
         _ => None,
     }
 }
 
-// esbuild writes `export { __require }` into the chunk that its other chunks share.
 pub fn find_exported_requires(
     hir: &File<'_>,
     bound: &Bound<'_>,
     decisions: &Decisions<'_>,
 ) -> Vec<ExportedRequire> {
     let exports = bound.table(bound.symbol(bound.file_symbol).exports);
-    let path_of = |declaration: Decl| match declaration {
+    let find_written = |declaration: Decl, left: StepsLeft| match declaration {
         Decl::ExportSpec(specifier) => {
             let item = hir[specifier];
             let statement = hir[item.export];
@@ -963,29 +1080,51 @@ pub fn find_exported_requires(
                 return None;
             }
             if statement.has_module_specifier {
-                return path_of_imported_require(hir, statement.spec, item.local).map(Some);
+                let imported = find_imported_require_named(hir, statement.spec, item.local, left)?;
+                return Some((Some(imported.path), imported.is_made));
             }
             match bound.exported_binding(specifier) {
-                Binding::Symbol(local) => find_require_held_by(hir, bound, decisions, local),
+                Binding::Symbol(local) => find_require_held_by(hir, bound, decisions, local, left),
                 Binding::Arguments(_) | Binding::CommonJs(_) | Binding::Free => None,
             }
         }
-        Decl::Var(_) => {
-            find_require_held_by(hir, bound, decisions, bound.declared_symbol(declaration))
-        }
+        Decl::Var(_) => find_require_held_by(
+            hir,
+            bound,
+            decisions,
+            bound.declared_symbol(declaration),
+            left,
+        ),
         Decl::ExportExpr(statement) => match hir[statement].kind {
-            StmtKind::ExportDefault(value) => find_require_written_as(hir, bound, decisions, value),
+            StmtKind::ExportDefault(value) => {
+                find_require_written_as(hir, bound, decisions, value, left)
+            }
             _ => None,
         },
         _ => None,
     };
     let exported = exports.iter().filter_map(|&(export, symbol)| {
-        let mut declarations = bound.symbol(symbol).decls.iter();
-        let path = declarations.find_map(|&declaration| path_of(declaration))?;
-        Some(ExportedRequire { export, path })
+        let find = |left: StepsLeft| {
+            let mut declarations = bound.symbol(symbol).decls.iter();
+            declarations.find_map(|&declaration| find_written(declaration, left))
+        };
+        let (path, is_made) = find(StepsLeft::ALL)?;
+        let other_values = if find(StepsLeft::ALL.proofs_alone()).is_some() {
+            OtherValues::None
+        } else if find(StepsLeft::ALL.without_choices()).is_some() {
+            OtherValues::Falsy
+        } else {
+            OtherValues::Any
+        };
+        Some(ExportedRequire {
+            export,
+            path,
+            is_made,
+            other_values,
+        })
     });
     let mut found: Vec<ExportedRequire> = exported.collect();
-    // `export * from` passes on what the file does not export itself.
+    let mut taken: Option<FxHashSet<Atom>> = None;
     for statement in hir.ids(hir.body) {
         let StmtKind::ExportStar {
             spec,
@@ -1004,11 +1143,16 @@ pub fn find_exported_requires(
             .iter()
             .filter(|it| it.specifier == spec)
         {
-            let is_own = exports.iter().any(|&(export, _)| export == imported.export);
-            if !is_own && !found.iter().any(|it| it.export == imported.export) {
+            let taken = taken.get_or_insert_with(|| {
+                let own = exports.iter().map(|&(export, _)| export);
+                own.chain(found.iter().map(|it| it.export)).collect()
+            });
+            if taken.insert(imported.export) {
                 found.push(ExportedRequire {
                     export: imported.export,
                     path: Some(imported.path),
+                    is_made: imported.is_made,
+                    other_values: imported.other_values,
                 });
             }
         }
@@ -1034,7 +1178,12 @@ pub(super) fn follow_settled_bindings(hir: &File<'_>, bound: &Bound<'_>, e: Expr
 }
 
 pub fn holds_import_meta_require(hir: &File<'_>, bound: &Bound<'_>, e: ExprId) -> bool {
-    if !bound.may_name_own_require() {
+    if !bound.may_name_own_require()
+        || !matches!(
+            expr_kind(hir, hir.skip_type_assertions(e)),
+            Some(ExprKind::Ident(_))
+        )
+    {
         return false;
     }
     let mut held = settled_chain(hir, bound, e).skip(1);

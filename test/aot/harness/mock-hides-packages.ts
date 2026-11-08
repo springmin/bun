@@ -5,7 +5,6 @@ import { bunEnv, bunExe, tempDir } from "harness";
 import { beforeAll, describe, test } from "../supported";
 import { afterAll } from "./default-timeout";
 import { run } from "./run";
-import { runsWholeGrids } from "./ways";
 
 const main = (lib: string) => `import { v } from "./${lib}";\nconsole.log("SEEN main", v);\n`;
 const hoisted = (lib: string) => `import { test, vi } from "bun:test";
@@ -228,18 +227,16 @@ function expectOfPlain(name: string, stdout: string[]) {
   expect(stdout[0]).toStartWith("SEEN " + first);
 }
 
-const layers = ["TestRunLayers:0", "TestRunLayers:1", "TestRunLayers:2"];
-const workers = "two workers, and no memory to spare";
+// On builds that had the faults, each project that differed in one way alone did so over two layers or as one program.
+const ways = ["TestRunLayers:0"];
 const compiled = (directory: string, way: string, testFiles: string[] = []) =>
-  way === workers
-    ? runTests(directory, undefined, ["--aot", "--parallel=2", "--aot-memory-limit=1KB", ...testFiles])
-    : runTests(directory, way, ["--aot", ...testFiles]);
+  runTests(directory, way, ["--aot", ...testFiles]);
 
 /**
  * All the projects as one, each in a folder of its own, which every line that it prints names: one build judges them all, project by project.
  * The lowest layer holds all of Bun's own library whatever stands above it: a project that is built by itself pays that for itself.
  */
-function asOneProject(way: string) {
+function asOneProject() {
   const folders = Object.entries(projects).map(([name, files], index) => ({
     name,
     index,
@@ -266,16 +263,12 @@ function asOneProject(way: string) {
     }
     return { seen, exitCode };
   };
-  // Two workers print their files as they end.
-  const inOrder = ({ stdout, tests }: Seen) =>
-    way === workers ? { stdout: stdout.toSorted(), tests: tests.toSorted() } : { stdout, tests };
-
   describe("as one project", () => {
     let dir: ReturnType<typeof tempDir> | undefined;
     let plain: ReturnType<typeof byFolder>;
-    let expected: typeof plain;
-    let built: Promise<typeof plain> | undefined;
-    const whenBuilt = () => (built ??= compiled(String(dir), way, inTurn).then(byFolder));
+    const built = new Map<string, Promise<typeof plain>>();
+    const whenBuilt = (way: string) =>
+      built.get(way) ?? built.set(way, compiled(String(dir), way, inTurn).then(byFolder)).get(way)!;
     beforeAll(async () => {
       const all: Record<string, string> = { "package.json": `{ "name": "all" }` };
       for (const { folder, files } of folders)
@@ -283,8 +276,6 @@ function asOneProject(way: string) {
           all[`${folder}/${path}`] = text.replaceAll("SEEN ", `SEEN ${folder} `);
       dir = tempDir("aot-mock-hides-packages", all);
       plain = byFolder(await runTests(String(dir), undefined, inTurn));
-      expected =
-        way === workers ? byFolder(await runTests(String(dir), undefined, ["--parallel=2", ...inTurn])) : plain;
     });
     afterAll(() => dir?.[Symbol.dispose]());
 
@@ -294,62 +285,35 @@ function asOneProject(way: string) {
         expectOfPlain(name, plain.seen[index].stdout);
       });
 
-      test(way, async () => {
-        const { seen } = await whenBuilt();
-        expect(inOrder(seen[index])).toEqual(inOrder(expected.seen[index]));
+      test.each(ways)("%s", async way => {
+        const { seen } = await whenBuilt(way);
+        expect(seen[index]).toEqual(plain.seen[index]);
       });
     });
 
-    test("the exit code", async () => {
+    test.each(ways)("the exit code, %s", async way => {
       expect(plain.exitCode).toBe(0);
-      expect((await whenBuilt()).exitCode).toBe(expected.exitCode);
+      expect((await whenBuilt(way)).exitCode).toBe(0);
     });
   });
 }
 
 /**
- * Built by themselves too in front of every merge. What one project does can make a build careful with the files of all: a fault in which files
- * may load again showed in the second by itself, and not beside the others.
+ * Built by itself too. What one project does can make a build careful with the files of all: a fault in which files may load again showed in this one by itself,
+ * and not beside the others.
  */
-const witnesses = ["a CommonJS package", "a file that throws runs again at every require()"];
+const alone = "a file that throws runs again at every require()";
 
-/**
- * The family is about the layers, so every project goes through every way. By itself a project is built four times, three of them in layers, each build in a case
- * of its own: under a sanitizer minutes of processor time. So the projects are dealt to several test files: of `of` files, this one takes every `of`-th project,
- * from the `part`-th on. In front of a merge only the witnesses are built so: each of the first four files builds all the projects as one, in one way.
- */
-export function mockHidesPackages(part: number, of: number) {
-  const way = [...layers, workers][part];
-  if (way && !runsWholeGrids) asOneProject(way);
-  for (const [name, files] of Object.entries(projects).filter((_, index) => index % of === part)) {
-    const isBuilt = runsWholeGrids || witnesses.includes(name);
-    describe(name, () => {
-      let dir: ReturnType<typeof tempDir> | undefined;
-      let plain: { stdout: string[]; exitCode: number };
-      let parallel: typeof plain;
+export function mockHidesPackages() {
+  asOneProject();
+  describe(alone, () => {
+    test(ways[0], async () => {
+      using dir = tempDir("aot-mock-hides-packages", filesOf(projects[alone]));
       const answers = ({ stdout, exitCode }: Awaited<ReturnType<typeof runTests>>) => ({ stdout, exitCode });
-      beforeAll(async () => {
-        dir = tempDir("aot-mock-hides-packages", filesOf(files));
-        plain = answers(await runTests(String(dir), undefined, []));
-        if (isBuilt) parallel = answers(await runTests(String(dir), undefined, ["--parallel=2"]));
-      });
-      afterAll(() => dir?.[Symbol.dispose]());
-
-      test("plain Bun", () => {
-        expect(plain.exitCode).toBe(0);
-        expectOfPlain(name, plain.stdout);
-      });
-      if (!isBuilt) return;
-
-      test.concurrent.each(layers)("%s", async words => {
-        expect(answers(await compiled(String(dir), words))).toEqual(plain);
-      });
-
-      test.concurrent(workers, async () => {
-        // Two workers print their files as they end.
-        const sorted = ({ stdout, exitCode }: typeof plain) => ({ stdout: stdout.toSorted(), exitCode });
-        expect(sorted(answers(await compiled(String(dir), workers)))).toEqual(sorted(parallel));
-      });
+      const plain = answers(await runTests(String(dir), undefined, []));
+      expect(plain.exitCode).toBe(0);
+      expectOfPlain(alone, plain.stdout);
+      expect(answers(await compiled(String(dir), ways[0]))).toEqual(plain);
     });
-  }
+  });
 }

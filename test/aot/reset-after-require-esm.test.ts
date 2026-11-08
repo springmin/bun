@@ -1,5 +1,7 @@
 import { expect } from "bun:test";
 import { bunEnv, bunExe, tempDir } from "harness";
+import { symlinkSync } from "node:fs";
+import { join } from "node:path";
 import { raiseDefaultTimeout } from "./harness/default-timeout";
 import { run } from "./harness/run";
 import { test } from "./supported";
@@ -39,7 +41,19 @@ test("behind vi.resetModules() the next test file gets every module anew, whatev
   using dir = tempDir("aot-reset-after-require-esm", {
     "package.json": `{ "name": "p", "type": "module" }`,
     ...Object.assign({}, ...Object.entries(cases).map(([name, files]) => filesOf(name, files))),
+    // pnpm and Bun's isolated linker put chai next to vitest, not into the project's node_modules.
+    "node_modules/.store/node_modules/vitest/package.json": `{ "name": "vitest", "type": "module", "main": "index.js" }`,
+    "node_modules/.store/node_modules/vitest/index.js": `export {};`,
+    "node_modules/.store/node_modules/chai/package.json": `{ "name": "chai", "type": "module", "main": "index.js" }`,
+    "node_modules/.store/node_modules/chai/index.js": `export const assert = { ok: value => "assert " + value };`,
+    "e-assert.test.js": `import { assert, test } from "vitest";
+test("e", () => console.log("OUT e", assert.ok(1)));`,
   });
+  symlinkSync(
+    join(String(dir), "node_modules/.store/node_modules/vitest"),
+    join(String(dir), "node_modules/vitest"),
+    "junction",
+  );
   const said = async (flags: string[], words = "") => {
     const { stdout, exitCode } = await run([bunExe(), "test", ...flags], String(dir), {
       ...bunEnv,
@@ -49,13 +63,15 @@ test("behind vi.resetModules() the next test file gets every module anew, whatev
   };
   const plain = await said([]);
   expect(plain).toEqual({
-    lines: Object.keys(cases).flatMap(name =>
-      ["lib runs", "index runs", "t1 1", "t2 2", "lib runs", "index runs", "t4 1 2"].map(line => `OUT ${name} ${line}`),
-    ),
+    lines: [
+      ...Object.keys(cases).flatMap(name =>
+        ["lib runs", "index runs", "t1 1", "t2 2", "lib runs", "index runs", "t4 1 2"].map(
+          line => `OUT ${name} ${line}`,
+        ),
+      ),
+      "OUT e assert 1",
+    ],
     exitCode: 0,
   });
-  expect(await Promise.all([said(["--aot"], "TestRunLayers:0"), said(["--aot"], "TestRunLayers:2")])).toEqual([
-    plain,
-    plain,
-  ]);
+  expect(await said(["--aot"], "TestRunLayers:0")).toEqual(plain);
 });

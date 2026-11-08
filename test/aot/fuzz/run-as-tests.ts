@@ -4,7 +4,6 @@
 //   bun test/aot/fuzz/run-as-tests.ts --bun <bun> --out <folder> [--sources a,b:2] [--programs 1000] [--seconds 600] [--seed 1] [--jobs 8]
 //   --together <n>   n programs are the test files of one run, which compiles them as one program
 //   --flags --isolate,--parallel=4   more flags for both runs
-//   --layers <n>     the compiled run is built in n layers under its test files, however small it is; a run that was not is a failure
 //   --multi-file     each program is split into several files that import each other; the test file is one of them
 //   --as-packages    the other files of a program lie in a package under its node_modules, where all of them are JavaScript
 //
@@ -25,6 +24,7 @@ import {
   changeEnvironment,
   outputLimit,
   ProductRunner,
+  refusalInOneWording,
   scriptMarker,
   spawned,
   type Program,
@@ -51,13 +51,6 @@ const together = Number(option("together") ?? 1);
 const limit = Number(option("programs") ?? Infinity);
 const until = Date.now() + Number(option("seconds") ?? 600) * 1000;
 const more = (option("flags") ?? "").split(/[\s,]+/).filter(Boolean);
-const layers = option("layers");
-/**
- * By itself a run is built in layers only where it is large. With the word it also says on stderr how it was built. Every run gets
- * the word, the plain one and the executable too: a program may print its environment.
- */
-const words = layers ? { BUN_DEBUG_TEST_AOT_WORDS: `TestRunLayers:${layers}` } : undefined;
-const setting = Object.entries(words ?? {}).map(([name, value]) => `${name}=${value} `).join(""); // prettier-ignore
 const work = join(process.env.TMPDIR ?? "/tmp", `aot-fuzz-as-tests-${process.pid}`);
 
 // As in a user's run: the compiler's verifiers are off.
@@ -223,7 +216,7 @@ async function judge(folder: string, programs: Drawn[], tallies: boolean): Promi
   rmSync(folder, { recursive: true, force: true });
   mkdirSync(folder, { recursive: true });
   const files = programs.map((program, index) => write(folder, `p${index}`, program, index));
-  const judged: Judged = { plain: await spawned([bun, "test", ...more, ...files], folder, 60, words), failing: new Map(), executables: new Map() }; // prettier-ignore
+  const judged: Judged = { plain: await spawned([bun, "test", ...more, ...files], folder, 60), failing: new Map(), executables: new Map() }; // prettier-ignore
   const { plain } = judged;
   // A run that plain Bun does not end says nothing.
   if (plain.signal || plain.timedOut) return (tallies && counts.plainFails++, judged);
@@ -231,18 +224,11 @@ async function judge(folder: string, programs: Drawn[], tallies: boolean): Promi
     [bun, "test", "--aot", ...more, ...files],
     folder,
     180 + 15 * files.length,
-    words,
   ));
   if (compiled.signal || compiled.timedOut) {
     judged.kind = compiled.signal ? "crash" : "hang";
     judged.why =
       `${compiled.signal ?? ""} ${/^.*(panic|ASSERTION FAILED|Segmentation fault|AOT: |error: internal).*$/m.exec(compiled.stderr)?.[0] ?? ""}`.trim();
-    return judged;
-  }
-  // A run that was to be built in layers and was not says nothing about layers.
-  if (layers && !compiled.stderr.includes(`AOT test run | layers ${layers} |`)) {
-    judged.kind = "not built in layers";
-    judged.why = /^AOT test run \| .*$/m.exec(compiled.stderr)?.[0] ?? "the run does not say how it was built";
     return judged;
   }
   // What was read of a run ends at a limit, and with --parallel the files end in any order: another file is cut each time.
@@ -270,7 +256,7 @@ async function judge(folder: string, programs: Drawn[], tallies: boolean): Promi
     }
     const entry = write(join(folder, "executable"), `p${index}`, program);
     const build = await spawned([bun, "build", "--compile", "--aot", entry, "--outfile", join(folder, "x")], dirname(entry), 180); // prettier-ignore
-    const run = build.exitCode === 0 ? await spawned([join(folder, "x")], dirname(entry), 60, words) : undefined;
+    const run = build.exitCode === 0 ? await spawned([join(folder, "x")], dirname(entry), 60) : undefined;
     judged.executables.set(
       index,
       run ? run.stdout : "the build stops: " + (build.stderr + build.stdout).slice(0, 2000),
@@ -284,7 +270,7 @@ async function judge(folder: string, programs: Drawn[], tallies: boolean): Promi
             .filter(line => line && !isDiagnostic(line))
             .join("\n")
         : withoutLastBreaks(run.stdout));
-    if (run ? flat(said!) === flat(ours[index]) : ours[index] === "") {
+    if (run ? flat(refusalInOneWording(said!)) === flat(refusalInOneWording(ours[index])) : ours[index] === "") {
       if (tallies) counts.asTheExecutable++;
       continue;
     }
@@ -329,7 +315,7 @@ async function round(slot: number) {
     // A program that plain Bun runs otherwise the second time (a worker ended midway, a race) shows nothing.
     if (judged.failing.size) {
       const files = drawn.map((program, index) => write(folder, `p${index}`, program, index));
-      const [first, second] = [judged.plain, await spawned([bun, "test", ...more, ...files], folder, 60, words)].map(run => byFile(run, drawn.length)); // prettier-ignore
+      const [first, second] = [judged.plain, await spawned([bun, "test", ...more, ...files], folder, 60)].map(run => byFile(run, drawn.length)); // prettier-ignore
       for (const index of [...judged.failing.keys()]) if (first[index] !== second[index]) judged.failing.delete(index);
       if (!judged.failing.size) {
         counts.plainWavers++;
@@ -365,7 +351,7 @@ async function round(slot: number) {
     for (const [index, text] of judged.executables) writeFileSync(join(kept, `executable-p${index}.txt`), text);
     writeFileSync(
       join(kept, "commands.txt"),
-      `${setting}bun test ${more.join(" ")} .\n${setting}bun test --aot ${more.join(" ")} .\n# ${how}: ${names}\n# all: ${drawn.map(each => `${each.source}:${each.seed}`).join(",")}\n`,
+      `bun test ${more.join(" ")} .\nbun test --aot ${more.join(" ")} .\n# ${how}: ${names}\n# all: ${drawn.map(each => `${each.source}:${each.seed}`).join(",")}\n`,
     );
   }
   rmSync(folder, { recursive: true, force: true });

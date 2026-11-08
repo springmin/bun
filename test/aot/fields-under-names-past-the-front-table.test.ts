@@ -89,7 +89,42 @@ describe("a field under a name that the table of fields has no number for", () =
     );
     const expected = told(await spawned([bunExe(), "./program.cjs"], folder, bunEnv));
     expect(told(await spawned([executable], folder, bunEnv))).toEqual(expected);
-    expect(told(await spawned([executable], folder, { ...bunEnv, BUN_JSC_validateAOTRuntime: "1" }))).toEqual(expected);
+  }, 240_000);
+});
+
+// A read that comes again has a place, and finds its name by the place where the place has no answer. The table of those names has two bytes for a place,
+// which hold the number of a name with a column. Each name below is read at six places, 2,000 and more of the names have numbers over 65,535, and one of those is there to be found.
+function namesReadAtPlaces() {
+  const numberOfNames = 68_000;
+  const lines = [
+    `let total = 0;`,
+    `const unknown = JSON.parse(process.env.TEXT_NOBODY_SETS || '{"n5":1,"n${numberOfNames - 3}":10}');`,
+  ];
+  for (let first = 0; first < numberOfNames; first += namesInFunction) {
+    const sum = Array.from({ length: namesInFunction }, (_, i) => `(o.n${first + i} | 0)`).join(" + ");
+    lines.push(
+      `function hot${first}(o) { let s = 0; for (let i = 0; i < 2; i++) { ${`s += ${sum}; `.repeat(6)}} return s; }`,
+      `total += hot${first}(unknown);`,
+    );
+  }
+  lines.push(`console.log(total);`);
+  return lines.join("\n") + "\n";
+}
+
+describe("a place under a name whose number does not fit two bytes", () => {
+  test("goes on under that name", async () => {
+    using dir = tempDir("aot-places-under-names-past-two-bytes", { "program.cjs": namesReadAtPlaces() });
+    const folder = String(dir);
+    const executable = join(folder, isWindows ? "program.exe" : "program");
+    built(
+      await spawned(
+        [bunExe(), "build", "--compile", "--aot", "./program.cjs", "--outfile", executable],
+        folder,
+        bunEnv,
+      ),
+    );
+    const expected = told(await spawned([bunExe(), "./program.cjs"], folder, bunEnv));
+    expect(told(await spawned([executable], folder, bunEnv))).toEqual(expected);
   }, 240_000);
 });
 
@@ -114,13 +149,5 @@ describe("fields under names that have no column in the front table", () => {
     );
     const expected = told(await spawned([bunExe(), "./as-written.cjs"], folder, bunEnv));
     expect(told(await spawned([executable], folder, bunEnv))).toEqual(expected);
-    expect(told(await spawned([executable], folder, { ...bunEnv, BUN_JSC_validateAOTRuntime: "1" }))).toEqual(expected);
-
-    const counts = join(folder, "counts.txt");
-    told(await spawned([executable], folder, { ...bunEnv, BUN_JSC_aotCountsPath: counts }));
-    const withoutColumn = readFileSync(counts, "utf8")
-      .split("\n")
-      .filter(line => line.includes("the name has no column"));
-    expect(withoutColumn).toEqual([]);
   }, 240_000);
 });

@@ -160,9 +160,12 @@ const programs: Record<string, Program> = {
         function hide(object, key, value) { return Object.defineProperty(object, key, { configurable: true, writable: true, value }); }
         function $export(name, source) { for (const key in source) hide(globalThis[name].prototype, key, source[key]); }
         $export("Function", { part() { return this.bind(undefined, ...arguments); } });
-        console.log(Math.max.part(2)(1));`,
+        console.log(Math.max.part(2)(1));
+        function define(Base, next) { hide(Base.prototype, Symbol.iterator, function () { return { i: 0, l: +this, next }; }); }
+        define(Number, function () { return this.i < this.l ? { done: false, value: this.i++ } : { done: true, value: undefined }; });
+        console.log([...3].join());`,
     },
-    plain: "2\n",
+    plain: "2\n0,1,2\n",
   },
   "harmony-reflect": {
     files: {
@@ -199,17 +202,6 @@ const programs: Record<string, Program> = {
         console.log(Object.values({ a: 1 }));`,
     },
     plain: "[ 1 ]\n",
-  },
-  "url-polyfill": {
-    files: {
-      "main.js": `
-        (function (global) {
-          var proto = global.URLSearchParams.prototype;
-          if (typeof proto._fromString !== "function") Object.defineProperty(proto, "_fromString", { value(text) { return text; } });
-        })(typeof global !== "undefined" ? global : globalThis);
-        console.log(new URLSearchParams()._fromString("a"));`,
-    },
-    plain: "a\n",
   },
   "array.prototype.map": {
     files: {

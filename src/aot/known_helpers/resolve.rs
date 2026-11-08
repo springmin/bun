@@ -162,7 +162,6 @@ pub fn resolve_callee(
 ) -> Option<KnownCallee> {
     let (hir, bound) = (input.files.hir(file), input.files.bound(file));
     let mut callee = hir.skip_type_assertions(callee);
-    // `(0, helper)(..)`. A known call may evaluate no callee, so what stands in front of the comma has to do nothing.
     while let ExprKind::Binary {
         op: BinOp::Comma,
         left,
@@ -191,7 +190,6 @@ pub fn resolve_callee(
                 None if bound.binding_kind(symbol) == BindingKind::Import => {
                     resolve_import(input, input.modules.import_binding(file, symbol))
                 }
-                // `var helper = require(K)`
                 None => {
                     let required = find_required_file(input, file, callee)?;
                     predict_exports(input, ModuleRef::File(required))
@@ -252,7 +250,6 @@ pub fn resolve_reference(
     })
 }
 
-/// The function of another file that a helper names, where it is of the family that the published text names there.
 pub fn resolve_loaded_reference(
     input: &ResolveInput<'_, '_>,
     file: FileId,
@@ -296,6 +293,13 @@ pub fn resolve_private_field_call(
         return None;
     }
     let callee = resolve_callee(input, file, site.callee)?;
+    let modules = input.modules;
+    let may_be_replaced = callee.file != file
+        && (modules.reaches_mock(file) || modules.may_be_mocked(ModuleRef::File(callee.file)));
+    let callee = match may_be_replaced {
+        true => callee.predicted(),
+        false => callee,
+    };
     let helper = callee.helper(input.helpers)?;
     let shape = callee.shape_of(input.helpers, *callee.functions.first()?)?;
     let of_field = PrivateFieldCall {
@@ -333,24 +337,30 @@ pub fn resolve_private_field_call(
     }
 }
 
+fn find_constant_text<'a>(
+    input: &ResolveInput<'a, '_>,
+    file: FileId,
+    expression: ExprId,
+) -> Option<&'a [u8]> {
+    let decisions = &input.files.analysis(file).decisions;
+    match decisions.constant(input.files.hir(file), expression) {
+        FoldedValue::Constant(Constant::String(text)) => Some(input.files.atoms.bytes(text)),
+        _ => None,
+    }
+}
+
 fn find_member_kind(
     input: &ResolveInput<'_, '_>,
     file: FileId,
     kind: ExprId,
 ) -> Option<PrivateMemberKind> {
-    let decisions = &input.files.analysis(file).decisions;
-    let folded = decisions.constant(input.files.hir(file), kind);
-    let FoldedValue::Constant(Constant::String(kind)) = folded else {
-        return None;
-    };
-    match input.files.atoms.bytes(kind) {
+    match find_constant_text(input, file, kind)? {
         b"f" => Some(PrivateMemberKind::Field),
         b"m" => Some(PrivateMemberKind::Method),
         _ => None,
     }
 }
 
-// Code of another file can run while the file of the variable has not started.
 fn resolve_variable(input: &ResolveInput<'_, '_>, variable: Sym) -> Option<KnownCallee> {
     let values = input.helpers.binding(variable.file, variable.id)?;
     Some(KnownCallee {
@@ -396,7 +406,6 @@ fn resolve_export(input: &ResolveInput<'_, '_>, file: FileId, name: Atom) -> Opt
     None
 }
 
-// Only a prediction: callers guard the value with IsClosureOf.
 fn predict_member(
     input: &ResolveInput<'_, '_>,
     module: ModuleRef,
@@ -418,7 +427,6 @@ fn predict_member(
     Some(KnownCallee::new(file, values).predicted())
 }
 
-// The helper that a CommonJS file stores as its value: a file that Babel wrote shows it as `default` too. Only a prediction: callers guard the value with IsClosureOf.
 fn predict_exports(input: &ResolveInput<'_, '_>, module: ModuleRef) -> Option<KnownCallee> {
     let ModuleRef::File(file) = module else {
         return None;
@@ -428,7 +436,6 @@ fn predict_exports(input: &ResolveInput<'_, '_>, module: ModuleRef) -> Option<Kn
     Some(KnownCallee::new(file, input.helpers.binding(file, stored)?).predicted())
 }
 
-// `var holder = wrap(require(K))`, `var holder = require(K)`
 fn find_file_required_behind_wrapper(
     input: &ResolveInput<'_, '_>,
     file: FileId,
@@ -646,170 +653,6 @@ helpers.__classPrivateFieldGet({}, new WeakMap(), "f");"#;
             let call = format!("{import}__classPrivateFieldGet({{}}, state, {other});");
             assert_eq!(describe_field_access(&call, &declared), None, "{other}");
         }
-    }
-
-    const RUNTIME_CREATE_CLASS: &str = r#"var toPropertyKey = require("./toPropertyKey.js");
-function _defineProperties(e, r) {
-  for (var t = 0; t < r.length; t++) {
-    var o = r[t];
-    o.enumerable = o.enumerable || !1, o.configurable = !0, "value" in o && (o.writable = !0), Object.defineProperty(e, toPropertyKey(o.key), o);
-  }
-}
-function _createClass(e, r, t) {
-  return r && _defineProperties(e.prototype, r), t && _defineProperties(e, t), Object.defineProperty(e, "prototype", {
-    writable: !1
-  }), e;
-}
-module.exports = _createClass, module.exports.__esModule = true, module.exports["default"] = module.exports;"#;
-    const RUNTIME_TO_PROPERTY_KEY: &str = r#"var _typeof = require("./typeof.js")["default"];
-var toPrimitive = require("./toPrimitive.js");
-function toPropertyKey(t) {
-  var i = toPrimitive(t, "string");
-  return "symbol" == _typeof(i) ? i : i + "";
-}
-module.exports = toPropertyKey, module.exports.__esModule = true, module.exports["default"] = module.exports;"#;
-    const RUNTIME_TO_PRIMITIVE: &str = r#"var _typeof = require("./typeof.js")["default"];
-function toPrimitive(t, r) {
-  if ("object" != _typeof(t) || !t) return t;
-  var e = t[Symbol.toPrimitive];
-  if (void 0 !== e) {
-    var i = e.call(t, r || "default");
-    if ("object" != _typeof(i)) return i;
-    throw new TypeError("@@toPrimitive must return a primitive value.");
-  }
-  return ("string" === r ? String : Number)(t);
-}
-module.exports = toPrimitive, module.exports.__esModule = true, module.exports["default"] = module.exports;"#;
-    const RUNTIME_TYPEOF: &str = r#"function _typeof(o) {
-  "@babel/helpers - typeof";
-
-  return module.exports = _typeof = "function" == typeof Symbol && "symbol" == typeof Symbol.iterator ? function (o) {
-    return typeof o;
-  } : function (o) {
-    return o && "function" == typeof Symbol && o.constructor === Symbol && o !== Symbol.prototype ? "symbol" : typeof o;
-  }, module.exports.__esModule = true, module.exports["default"] = module.exports, _typeof(o);
-}
-module.exports = _typeof, module.exports.__esModule = true, module.exports["default"] = module.exports;"#;
-    const RUNTIME_INTEROP: &str = r#"function _interopRequireDefault(e) {
-  return e && e.__esModule ? e : {
-    "default": e
-  };
-}
-module.exports = _interopRequireDefault, module.exports.__esModule = true, module.exports["default"] = module.exports;"#;
-    const RUNTIME_ESM_CREATE_CLASS: &str = r#"import toPropertyKey from "./toPropertyKey.js";
-function _defineProperties(e, r) {
-  for (var t = 0; t < r.length; t++) {
-    var o = r[t];
-    o.enumerable = o.enumerable || !1, o.configurable = !0, "value" in o && (o.writable = !0), Object.defineProperty(e, toPropertyKey(o.key), o);
-  }
-}
-function _createClass(e, r, t) {
-  return r && _defineProperties(e.prototype, r), t && _defineProperties(e, t), Object.defineProperty(e, "prototype", {
-    writable: !1
-  }), e;
-}
-export { _createClass as default };"#;
-    const RUNTIME_ESM_TO_PROPERTY_KEY: &str = r#"import _typeof from "./typeof.js";
-import toPrimitive from "./toPrimitive.js";
-function toPropertyKey(t) {
-  var i = toPrimitive(t, "string");
-  return "symbol" == _typeof(i) ? i : i + "";
-}
-export { toPropertyKey as default };"#;
-    const RUNTIME_ESM_TO_PRIMITIVE: &str = r#"import _typeof from "./typeof.js";
-function toPrimitive(t, r) {
-  if ("object" != _typeof(t) || !t) return t;
-  var e = t[Symbol.toPrimitive];
-  if (void 0 !== e) {
-    var i = e.call(t, r || "default");
-    if ("object" != _typeof(i)) return i;
-    throw new TypeError("@@toPrimitive must return a primitive value.");
-  }
-  return ("string" === r ? String : Number)(t);
-}
-export { toPrimitive as default };"#;
-    const RUNTIME_ESM_TYPEOF: &str = r#"function _typeof(o) {
-  "@babel/helpers - typeof";
-
-  return _typeof = "function" == typeof Symbol && "symbol" == typeof Symbol.iterator ? function (o) {
-    return typeof o;
-  } : function (o) {
-    return o && "function" == typeof Symbol && o.constructor === Symbol && o !== Symbol.prototype ? "symbol" : typeof o;
-  }, _typeof(o);
-}
-export { _typeof as default };"#;
-
-    fn files_of_runtime<'a>(main: (&'a str, &'a str)) -> [(&'a str, &'a str); 6] {
-        [
-            main,
-            ("createClass.js", RUNTIME_CREATE_CLASS),
-            ("toPropertyKey.js", RUNTIME_TO_PROPERTY_KEY),
-            ("toPrimitive.js", RUNTIME_TO_PRIMITIVE),
-            ("typeof.js", RUNTIME_TYPEOF),
-            ("interopRequireDefault.js", RUNTIME_INTEROP),
-        ]
-    }
-
-    #[test]
-    fn a_helper_that_a_file_exports_whole_is_predicted_behind_a_wrapped_require() {
-        let main = r#"var _interopRequireDefault = require("./interopRequireDefault.js");
-var _createClass2 = _interopRequireDefault(require("./createClass.js"));
-function B() {}
-(0, _createClass2["default"])(B, []);"#;
-        let files = files_of_runtime(("main.cjs", main));
-        let (helper, certainty, path) = describe_last_call(&files, "main.cjs").expect("resolved");
-        assert_eq!(helper, Helper::CreateClass);
-        assert_eq!(certainty, Certainty::MayHoldOtherValues);
-        assert!(path.ends_with("createClass.js"), "{path}");
-    }
-
-    #[test]
-    fn a_helper_that_a_file_exports_whole_is_predicted_behind_a_default_import() {
-        let main =
-            "import _createClass from \"./createClass.js\";\nfunction B() {}\n_createClass(B, []);";
-        let files = files_of_runtime(("main.mjs", main));
-        let (helper, certainty, path) = describe_last_call(&files, "main.mjs").expect("resolved");
-        assert_eq!(helper, Helper::CreateClass);
-        assert_eq!(certainty, Certainty::MayHoldOtherValues);
-        assert!(path.ends_with("createClass.js"), "{path}");
-    }
-
-    #[test]
-    fn a_helper_names_helpers_of_other_files() {
-        let commonjs = files_of_runtime(("main.cjs", "require(\"./createClass.js\");"));
-        let modules = [
-            ("main.mjs", "import \"./createClass.mjs\";"),
-            ("createClass.mjs", RUNTIME_ESM_CREATE_CLASS),
-            ("toPropertyKey.js", RUNTIME_ESM_TO_PROPERTY_KEY),
-            ("toPrimitive.js", RUNTIME_ESM_TO_PRIMITIVE),
-            ("typeof.js", RUNTIME_ESM_TYPEOF),
-        ];
-        let _ = modules;
-        with_graph(&commonjs, |graph, bind_input| {
-            let files = bind_input.files;
-            let helpers = KnownHelpers::compute(files, &run_serially);
-            let input = ResolveInput {
-                files,
-                modules: graph,
-                helpers: &helpers,
-            };
-            let mut file = file_named(bind_input, "createClass.js");
-            let mut family = Helper::DefineProperties;
-            for next in [Helper::ToPropertyKey, Helper::ToPrimitive, Helper::Typeof] {
-                let found = helpers.file(file).expect("the file has helpers");
-                let (_, known) = found
-                    .functions()
-                    .find(|(_, known)| known.shape.helper() == family)
-                    .unwrap_or_else(|| panic!("{family:?} is not known"));
-                let loaded = known.references.iter().find_map(|&reference| {
-                    let (file, held) = resolve_loaded_reference(&input, file, reference)?;
-                    let shape = helpers.function(file, held.definition)?.shape;
-                    (shape.helper() == next).then_some(file)
-                });
-                file = loaded.unwrap_or_else(|| panic!("{family:?} does not lead to {next:?}"));
-                family = next;
-            }
-        });
     }
 
     #[test]

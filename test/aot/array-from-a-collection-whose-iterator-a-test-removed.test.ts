@@ -62,5 +62,4 @@ test("Array.from(new Map(..)) and Array.from(new Set(..)) answer as plain Bun do
   expect(plain.lines).toContain("SAID without Map's map: []");
   expect(plain.lines.length).toBe(24);
   expect(await said(["--aot"], "TestRunLayers:0")).toEqual(plain);
-  expect(await said(["--aot"], "TestRunLayers:2")).toEqual(plain);
 }, 240_000);

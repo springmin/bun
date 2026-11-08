@@ -10,7 +10,7 @@ enum FunctionName<'a> {
 }
 
 const FUNCTION_WITH_DIRECTIVE: &str = r#"function f() { "use strict"; }"#;
-const ESCAPED_DIRECTIVE: &str = r"'use\x20strict';";
+const ESCAPED_DIRECTIVE: &str = r"function f() { 'use\x20strict'; }";
 const STATIC_BLOCK: &str = r#"class A { static { "use strict"; } }"#;
 
 const DIRECTIVE_PROLOGUES: &[(&str, &[&str], bool)] = &[
@@ -18,10 +18,13 @@ const DIRECTIVE_PROLOGUES: &[(&str, &[&str], bool)] = &[
     (r#""a"; 'use strict';"#, &["a", "use strict"], true),
     (FUNCTION_WITH_DIRECTIVE, &["use strict"], false),
     (ESCAPED_DIRECTIVE, &[r"use\x20strict"], false),
+    (r"'use\x20strict';", &["use strict"], true),
+    (r#"("use strict");"#, &["use strict"], true),
+    (r#"("a"); "use strict";"#, &["a", "use strict"], true),
 ];
 
 const STRINGS_OUTSIDE_PROLOGUES: &[(&str, &str)] = &[
-    (DEFAULT_PATH, r#"("use strict");"#),
+    (DEFAULT_PATH, r#"function f() { ("use strict"); }"#),
     (DEFAULT_PATH, "`use strict`;"),
     (DEFAULT_PATH, r#""use strict" + 1;"#),
     (DEFAULT_PATH, r#""use strict".length;"#),

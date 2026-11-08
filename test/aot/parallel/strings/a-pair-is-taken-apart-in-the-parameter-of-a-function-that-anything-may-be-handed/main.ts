@@ -6,8 +6,7 @@
 // COUNTER: RegExpsCompiledToBytecode = 0
 // COUNTER: RegExpMatchesInterpreted = 0
 // COUNTER: RegExpPredictedTextsGivenCode = 3
-// STATISTIC: RegExpTextsLostToOperation = 0
-// STATISTIC: RegExpTextsLostToUnknownCode = 0
+// The old compiler walked back from each call of RegExp and counted where it gave up: RegExpTextsLostToOperation = 0, RegExpTextsLostToUnknownCode = 0. The build now runs the code that leads to RegExp, and keeps no cause.
 import { INNER, ONE } from "./ranges"
 import { others } from "./keep"
 const WHOLE = RegExp(`^[${INNER}]+$`, "u")

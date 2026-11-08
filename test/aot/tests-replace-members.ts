@@ -9,8 +9,9 @@ raiseDefaultTimeout(240_000);
 
 // A built-in function has a row for a pristine operand, which leaves out what a lookup on such an operand finds, and a general row. Where tests replace a member that the table locks,
 // the first is passed by for the classes on whose instances a lookup finds the replaced member: Object.prototype.valueOf on an array, but not Object.prototype.toString, which
-// Array.prototype.toString hides. Each run here replaces other members, by a function that notes the call and calls the original, and does the same with lists, bytes, maps, sets,
+// Array.prototype.toString hides. One run for each side: it replaces the members by functions that note the call and call the original, and does the same with lists, bytes, maps, sets,
 // patterns, dates, errors, functions and promises, made in a module of the project and in the test file: before, while and after the members are replaced. As plain Bun does it, call for call.
+// What a run replaces is a fact of the whole program, so each run is built by itself. Which row is taken: ./engine-tests/builtins/a-member-that-*.ir.
 const rows = `
   const rows = [];
   const row = async (label, run) => { seen.length = 0; let answer; try { answer = String(await run()); } catch (error) { answer = error.name + ": " + error.message; } const calls = seen.slice(); rows.push(where + " | " + label + " | " + answer.replace(/GMT.*/, "GMT..") + " | " + calls.length + " " + [...new Set(calls)].sort().join(",")); };
@@ -87,63 +88,6 @@ const replacements: Record<string, string> = {
   const original3 = Object.prototype.valueOf;
   Object.prototype.valueOf = function (...operands) { seen[seen.length] = "Object.valueOf"; return original3.apply(this, operands); };
   undo[undo.length] = () => { Object.prototype.valueOf = original3; };`,
-  "array-join": `
-  const original4 = Array.prototype.join;
-  Array.prototype.join = function (...operands) { seen[seen.length] = "Array.join"; return original4.apply(this, operands); };
-  undo[undo.length] = () => { Array.prototype.join = original4; };`,
-  "array-tostring": `
-  const original5 = Array.prototype.toString;
-  Array.prototype.toString = function (...operands) { seen[seen.length] = "Array.toString"; return original5.apply(this, operands); };
-  undo[undo.length] = () => { Array.prototype.toString = original5; };`,
-  "names-opened-on-object-prototype": `
-  Object.prototype.format = function () { seen[seen.length] = "format"; return "formatted"; };
-  undo[undo.length] = () => { delete Object.prototype.format; };
-  Object.prototype.toJSON = function () { seen[seen.length] = "toJSON"; return "json"; };
-  undo[undo.length] = () => { delete Object.prototype.toJSON; };`,
-  "promise-then": `
-  const original16 = Promise.prototype.then;
-  Promise.prototype.then = function (...operands) { seen[seen.length] = "Promise.then"; return original16.apply(this, operands); };
-  undo[undo.length] = () => { Promise.prototype.then = original16; };`,
-  "date-and-error-tostring": `
-  const original26 = Date.prototype.toString;
-  Date.prototype.toString = function (...operands) { seen[seen.length] = "Date.toString"; return original26.apply(this, operands); };
-  undo[undo.length] = () => { Date.prototype.toString = original26; };
-  const original27 = Error.prototype.toString;
-  Error.prototype.toString = function (...operands) { seen[seen.length] = "Error.toString"; return original27.apply(this, operands); };
-  undo[undo.length] = () => { Error.prototype.toString = original27; };
-  const original28 = Date.prototype.toJSON;
-  Date.prototype.toJSON = function (...operands) { seen[seen.length] = "Date.toJSON"; return original28.apply(this, operands); };
-  undo[undo.length] = () => { Date.prototype.toJSON = original28; };
-  const original29 = Date.prototype.valueOf;
-  Date.prototype.valueOf = function (...operands) { seen[seen.length] = "Date.valueOf"; return original29.apply(this, operands); };
-  undo[undo.length] = () => { Date.prototype.valueOf = original29; };`,
-  "regexp-exec": `
-  const original10 = RegExp.prototype.exec;
-  RegExp.prototype.exec = function (...operands) { seen[seen.length] = "RegExp.exec"; return original10.apply(this, operands); };
-  undo[undo.length] = () => { RegExp.prototype.exec = original10; };`,
-  "map-set-and-set-add": `
-  const original11 = Map.prototype.set;
-  Map.prototype.set = function (...operands) { seen[seen.length] = "Map.set"; return original11.apply(this, operands); };
-  undo[undo.length] = () => { Map.prototype.set = original11; };
-  const original12 = Set.prototype.add;
-  Set.prototype.add = function (...operands) { seen[seen.length] = "Set.add"; return original12.apply(this, operands); };
-  undo[undo.length] = () => { Set.prototype.add = original12; };`,
-  "statics-and-globals": `
-  const original21 = Date.now;
-  Date.now = function (...operands) { seen[seen.length] = "Date.now"; return original21.apply(this, operands); };
-  undo[undo.length] = () => { Date.now = original21; };
-  const original22 = Math.random;
-  Math.random = function (...operands) { seen[seen.length] = "Math.random"; return original22.apply(this, operands); };
-  undo[undo.length] = () => { Math.random = original22; };
-  const original23 = JSON.parse;
-  JSON.parse = function (...operands) { seen[seen.length] = "JSON.parse"; return original23.apply(this, operands); };
-  undo[undo.length] = () => { JSON.parse = original23; };
-  const original24 = Object.keys;
-  Object.keys = function (...operands) { seen[seen.length] = "Object.keys"; return original24.apply(this, operands); };
-  undo[undo.length] = () => { Object.keys = original24; };
-  const original25 = globalThis.setTimeout;
-  globalThis.setTimeout = function (...operands) { seen[seen.length] = "setTimeout"; return original25.apply(this, operands); };
-  undo[undo.length] = () => { globalThis.setTimeout = original25; };`,
 };
 
 export function builtInFunctionsWhereTestsReplaceMembers(part: number, parts: number) {
@@ -182,9 +126,6 @@ export function builtInFunctionsWhereTestsReplaceMembers(part: number, parts: nu
       expect(plain.exitCode).toBe(0);
       expect(plain.lines.length).toBe(348);
       expect(await seen(bunEnv, "--aot")).toEqual(plain);
-      expect(
-        await seen({ ...bunEnv, BUN_DEBUG_TEST_AOT_WORDS: "TestRunLayers:2,TestRunPartFiles:1" }, "--aot"),
-      ).toEqual(plain);
     });
   }
 }

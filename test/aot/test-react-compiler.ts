@@ -78,7 +78,6 @@ export function reactCompiler(part: number) {
   const ways: [string, string[], string][] = [
     ["plain", [], ""],
     ["as one program", ["--aot"], "TestRunLayers:0"],
-    ["over two layers", ["--aot"], "TestRunLayers:2,TestRunPartFiles:1"],
   ];
 
   async function compiled(cwd: string, args: string[], words: string) {
@@ -87,36 +86,38 @@ export function reactCompiler(part: number) {
     return { compiled: stdout.match(/compiled: (.*)/)?.[1] ?? stderr, exitCode };
   }
 
-  // The first file: plain and as one program. The second: over two layers.
-  const isOverLayers = ([, , words]: (typeof ways)[number]) => words.includes("TestRunLayers:2");
-  describe.concurrent.each(ways.filter(way => isOverLayers(way) === (part === 2)))(
+  const rowsFor = <Row extends [string, ...unknown[]]>(_words: string, rows: Row[]) => rows;
+
+  describe.concurrent.each(part === 1 ? ways : [])(
     "bun test --react-compiler, %s",
     (_, flags, words) => {
       const everything = "List useTotal Story Other";
-      test.each([
-        ["nothing without it", "", [], ""],
-        ["the flag", "", ["--react-compiler"], everything],
-        ["the flag, in workers", "", ["--react-compiler", "--parallel=2"], everything],
-        ["the flag, with --isolate", "", ["--react-compiler", "--isolate"], everything],
-        ["true", `reactCompiler = true`, [], everything],
-        ["false", `reactCompiler = false`, [], ""],
-        ["false, and the flag", `reactCompiler = false`, ["--react-compiler"], everything],
-        ["folders", `reactCompiler = ["./src/"]`, [], "List useTotal Story"],
-        ["a pattern", `reactCompiler = ["**/*.jsx"]`, [], "Other"],
-        ["exclude alone", `reactCompiler = { exclude = "src" }`, [], "Other"],
-        [
-          "include and exclude",
-          `reactCompiler = { include = ["src", "other"], exclude = ["**/*.stories.*", "other"] }`,
-          [],
-          "List useTotal",
-        ],
-        [
-          "include and exclude, in workers",
-          `reactCompiler = { include = ["src"], exclude = ["**/*.stories.*"] }`,
-          ["--parallel=2"],
-          "List useTotal",
-        ],
-      ])("%s", async (_, config, args, expected) => {
+      test.each(
+        rowsFor<[string, string, string[], string]>(words, [
+          ["nothing without it", "", [], ""],
+          ["the flag", "", ["--react-compiler"], everything],
+          ["the flag, in workers", "", ["--react-compiler", "--parallel=2"], everything],
+          ["the flag, with --isolate", "", ["--react-compiler", "--isolate"], everything],
+          ["true", `reactCompiler = true`, [], everything],
+          ["false", `reactCompiler = false`, [], ""],
+          ["false, and the flag", `reactCompiler = false`, ["--react-compiler"], everything],
+          ["folders", `reactCompiler = ["./src/"]`, [], "List useTotal Story"],
+          ["a pattern", `reactCompiler = ["**/*.jsx"]`, [], "Other"],
+          ["exclude alone", `reactCompiler = { exclude = "src" }`, [], "Other"],
+          [
+            "include and exclude",
+            `reactCompiler = { include = ["src", "other"], exclude = ["**/*.stories.*", "other"] }`,
+            [],
+            "List useTotal",
+          ],
+          [
+            "include and exclude, in workers",
+            `reactCompiler = { include = ["src"], exclude = ["**/*.stories.*"] }`,
+            ["--parallel=2"],
+            "List useTotal",
+          ],
+        ]),
+      )("%s", async (_, config, args, expected) => {
         using directory = tempDir("aot-test-react-compiler", { ...files, "bunfig.toml": `[test]\n${config}` });
         const all = [...flags, "--preload=./setup.tsx", ...args, "./compiled.test.tsx"];
         expect(await compiled(String(directory), all, words)).toEqual({ compiled: expected, exitCode: 0 });
@@ -147,21 +148,23 @@ export function reactCompiler(part: number) {
         });`,
         };
         const inWeb = "Root Local Helper";
-        test.each([
-          ["a package linked into node_modules is compiled", `true`, `${inWeb} Ui Ui2 Linked`],
-          ["a linked package is included by its real path", `["../../packages/linked"]`, "Linked"],
-          [`"." is the run directory`, `["."]`, inWeb],
-          ["a path that goes up and back down into the run directory", `["../../apps/web/src/"]`, "Local"],
-          ["a folder above the run directory includes it", `["../.."]`, `${inWeb} Ui Ui2 Linked`],
-          ["an absolute path", `["<dir>/apps/web/src"]`, "Local"],
-          [
-            "exclude with a path that goes up and back down",
-            `{ exclude = ["../../apps/web/test", "../../packages"] }`,
-            "Root Local",
-          ],
-          ["a folder doesn't match a sibling whose name starts the same", `["../../packages/ui"]`, "Ui"],
-          ["a pattern reaches outside the run directory", `{ exclude = ["**/U*.tsx"] }`, `${inWeb} Linked`],
-        ])("%s", async (_, config, expected) => {
+        test.each(
+          rowsFor<[string, string, string]>(words, [
+            ["a package linked into node_modules is compiled", `true`, `${inWeb} Ui Ui2 Linked`],
+            ["a linked package is included by its real path", `["../../packages/linked"]`, "Linked"],
+            [`"." is the run directory`, `["."]`, inWeb],
+            ["a path that goes up and back down into the run directory", `["../../apps/web/src/"]`, "Local"],
+            ["a folder above the run directory includes it", `["../.."]`, `${inWeb} Ui Ui2 Linked`],
+            ["an absolute path", `["<dir>/apps/web/src"]`, "Local"],
+            [
+              "exclude with a path that goes up and back down",
+              `{ exclude = ["../../apps/web/test", "../../packages"] }`,
+              "Root Local",
+            ],
+            ["a folder doesn't match a sibling whose name starts the same", `["../../packages/ui"]`, "Ui"],
+            ["a pattern reaches outside the run directory", `{ exclude = ["**/U*.tsx"] }`, `${inWeb} Linked`],
+          ]),
+        )("%s", async (_, config, expected) => {
           using directory = tempDir("aot-test-react-compiler", workspace);
           const root = String(directory).replaceAll("\\", "/");
           symlinkSync(join(root, "packages/linked"), join(root, "apps/web/node_modules/linked"), "junction");

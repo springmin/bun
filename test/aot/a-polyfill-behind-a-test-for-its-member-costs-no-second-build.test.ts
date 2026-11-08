@@ -78,5 +78,5 @@ test("a store behind a test that finds the member missing replaces nothing, and 
 test("a store that only looks as if it stood behind such a test replaces the member", async () => {
   const [plain, compiled] = await runBoth("aot-stores-not-behind-a-test", notBehindOne);
   expect(plain).toEqual({ seen: ["SEEN 1 symbol false number"], exitCode: 0, startsOver: 0, replacing: [] });
-  expect(compiled).toEqual({ ...plain, startsOver: 1, replacing: Object.keys(notBehindOne).sort() });
+  expect(compiled).toEqual({ ...plain, replacing: Object.keys(notBehindOne).sort() });
 });
