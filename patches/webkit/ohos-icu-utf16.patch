@@ -1,0 +1,36 @@
+diff --git a/Source/JavaScriptCore/runtime/RegExp.h b/Source/JavaScriptCore/runtime/RegExp.h
+index ec504740a8f0..59e99e0a5001 100644
+--- a/Source/JavaScriptCore/runtime/RegExp.h
++++ b/Source/JavaScriptCore/runtime/RegExp.h
+@@ -28,6 +28,7 @@
+ #include "Weak.h"
+ #include "Yarr.h"
+ #include <JavaScriptCore/YarrErrorCode.h>
++#include <unicode/utf16.h>
+ #include <wtf/Atomics.h>
+ #include <wtf/BitSet.h>
+ #include <wtf/FixedVector.h>
+diff --git a/Source/WTF/wtf/text/StringConcatenate.h b/Source/WTF/wtf/text/StringConcatenate.h
+index dd85597e94ff..6bd39d773757 100644
+--- a/Source/WTF/wtf/text/StringConcatenate.h
++++ b/Source/WTF/wtf/text/StringConcatenate.h
+@@ -28,6 +28,7 @@
+ #include <atomic>
+ #include <cstring>
+ #include <functional>
++#include <unicode/uchar.h>
+ #include <wtf/CheckedArithmetic.h>
+ #include <wtf/StdLibExtras.h>
+ #include <wtf/text/AtomString.h>
+diff --git a/Source/WTF/wtf/text/StringView.h b/Source/WTF/wtf/text/StringView.h
+index 9c3c755e33e6..f591958b53c0 100644
+--- a/Source/WTF/wtf/text/StringView.h
++++ b/Source/WTF/wtf/text/StringView.h
+@@ -27,6 +27,7 @@
+ 
+ #include <limits.h>
+ #include <unicode/utypes.h>
++#include <unicode/utf16.h>
+ #include <wtf/Forward.h>
+ #include <wtf/RetainPtr.h>
+ #include <wtf/Vector.h>
