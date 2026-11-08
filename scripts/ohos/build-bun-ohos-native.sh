@@ -150,7 +150,7 @@ phase_rust_nightly() {
 phase_webkit() {
   info "=== 准备 WebKit 源码 ==="
 
-  if [ -d "$WEBKIT_SRC/.git" ]; then
+  if [ -e "$WEBKIT_SRC/.git" ]; then
     local current
     current=$(cd "$WEBKIT_SRC" && git rev-parse HEAD 2>/dev/null || true)
     if [ "$current" != "$WEBKIT_COMMIT" ]; then
