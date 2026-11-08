@@ -406,6 +406,8 @@ CROSSXX
   # OHOS 专用
   export OHOS_LLVM_PREFIX="$LLVM21"
   export BUN_WEBKIT_PATH="$WEBKIT_SRC"
+  # webkit.ts takes a static ICU from BUN_ICU_ROOT on Linux; build/ohos-icu/target is that include/ + lib/.
+  export BUN_ICU_ROOT="$ICU_TARGET"
   export OHOS_BUN_SIGNING_LINKER="$CXX"
   export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_OHOS_LINKER="$CXX"
 
