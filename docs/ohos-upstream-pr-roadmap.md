@@ -152,8 +152,10 @@ The compiled-test mock bridge is fixed in the fork:
 The fork now carries the complete upstream fix rather than the local bridge
 alone: `oven-sh/bun#47605` was merged into `ohos-aarch64`, and the WebKit pin
 was moved to `648208de5208542f2d9fb68c85391c5c89e54b6b` (the source commit
-behind the `autobuild-preview-pr-982-*` build). The OHOS WebKit patches
-(`aot-anonymous-code`, `suspend-resume`) apply to that commit unchanged.
+behind the `autobuild-preview-pr-982-*` build), with `aot-live-mocks.patch`
+backporting WebKit `0ca9f153` so a mocked factory's getter is not read once
+before its first use. The OHOS WebKit patches (`aot-anonymous-code`,
+`suspend-resume`) apply to that commit unchanged.
 
 Verified on OHOS with the merged build:
 
@@ -164,10 +166,14 @@ Verified on OHOS with the merged build:
 - `mock-again`: 3/3.
 - `mock-cjs-again`: 1/1.
 - `a-mock-through-the-global-jest-or-vi-reaches-a-module-of-a-layer-below`: 4/4.
+- `mock-builtin-live`: 1/1.
 
 `BunPlugin` and the AOT tests are the upstream versions; the local
 second-mock/CommonJS patch and `patches/webkit/aot-runtime-mocks.patch` are
 gone because the upstream implementation replaces them. `isOhos` conditions
 remain in the shared test-harness imports.
 
-The full 3,533-file suite has not been rerun on this merged build yet.
+The full 3,533-file suite has not been rerun on this merged build yet. Three
+more of the upstream PR's own mock tests still fail on OHOS with this preview
+engine (`mock-kinds-layers`, `mock-laid-over`, `mock-package-import`); they
+are outside the original Layer 2 set and stay visible.
