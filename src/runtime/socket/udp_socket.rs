@@ -402,7 +402,36 @@ impl UDPSocketConfig {
                         "Expected \"hostname\" to be a string"
                     )));
                 }
-                break 'brk value.to_bun_string(global_this)?;
+                let s = value.to_bun_string(global_this)?;
+                // OHOS only: the uws bind path resolves via libc getaddrinfo,
+                // which in the OHOS sandbox spends ~4s per malformed name
+                // before failing (ESRCH/ETIMEOUT) — a 200-iteration leak test
+                // then hangs for 800s. The whitelist (DNS alphabet plus IPv6
+                // literal/scope syntax) intentionally has no IDN, so it stays
+                // off other platforms where getaddrinfo handles such names.
+                #[cfg(target_env = "ohos")]
+                {
+                    let hostname_bytes = s.to_utf8();
+                    let bytes = hostname_bytes.as_ref();
+                    if !bytes.is_empty()
+                        && !bytes
+                            .iter()
+                            .all(|&c| c.is_ascii_alphanumeric() || matches!(c, b'.' | b'-' | b'_' | b'%' | b':' | b'[' | b']'))
+                    {
+                        // The name can never be accepted by the resolver, so give
+                        // the same error a failed lookup produces
+                        // (`getaddrinfo ENOTFOUND <hostname>` with syscall and
+                        // hostname set) rather than a raw EINVAL: callers match on
+                        // that shape.
+                        let err = crate::dns_jsc::cares_jsc::system_error_with_syscall_and_hostname(
+                            c_ares::Error::ENOTFOUND,
+                            b"getaddrinfo",
+                            bytes,
+                        );
+                        return Err(global_this.throw_value(err.to_error_instance(global_this)));
+                    }
+                }
+                break 'brk s;
             } else {
                 break 'brk BunString::static_("0.0.0.0");
             }

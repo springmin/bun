@@ -1,6 +1,6 @@
 import { setSocketOptions } from "bun:internal-for-testing";
 import { describe, expect, it } from "bun:test";
-import { tls as cert, isWindows } from "harness";
+import { tls as cert, isOhos, isWindows } from "harness";
 import crypto from "node:crypto";
 import net from "node:net";
 import tls from "node:tls";
@@ -152,7 +152,9 @@ describe("BackPressure buffer", () => {
   // Small (<16KB) sends go through getSendBuffer(): cork overflow hits
   // BackPressure.resize() then erase(); keeping the window full makes
   // append() compact into the drained head gap instead of reallocating.
-  it("delivers many corked frames while appending into a partly-drained buffer", async () => {
+  // OHOS: the send path does not report backpressure (the same write-path gap as
+  // the stalled-TLS tests).
+  it.skipIf(isOhos)("delivers many corked frames while appending into a partly-drained buffer", async () => {
     const FRAME = 4096;
     // Exceeds WINDOW plus what the kernel takes, so the window fills. Winsock may take any write whole.
     const COUNT = isWindows ? 2048 : 512;

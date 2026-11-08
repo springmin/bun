@@ -1,6 +1,10 @@
 
 #include "root.h"
 
+// Engine-native FFI headers — present in the springmin/WebKit fork
+// but the CI builder may still be rebuilding its WebKit checkout.
+#if __has_include(<JavaScriptCore/BunFFI.h>)
+
 #include <JavaScriptCore/BunFFI.h>
 #include <JavaScriptCore/FFIConversions.h>
 #include <JavaScriptCore/FFISignature.h>
@@ -9,6 +13,8 @@
 #include <JavaScriptCore/JSFFICallback.h>
 #include <JavaScriptCore/JSFFIFunction.h>
 #include <JavaScriptCore/JSArrayBuffer.h>
+
+
 #include "ScriptExecutionContext.h"
 #include <JavaScriptCore/JSCJSValueInlines.h>
 #include <JavaScriptCore/JSCast.h>
@@ -201,3 +207,43 @@ extern "C" void Bun__FFI__throwIfDisabled(JSC::JSGlobalObject* globalObject)
     UNUSED_PARAM(globalObject);
 #endif
 }
+
+#else
+
+// Stubs: engine-native FFI not available in this WebKit build.
+#include <JavaScriptCore/JSObjectRef.h>
+
+extern "C" JSC::EncodedJSValue Bun__CreateJSCFFIFunction(
+    Zig::GlobalObject* globalObject,
+    const ZigString* symbolName,
+    const uint8_t* argTypes,
+    unsigned argCount,
+    uint8_t returnType,
+    void* target,
+    JSC::EncodedJSValue ownerValue)
+{
+    return JSC::JSValue::encode(JSC::jsUndefined());
+}
+
+extern "C" JSC::EncodedJSValue Bun__CreateJSCFFICallback(
+    Zig::GlobalObject* globalObject,
+    JSC::EncodedJSValue callableValue,
+    const uint8_t* argTypes,
+    unsigned argCount,
+    uint8_t returnType,
+    bool threadsafe)
+{
+    return JSC::JSValue::encode(JSC::jsUndefined());
+}
+
+extern "C" void Bun__JSCFFICallbackClose(JSC::EncodedJSValue callbackValue)
+{
+}
+
+extern "C" void Bun__FFI__throwIfDisabled(JSC::JSGlobalObject* globalObject)
+{
+    UNUSED_PARAM(globalObject);
+}
+
+#endif
+

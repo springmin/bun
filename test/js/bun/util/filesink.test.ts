@@ -1,6 +1,6 @@
 import { createSocketPair, fileSinkInternals } from "bun:internal-for-testing";
 import { describe, expect, it } from "bun:test";
-import { bunEnv, bunExe, fileDescriptorLeakChecker, isLinux, isPosix, isWindows, tempDir, tmpdirSync } from "harness";
+import { bunEnv, bunExe, fileDescriptorLeakChecker, isLinux, isOhos, isPosix, isWindows, tempDir, tmpdirSync } from "harness";
 import { mkfifo } from "mkfifo";
 import { join } from "node:path";
 
@@ -361,7 +361,10 @@ it.skipIf(!isPosix)(
 // drain-flush-drain shape needs the AF_UNIX send buffer to hold the remainder
 // (Linux default ~200KB; macOS is ~8KB, so flush() returns Pending there and
 // the promise was already settled via on_write).
-it.skipIf(!isLinux)(
+it.skipIf(!isLinux || isOhos)(
+  // OHOS: the AF_UNIX send buffer is ~512KB (Linux ~200KB) so 300KB never
+  // backpressures, and the socketpair read end is blocking there — the
+  // drain loop hangs once the buffer empties. Skip on OHOS.
   "end() after a backpressured write() with the reader drained returns the write's promise and resolves it",
   async () => {
     const [readFd, writeFd] = createSocketPair();
@@ -676,7 +679,7 @@ it("Bun.file(fd).writer() write/end under GC pressure does not crash", async () 
 // closed from under it survives as long as the file does and the next dup that
 // lands on that number fails with EEXIST. kqueue drops the registration with
 // the fd, so this cannot be set up on macOS.
-it.skipIf(!isLinux)("Bun.file(fd).writer() whose registration fails closes the dup exactly once", async () => {
+it.skipIf(!isLinux || isOhos)("Bun.file(fd).writer() whose registration fails closes the dup exactly once", async () => {
   const fifoPath = join(tmpdirSync(), "parking.fifo");
   mkfifo(fifoPath, 0o666);
   const src = `

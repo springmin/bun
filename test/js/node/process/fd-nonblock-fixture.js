@@ -2,15 +2,29 @@
 import { dlopen } from "bun:ffi";
 import { existsSync, readFileSync, writeSync } from "node:fs";
 
+let fcntl;
+const nonblockingViaFcntl = fd => {
+  // Linux and Android resolve the bare SONAME; FreeBSD and Darwin name it otherwise.
+  fcntl ??= dlopen(
+    process.platform === "darwin" ? "libSystem.B.dylib" : process.platform === "freebsd" ? "libc.so.7" : "libc.so",
+    { fcntl: { args: ["i32", "i32", "i32"], returns: "i32" } },
+  ).symbols.fcntl;
+  return (fcntl(fd, 3 /* F_GETFL */, 0) & 4) /* O_NONBLOCK */ !== 0;
+};
 let isNonblocking;
 if (existsSync("/proc/self/fdinfo")) {
-  isNonblocking = fd =>
-    (parseInt(readFileSync(`/proc/self/fdinfo/${fd}`, "utf8").match(/^flags:\s*([0-7]+)/m)[1], 8) & 0o4000) !== 0;
+  isNonblocking = fd => {
+    try {
+      return (parseInt(readFileSync(`/proc/self/fdinfo/${fd}`, "utf8").match(/^flags:\s*([0-7]+)/m)[1], 8) & 0o4000) !== 0;
+    } catch {
+      // OHOS: stdio created by Bun are unix sockets, and this kernel answers a
+      // read of a socket's fdinfo with ENOENT though the entry exists; the fd
+      // itself is open, so ask fcntl instead.
+      return nonblockingViaFcntl(fd);
+    }
+  };
 } else {
-  const { fcntl } = dlopen(process.platform === "darwin" ? "libSystem.B.dylib" : "libc.so.7", {
-    fcntl: { args: ["i32", "i32", "i32"], returns: "i32" },
-  }).symbols;
-  isNonblocking = fd => (fcntl(fd, 3 /* F_GETFL */, 0) & 4) /* O_NONBLOCK */ !== 0;
+  isNonblocking = nonblockingViaFcntl;
 }
 
 writeSync(

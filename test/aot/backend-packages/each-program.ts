@@ -3,7 +3,7 @@
 // An executable built with --aot prints what plain Bun prints, also where the project no longer lies.
 // The programs of a file are built and run side by side. The project is moved away while nobody else needs it.
 import { afterAll, expect } from "bun:test";
-import { bunEnv, bunExe, tempDir } from "harness";
+import { bunEnv, bunExe, isOhos, tempDir } from "harness";
 import { cpSync, mkdirSync, readdirSync, renameSync, rmSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
 import { run as runCommand } from "../harness/run";
@@ -82,7 +82,7 @@ export function testPrograms(folder: string, programs: Record<string, Program> =
       .replace(/\/\$bunfs\/root|B:[\\/]~BUN[\\/]root/g, "<project>")
       .replace(/took [0-9.]+m?s/g, "took N ms");
 
-  describe.concurrent(folder, () => {
+  describe.skipIf(isOhos).concurrent(folder, () => {
     afterAll(() => rmSync(String(dir), { recursive: true, force: true }), 300_000);
     beforeAll(async () => {
       cpSync(join(import.meta.dir, folder), project, { recursive: true });

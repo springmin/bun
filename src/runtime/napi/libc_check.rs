@@ -53,6 +53,10 @@ pub(crate) unsafe extern "C" fn Bun__addonNeedsGlibcOnMusl(
 
 #[cfg(any(target_os = "linux", target_os = "android"))]
 fn check_enabled() -> bool {
+    // IS_MUSL is true on OHOS too (its libc is musl), and a glibc-linked
+    // addon cannot load there either: keep the probe so the addon fails with
+    // the libc mismatch instead of a loader "Permission denied". The message
+    // tail is platform-specific in BunProcess.cpp.
     bun_core::Environment::IS_MUSL
         || bun_core::env_var::BUN_INTERNAL_NAPI_FORCE_MUSL_CHECK.get() == Some(true)
 }

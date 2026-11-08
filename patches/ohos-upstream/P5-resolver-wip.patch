@@ -1,0 +1,147 @@
+diff --git a/src/resolver/lib.rs b/src/resolver/lib.rs
+index 43db5aacd8..70ed25fed0 100644
+--- a/src/resolver/lib.rs
++++ b/src/resolver/lib.rs
+@@ -950,6 +950,22 @@ pub mod fs {
+                     raised.max = lim.max.max(target);
+                     if bun_sys::posix::setrlimit(resource, raised).is_ok() {
+                         lim.cur = raised.cur;
++                    } else {
++                        // Unprivileged processes cannot raise rlim_max (EPERM),
++                        // so when target exceeds the current hard limit the
++                        // attempt above fails outright and leaves the soft
++                        // limit at whatever low value the parent set -- e.g.
++                        // `ulimit -Sn 256 && exec bun` observed on OHOS, where
++                        // bun then runs the whole session with a 256-fd budget.
++                        // Fall back to Node's semantics: raise soft as far as
++                        // the hard limit allows.
++                        let mut clamped = lim;
++                        clamped.cur = lim.max.min(target);
++                        if clamped.cur > lim.cur
++                            && bun_sys::posix::setrlimit(resource, clamped).is_ok()
++                        {
++                            lim.cur = clamped.cur;
++                        }
+                     }
+                 }
+                 usize::try_from(lim.cur).expect("int cast")
+@@ -1024,7 +1040,11 @@ pub mod fs {
+             err: crate::Error,
+         ) -> crate::CrateResult<&'static EntriesOption> {
+             let mut get_or_put_result = self.entries.get_or_put(dir)?;
+-            if err == crate::Error::Sys(bun_errno::SystemErrno::ENOENT) {
++            let is_not_found = err == crate::Error::Sys(bun_errno::SystemErrno::ENOENT)
++                || (cfg!(target_env = "ohos")
++                    && (err == crate::Error::Sys(bun_errno::SystemErrno::EACCES)
++                        || err == crate::Error::Sys(bun_errno::SystemErrno::EPERM)));
++            if is_not_found {
+                 self.entries.mark_not_found(get_or_put_result);
+                 return Ok(temp_entries_option_write(EntriesOption::Err(
+                     dir_entry::Err {
+@@ -1032,6 +1052,7 @@ pub mod fs {
+                         canonical_error: err,
+                     },
+                 )));
++
+             }
+             let opt = self.entries.put(
+                 &mut get_or_put_result,
+@@ -1561,9 +1582,37 @@ pub mod fs {
+             {
+                 return b"/data/local/tmp";
+             }
+-            #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "android")))]
++            #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+             {
+-                b"/tmp"
++                #[cfg(target_env = "ohos")]
++                {
++                    // OHOS /tmp is writable but rename(2) is denied by the MAC layer
++                    // (hmmac=inherit_parent): install/extract and child processes need
++                    // a temp dir where rename works, so skip /tmp entirely.
++                    // Fallback order: $HOME/tmp → /data/storage/el2/base/tmp.
++                    if let Some(home) = env_var::HOME.get_not_empty() {
++                        let mut buf = [0u8; 2048];
++                        let len = home.len().min(buf.len() - 5);
++                        buf[..len].copy_from_slice(&home[..len]);
++                        buf[len..len + 4].copy_from_slice(b"/tmp");
++                        buf[len + 4] = 0;
++                        if unsafe { libc::access(buf.as_ptr() as *const libc::c_char, libc::W_OK) } == 0 {
++                            let tmp = &buf[..len + 4];
++                            let leaked = tmp.to_vec().leak();
++                            return &leaked[..];
++                        }
++                    }
++                    let candidate = b"/data/storage/el2/base/tmp\0";
++                    if unsafe { libc::access(candidate.as_ptr() as *const libc::c_char, libc::W_OK) } == 0 {
++                        return b"/data/storage/el2/base/tmp";
++                    }
++                    // Last resort: return /tmp even if read-only.
++                    b"/tmp"
++                }
++                #[cfg(not(target_env = "ohos"))]
++                {
++                    b"/tmp"
++                }
+             }
+         }
+ 
+diff --git a/src/resolver/resolver.rs b/src/resolver/resolver.rs
+index 1bedadabaf..18a245ea9a 100644
+--- a/src/resolver/resolver.rs
++++ b/src/resolver/resolver.rs
+@@ -4698,7 +4698,7 @@ impl<'a> Resolver<'a> {
+         let mut _safe_path: Option<&'static [u8]> = None;
+ 
+         // Start at the top.
+-        while queue_slice_len > 0 {
++        'queue_walk: while queue_slice_len > 0 {
+             // SAFETY: every slot in `0..queue_slice_len` was `.write()`-initialised above.
+             let mut queue_top = unsafe { queue[queue_slice_len - 1].assume_init_ref() }.clone();
+             // Copy the `RawSlice` out so `.slice()` doesn't keep `queue_top` borrowed.
+@@ -4797,6 +4797,22 @@ impl<'a> Resolver<'a> {
+                             //   ...
+                             self.dir_cache_mut().mark_not_found(queue_top.result);
+                             rfs!().entries.mark_not_found(cached_dir_entry_result);
++
++                            // OHOS: Ancestor directories like "/" or "/storage/" may return
++                            // EACCES due to sandbox restrictions. Skip the unreadable ancestor
++                            // and continue processing child directories in the queue.
++                            // Guard: if the queue is now empty, there is nothing left to walk —
++                            // return Ok(None) instead of `continue`-ing into the while-exit path
++                            // that would hit the post-loop `unreachable!()` (BUG-01).
++                            if err == crate::Error::Sys(bun_errno::SystemErrno::EACCES)
++                                || err == crate::Error::Sys(bun_errno::SystemErrno::EPERM)
++                            {
++                                if queue_slice_len == 0 {
++                                    return Ok(None);
++                                }
++                                continue 'queue_walk;
++                            }
++
+                             if err != crate::Error::Sys(bun_errno::SystemErrno::ENOENT) {
+                                 if enable_logging {
+                                     let pretty = queue_top_unsafe_path;
+@@ -6053,6 +6069,9 @@ impl<'a> Resolver<'a> {
+             match err.original_err {
+                 crate::Error::Sys(bun_errno::SystemErrno::ENOENT)
+                 | crate::Error::Sys(bun_errno::SystemErrno::ENOTDIR) => {}
++                crate::Error::Sys(bun_errno::SystemErrno::EACCES)
++                | crate::Error::Sys(bun_errno::SystemErrno::EPERM)
++                    if cfg!(target_env = "ohos") => {}
+                 _ => {
+                     let _ = self.log_mut().add_error_fmt(
+                         None,
+@@ -6661,7 +6680,11 @@ impl<'a> Resolver<'a> {
+             Ok(v) => v,
+             Err(err) => {
+                 let pretty = tsconfigpath;
+-                if err == crate::Error::Sys(bun_errno::SystemErrno::ENOENT) {
++                let is_not_found_like = err == crate::Error::Sys(bun_errno::SystemErrno::ENOENT)
++                    || (cfg!(target_env = "ohos")
++                        && (err == crate::Error::Sys(bun_errno::SystemErrno::EACCES)
++                            || err == crate::Error::Sys(bun_errno::SystemErrno::EPERM)));
++                if is_not_found_like {
+                     let _ = self.log_mut().add_error_fmt(
+                         None,
+                         bun_ast::Loc::EMPTY,

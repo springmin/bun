@@ -1,7 +1,6 @@
 import { SQL } from "bun";
 import { afterAll, beforeEach, describe, expect, test } from "bun:test";
 import { isWindows, tempDir } from "harness";
-
 declare module "bun" {
   namespace SQL {
     export interface PostgresOrMySQLOptions {

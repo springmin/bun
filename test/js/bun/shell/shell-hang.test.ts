@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { bunRun, isLinux } from "harness";
+import { bunRun, isLinux, isOhos } from "harness";
 import path from "path";
 
 // Pass by not hanging
@@ -35,7 +35,8 @@ describe("pass", () => {
       if (exitCode !== 0) console.error(stderr);
       expect(exitCode).toBe(0);
     },
-    700,
+    // OHOS: the success fixtures run slower (spawn overhead); 700ms is too tight
+    isOhos ? 5000 : 700,
   );
 });
 

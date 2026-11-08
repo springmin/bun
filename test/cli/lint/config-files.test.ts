@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { bunEnv, bunExe, isASAN, isDebug, isWindows, normalizeBunSnapshot, tempDir } from "harness";
+import { bunEnv, bunExe, isASAN, isDebug, isOhos, isWindows, normalizeBunSnapshot, tempDir } from "harness";
 import {
   chmodSync,
   existsSync,
@@ -1175,7 +1175,7 @@ describe.concurrent("the note about an older installed version of a built-in plu
 });
 
 describe.concurrent("an eslint.config.js is evaluated again on every run", () => {
-  const timeout = isDebug || isASAN ? 120_000 : 30_000;
+  const timeout = isDebug || isASAN || isOhos ? 120_000 : 30_000;
 
   /**
    * Creates a project. `write` writes a file with a modification time of a minute ago. `run` returns the rules that
@@ -1372,7 +1372,7 @@ describe.concurrent("`process.argv` in a config file is bun lint's command line"
 });
 
 describe.concurrent("evaluating an eslint.config.js doesn't load the packages of built-in plugins", () => {
-  const timeout = isDebug || isASAN ? 120_000 : 30_000;
+  const timeout = isDebug || isASAN || isOhos ? 120_000 : 30_000;
   // A stand-in for the relevant parts of typescript-eslint, in the shape TypeScript compiles them to. Each large module
   // logs that it was loaded.
   const notes = (directory: string) =>
@@ -4834,7 +4834,7 @@ describe.concurrent("ESLint 8 config files", () => {
           Object.fromEntries(some.filter(it => it.name in known).map(it => [it.name, known[it.name]])),
         );
       },
-      30_000,
+      isOhos ? 120_000 : 30_000,
     );
   }
 });

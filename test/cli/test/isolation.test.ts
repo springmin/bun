@@ -1,5 +1,6 @@
 import { describe, expect, setDefaultTimeout, test } from "bun:test";
-import { bunEnv, bunExe, Heap, isASAN, isDebug, isWindows, normalizeBunSnapshot, tempDir, tls } from "harness";
+import { describe, expect, setDefaultTimeout, test } from "bun:test";
+import { bunEnv, bunExe, Heap, isASAN, isDebug, isOhos, isWindows, normalizeBunSnapshot, tempDir, tls } from "harness";
 import fs from "node:fs";
 import net from "node:net";
 import { join } from "node:path";
@@ -8,7 +9,7 @@ import { mysqlHandshakeV10, mysqlOkPacket, pgAuthenticationOk, pgReadyForQuery }
 // Every case spawns at least one full `bun test --isolate` child; the heavy
 // ones (8-file leak fixtures, 500-2000-export module_info modules) exceed the
 // 5s default on debug/ASAN runners.
-setDefaultTimeout(isASAN ? 120_000 : 30_000);
+setDefaultTimeout(isASAN ? 120_000 : isOhos ? 60_000 : 30_000);
 
 // Two test files where the first leaks state and the second observes it.
 // Under --isolate the second file must see a clean world.
@@ -533,12 +534,16 @@ describe.concurrent("bun test --isolate", () => {
 
         test("server saw the disconnect", async () => {
           const closeFile = process.env.CLOSE_FILE!;
-          for (let i = 0; i < 200; i++) {
+          // OHOS propagates the isolate-forced close more slowly (sandbox
+          // TCP teardown); the runner passes a longer budget there. The
+          // test's own timeout has to cover that budget.
+          const waitMs = Number(process.env.ISOLATE_CLOSE_WAIT_MS ?? 2000);
+          for (let i = 0; i < waitMs / 10; i++) {
             if (fs.existsSync(closeFile)) break;
             await Bun.sleep(10);
           }
           expect(fs.existsSync(closeFile)).toBe(true);
-        });
+        }, Number(process.env.ISOLATE_CLOSE_WAIT_MS ?? 2000) + 5000);
       `,
     });
 
@@ -553,7 +558,12 @@ describe.concurrent("bun test --isolate", () => {
     try {
       await using proc = Bun.spawn({
         cmd: [bunExe(), "test", "--isolate", "./a-connect.test.ts", "./b-check.test.ts"],
-        env: { ...bunEnv, PORT: String(port), CLOSE_FILE: closeFile },
+        env: {
+          ...bunEnv,
+          PORT: String(port),
+          CLOSE_FILE: closeFile,
+          ISOLATE_CLOSE_WAIT_MS: isOhos ? "45000" : "2000",
+        },
         cwd: String(dir),
         stderr: "pipe",
         stdout: "pipe",
@@ -565,7 +575,8 @@ describe.concurrent("bun test --isolate", () => {
     } finally {
       server.close();
     }
-  });
+    // The inner budget (ISOLATE_CLOSE_WAIT_MS + 5s on OHOS) must fit here.
+  }, isOhos ? 120_000 : 30_000);
 
   test("with --isolate, what a leaked listener's close handler opens is closed before next file", async () => {
     using dir = tempDir("isolate-close-handler", {
@@ -647,7 +658,10 @@ describe.concurrent("bun test --isolate", () => {
       leak: `
         const dial = (options = {}) =>
           new Bun.RedisClient("redis://127.0.0.1:" + port, { autoReconnect: false, ...options });
-        const first = dial();
+        // OHOS: the mock server answers the handshake from this file's parent
+        // process; while the whole file's isolate children run, the default 10s
+        // is not enough and the client closes the connection instead.
+        const first = dial({ connectionTimeout: ${isOhos ? 60_000 : 10_000} });
         first.onclose = () => {
           dial({ connectionTimeout: timeout }).connect().catch(() => {});
         };
@@ -682,10 +696,12 @@ describe.concurrent("bun test --isolate", () => {
         import { test } from "bun:test";
         import fs from "node:fs";
         ${shared}
+        // OHOS: the handshake with the mock server can exceed the default 5s
+        // while the sibling isolate runs load the device.
         test("leak a client that dials again when it is closed", async () => {
           const entered = (handler: string) => fs.appendFileSync(process.env.ENTERED_FILE!, handler + "\\n");
           ${leak}
-        });
+        }, ${isOhos ? 30_000 : 5_000});
       `,
         "b-check.test.ts": `
         import { test, expect } from "bun:test";

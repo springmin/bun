@@ -381,6 +381,48 @@ impl PackageManager {
             None if list.is_dependency => {}
             None => path.append(original_path.as_slice())?,
         }
+
+        // OHOS: put bun's directory first and node's directory last, and set
+        // NODE=bun so lifecycle scripts resolve both `bun` and `node` (and use
+        // bun's process.dlopen, which auto-signs .node ELF files). node is
+        // installed to ~/.harmonybrew/bin on OHOS — NOT ~/.bun — so a script
+        // with none of it in PATH (tests set PATH="") still finds `node` at the
+        // end; bun's own `node` shim, earlier in PATH, stays the one scripts get.
+        #[cfg(target_env = "ohos")]
+        {
+            let bun_dir_bytes = bun_core::self_exe_path().ok()
+                .and_then(|exe| bun_paths::dirname(exe.as_bytes()));
+            // OHOS node install dir; prepend only when it actually contains
+            // a node binary so an absent install stays harmless.
+            let node_dir_bytes: Option<Vec<u8>> = bun_core::env_var::HOME::get().and_then(|home| {
+                let mut v = Vec::with_capacity(home.len() + b"/.harmonybrew/bin/node".len());
+                v.extend_from_slice(home);
+                v.extend_from_slice(b"/.harmonybrew/bin");
+                let node_path = std::path::Path::new(
+                    core::str::from_utf8(&v).unwrap_or(""),
+                ).join("node");
+                node_path.exists().then_some(v)
+            });
+            if let Some(bun_dir) = bun_dir_bytes {
+                let current_path: Vec<u8> = path.slice().to_vec();
+                let node_dir_len = node_dir_bytes.as_ref().map_or(0, |v| v.len() + 1);
+                let mut ohos_path = EnvPath::init_capacity(
+                    bun_dir.len() + 1 + node_dir_len + current_path.len() + 1,
+                )?;
+                ohos_path.append(bun_dir)?;
+                ohos_path.append(current_path.as_slice())?;
+                // Last: bun puts a `node` shim earlier in PATH, and a script's
+                // `node` must be bun; this only covers a PATH with no other `node`.
+                if let Some(node_dir) = node_dir_bytes.as_deref() {
+                    ohos_path.append(node_dir)?;
+                }
+                path = ohos_path;
+            }
+        }
+        #[cfg(target_env = "ohos")]
+        if let Ok(bun_exe) = bun_core::self_exe_path() {
+            let _ = script_env.put(b"NODE", bun_exe.as_bytes());
+        }
         script_env.put(b"PATH", path.slice())?;
 
         put_npm_package_env(&mut script_env, cwd, &list.package_name)?;

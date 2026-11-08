@@ -1,7 +1,7 @@
 import { $ } from "bun";
 import { describe, expect, it, test } from "bun:test";
 import { cpSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "fs";
-import { bunEnv, bunExe, DirectoryTree, isDebug, isWindows, MAX_PATH_BYTES, tempDir, tempDirWithFiles } from "harness";
+import { bunEnv, bunExe, DirectoryTree, isDebug, isOHOS, isWindows, MAX_PATH_BYTES, tempDir, tempDirWithFiles } from "harness";
 import { join } from "path";
 
 const isolationFlags: [string[]][] = [[[]], [["--isolate"]], [["--isolate=modules"]]];
@@ -188,7 +188,9 @@ class SnapshotTester {
     contents: string,
     opts: { shouldNotError?: boolean; shouldGrow?: boolean; skipSnapshot?: boolean } = {},
   ) {
-    test(label, async () => await this.update(contents, opts), isDebug ? 100_000 : 5_000);
+    // OHOS: the update cycle runs the inner `bun test` two or three times and
+    // each run takes seconds there, so the 5s budget only fits debug hosts.
+    test(label, async () => await this.update(contents, opts), isDebug ? 100_000 : isOHOS ? 30_000 : 5_000);
   }
   async update(
     contents: string,

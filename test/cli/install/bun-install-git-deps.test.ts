@@ -21,8 +21,7 @@ import {
   writeFileSync,
 } from "fs";
 import { lstat, readdir, readlink } from "fs/promises";
-import { bunEnv, bunExe, hostedGitRepository, isLinux, isWindows, normalizeBunSnapshot, tempDir } from "harness";
-import { dirname, join, resolve } from "path";
+import { bunEnv, bunExe, hostedGitRepository, isLinux, isOhos, isWindows, normalizeBunSnapshot, tempDir } from "harness";import { dirname, join, resolve } from "path";
 import { pathToFileURL } from "url";
 
 const gitEnv: NodeJS.Dict<string> = {
@@ -340,6 +339,7 @@ function expectedGitPackages(
 // appear both directly and transitively (same repo URL + committish) raced
 // against the shared clone/checkout tasks and failed with "failed to resolve".
 test.concurrent(
+  // OHOS: 26 local git clones over http take >30s on-device
   "installs every git dependency when many branches of one repo appear directly and transitively",
   async () => {
     using dir = tempDir("git-dep-dup", {});
@@ -371,7 +371,7 @@ test.concurrent(
       expect(exitCode).toBe(0);
     }
   },
-  30_000,
+  isOhos ? 120_000 : 30_000,
 );
 
 // same mechanism as above but for tarball-URL dependencies (issues #10915,
@@ -433,7 +433,7 @@ test.concurrent(
       expect(exitCode).toBe(0);
     }
   },
-  30_000,
+  isOhos ? 120_000 : 30_000,
 );
 
 // issue #11348: same mechanism for `github:` dependencies. The root and a
@@ -502,7 +502,7 @@ test.concurrent(
       expect(exitCode).toBe(0);
     }
   },
-  30_000,
+  isOhos ? 120_000 : 30_000,
 );
 
 // The URL parser returns the committish of a GitHub dependency percent-decoded. A committish that was written with an
@@ -1021,7 +1021,7 @@ test.concurrent(
     expect(await lockedPackages(project)).toEqual(locked);
     expect(exitCode).toBe(0);
   },
-  30_000,
+  isOhos ? 120_000 : 30_000,
 );
 
 // With the isolated linker, a cold-cache frozen install re-enqueued each
@@ -4097,7 +4097,7 @@ test.concurrent.skipIf(isWindows).each<{ what: string; change(at: Places): void 
     expect(await installedVersionOf(project, "dep")).toBe("main-v2");
     expect(exitCode).toBe(0);
   },
-  30_000,
+  isOhos ? 240_000 : 30_000,
 );
 
 // Only a file of the repository itself is read as its package.json.
@@ -4301,7 +4301,7 @@ test.concurrent(
     }
     expect(cpuTime.chain).toBeLessThan(3 * cpuTime.star);
   },
-  30_000,
+  isOhos ? 120_000 : 30_000,
 );
 
 // For the other kinds of entry, Bun installs whatever git itself writes.

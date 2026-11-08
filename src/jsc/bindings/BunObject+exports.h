@@ -3,6 +3,7 @@
 
 // --- Getters ---
 #define FOR_EACH_GETTER(macro) \
+    macro(ant) \
     macro(FFI) \
     macro(argv) \
     macro(cron) \

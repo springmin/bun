@@ -2,6 +2,7 @@
 #include "root.h"
 #include <cstdio>
 #include <cstdlib>
+#include <optional>
 
 #if !OS(WINDOWS)
 #include <wtf/Threading.h>
@@ -11,6 +12,7 @@
 #include <sys/stat.h>
 #include <signal.h>
 #include <unistd.h>
+#include <sched.h>
 #include <atomic>
 #include <cerrno>
 #include <cstring>
@@ -90,21 +92,29 @@ extern "C" int32_t set_process_priority(int32_t pid, int32_t priority)
 #if !OS(WINDOWS)
 extern "C" bool is_executable_file(const char* path)
 {
-#if defined(O_EXEC) && !OS(LINUX)
+#if defined(__OHOS__)
+    // OHOS: open(O_EXEC) skips the x-permission-bit check (kernel bug), so use access(X_OK); access passes directories too (x = traversal), so require a regular file first.
+    struct stat st;
+    if (stat(path, &st) != 0)
+        return false;
+    if (!S_ISREG(st.st_mode))
+        return false;
+    return access(path, X_OK) == 0;
+#elif defined(O_EXEC) && !OS(LINUX)
     // musl defines O_EXEC as O_PATH, which opens any file.
     int fd = open(path, O_EXEC | O_CLOEXEC | O_NONBLOCK | O_NOCTTY, 0);
     if (fd < 0)
         return false;
     close(fd);
     return true;
-#endif // defined(O_EXEC) && !OS(LINUX)
-
+#else
     struct stat st;
     if (stat(path, &st) != 0)
         return false;
 
     // regular file and user can execute
     return S_ISREG(st.st_mode) && (st.st_mode & S_IXUSR);
+#endif
 }
 #endif
 
@@ -300,7 +310,14 @@ extern "C" void windows_enable_stdio_inheritance()
 // close_range is glibc > 2.33, which is very new
 extern "C" ssize_t bun_close_range(unsigned int start, unsigned int end, unsigned int flags)
 {
+#if defined(__OHOS__)
+    // OHOS kernel sends uncatchable SIGSYS for unimplemented syscalls.
+    // Fall back to the caller's closeRangeLoop.
+    errno = ENOSYS;
+    return -1;
+#else
     return syscall(__NR_close_range, start, end, flags);
+#endif
 }
 
 #if CPU(X86_64) || CPU(ARM64)
@@ -428,15 +445,18 @@ extern "C" void on_before_reload_process_posix([[maybe_unused]] bool closeInheri
     // close all file descriptors except stdin, stdout, stderr and possibly IPC.
     // if you're passing additional file descriptors to Bun, you're probably not passing more than 8.
     // If this fails, it's ultimately okay, we're just trying our best to avoid leaking file descriptors.
+#if !defined(__OHOS__)
     if (closeInheritedFileDescriptors)
         bun_close_range(3, ~0U, CLOSE_RANGE_CLOEXEC);
 #endif
+#endif // OS(LINUX) || OS(FREEBSD)
 #if OS(LINUX)
     if (!closeInheritedFileDescriptors) {
         for (int fd : inheritedFileDescriptors())
             unset_cloexec(fd);
     }
 #endif
+
 
     // Preserve the IPC channel to the parent across the execve: NODE_CHANNEL_FD survives in
     // environ and the reloaded image re-attaches to it; CLOEXEC'd, the parent stops receiving
@@ -489,6 +509,20 @@ extern "C" void on_before_reload_process_posix([[maybe_unused]] bool closeInheri
 // after `threads_in_execve` and read before it.
 static std::atomic<int> threads_in_execve { 0 };
 static std::atomic<unsigned> execve_generation { 0 };
+#if defined(__OHOS__)
+// Two-phase (register-then-verify) mutual exclusion between clone() and the
+// execve(2) bookkeeping window: each side only proceeds when it has registered
+// itself and then re-observed the other side absent. A check followed directly
+// by the syscall leaves a race where the other side starts in between (on OHOS
+// a clone that overlaps this window can corrupt the process instead of
+// reliably failing with EAGAIN), so a single-sided wait is not sufficient.
+static std::atomic<int> threads_creating { 0 };
+// An exec that is about to enter its window raises this flag first; thread
+// creation defers to it. Without the flag, back-to-back thread creations
+// pipeline the creating counter across zero so tightly that the exec side
+// starves retrying its register-then-verify.
+static std::atomic<int> execve_want { 0 };
+#endif
 // The clone(CLONE_VM) child of posix_spawn_bun execs in this address space and never returns
 // to undo a count, so only the pid recorded in bun_initialize_process counts its execs.
 static pid_t execve_counting_pid = 0;
@@ -674,6 +708,21 @@ extern "C" int __wrap_execve(const char* path, char* const argv[], char* const e
 {
     if (getpid() != execve_counting_pid)
         return __real_execve(path, argv, envp);
+
+#if defined(__OHOS__)
+    execve_want.fetch_add(1, std::memory_order_seq_cst);
+    for (;;) {
+        while (threads_creating.load(std::memory_order_seq_cst) != 0)
+            sched_yield();
+        threads_in_execve.fetch_add(1, std::memory_order_seq_cst);
+        if (threads_creating.load(std::memory_order_seq_cst) == 0)
+            break;
+        // A creator registered before our want was visible; let it finish.
+        threads_in_execve.fetch_sub(1, std::memory_order_seq_cst);
+        sched_yield();
+    }
+    execve_want.fetch_sub(1, std::memory_order_seq_cst);
+#else
     // execve keeps a signal that is pending on this thread and resets its handler, so a suspend or
     // resume signal sent now would kill the new image. Senders hold this lock. A thread that
     // crashed may already hold it, and it is not recursive.
@@ -681,6 +730,7 @@ extern "C" int __wrap_execve(const char* path, char* const argv[], char* const e
     if (!CrashHandler__isReloadingProcess())
         suspendLocker.emplace();
     threads_in_execve.fetch_add(1, std::memory_order_seq_cst);
+#endif
     execve_generation.fetch_add(1, std::memory_order_seq_cst);
     int rc = __real_execve(path, argv, envp);
     // Only reached when execve failed and the old image keeps running.
@@ -691,19 +741,48 @@ extern "C" int __wrap_execve(const char* path, char* const argv[], char* const e
 // The attempt bound keeps a real limit, hit while an exec never completes, from looping forever.
 static int createThreadUnlessExecIsInFlight(pthread_t* thread, const pthread_attr_t* attr, void* (*start_routine)(void*), void* arg)
 {
+#if defined(__OHOS__)
+    int rc;
+    for (;;) {
+        threads_creating.fetch_add(1, std::memory_order_seq_cst);
+        if (threads_in_execve.load(std::memory_order_seq_cst) == 0
+            && execve_want.load(std::memory_order_seq_cst) == 0)
+            break;
+        // An exec is in or waiting for its window: yield the line to it.
+        threads_creating.fetch_sub(1, std::memory_order_seq_cst);
+        usleep(200);
+    }
+#endif
     for (int attempt = 0;; attempt++) {
         unsigned generation = execve_generation.load(std::memory_order_seq_cst);
         bool execInFlight = threads_in_execve.load(std::memory_order_seq_cst) > 0;
+#if defined(__OHOS__)
+        rc = __real_pthread_create(thread, attr, start_routine, arg);
+#else
         int rc = __real_pthread_create(thread, attr, start_routine, arg);
-        if (rc != EAGAIN || attempt >= 1000)
+#endif
+        if (rc != EAGAIN || attempt >= 1000) {
+#if defined(__OHOS__)
+            break;
+#else
             return rc;
+#endif
+        }
         if (!execInFlight && threads_in_execve.load(std::memory_order_seq_cst) == 0
             && execve_generation.load(std::memory_order_seq_cst) == generation) {
             // No exec overlapped this attempt: a real limit.
+#if defined(__OHOS__)
+            break;
+#else
             return rc;
+#endif
         }
         usleep(1000);
     }
+#if defined(__OHOS__)
+    threads_creating.fetch_sub(1, std::memory_order_seq_cst);
+    return rc;
+#endif
 }
 
 extern "C" int __wrap_pthread_create(pthread_t* thread, const pthread_attr_t* attr, void* (*start_routine)(void*), void* arg)
@@ -943,16 +1022,16 @@ extern "C" void bun_restore_stdio()
         sigset_t sa;
         int err;
 
-        // We might be a background job that doesn't own the TTY so block SIGTTOU
-        // before making the tcsetattr() call, otherwise that signal suspends us.
-        sigemptyset(&sa);
-        sigaddset(&sa, SIGTTOU);
+    // We might be a background job that doesn't own the TTY so block SIGTTOU
+    // before making the tcsetattr() call, otherwise that signal suspends us.
+    sigemptyset(&sa);
+    sigaddset(&sa, SIGTTOU);
 
-        pthread_sigmask(SIG_BLOCK, &sa, nullptr);
-        do
-            err = tcsetattr(fd, TCSANOW, &termios_to_restore_later[fd]);
-        while (err == -1 && errno == EINTR);
-        pthread_sigmask(SIG_UNBLOCK, &sa, nullptr);
+    pthread_sigmask(SIG_BLOCK, &sa, nullptr);
+    do
+        err = tcsetattr(fd, TCSANOW, &termios_to_restore_later[fd]);
+    while (err == -1 && errno == EINTR);
+    pthread_sigmask(SIG_UNBLOCK, &sa, nullptr);
     }
 #endif
 }
@@ -1057,8 +1136,13 @@ extern "C" void bun_initialize_process()
     // This is less of an issue for macOS due to posix_spawn
     // This is best effort, not all linux kernels support close_range or CLOSE_RANGE_CLOEXEC
     // To avoid breaking --watch, we skip stdin, stdout, stderr and IPC.
+#if !defined(__OHOS__)
     bun_close_range(4, ~0U, CLOSE_RANGE_CLOEXEC);
-
+#endif
+    // Also on OHOS: the wrapped execve/pthread_create (see the
+    // -Wl,--wrap=execve/--wrap=pthread_create flags in flags.ts) only count
+    // execs when the pid matches, so this must be recorded on every Linux
+    // target including OHOS.
     execve_counting_pid = getpid();
 #endif
 
@@ -1459,7 +1543,12 @@ extern "C" void Bun__unregisterSignalsForForwarding()
 #if OS(LINUX) || OS(DARWIN) || OS(FREEBSD)
 #include <paths.h>
 
+#if defined(__OHOS__)
+// OHOS has system binaries in /system/bin (echo, sh, mkdir, etc.).
+extern "C" const char* BUN_DEFAULT_PATH_FOR_SPAWN = "/system/bin:/usr/bin:/bin";
+#else
 extern "C" const char* BUN_DEFAULT_PATH_FOR_SPAWN = _PATH_DEFPATH;
+#endif
 #elif OS(WINDOWS)
 extern "C" const char* BUN_DEFAULT_PATH_FOR_SPAWN = "C:\\Windows\\System32;C:\\Windows;";
 #else

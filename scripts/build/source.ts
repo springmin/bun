@@ -506,8 +506,10 @@ export interface Dependency {
    * Files ending in `.patch` are applied with `git apply`. Other files are
    * OVERLAYS — copied into the source root as-is. Useful for injecting a
    * CMakeLists.txt into a project that lacks one (tinycc).
+   *
+   * Function form allows conditional patches: OHOS adds zstd's qsort_r fix.
    */
-  patches?: string[];
+  patches?: string[] | ((cfg: Config) => string[]);
 
   /**
    * Other deps whose headers this dep's sources include — e.g. a dep that
@@ -829,7 +831,7 @@ export function resolveDep(
 
   // Resolve conditional patches. Same list for the whole configure run —
   // we don't want patches changing between emitFetch and the hash check.
-  const patches = dep.patches ?? [];
+  const patches = dep.patches === undefined ? [] : typeof dep.patches === "function" ? dep.patches(cfg) : dep.patches;
 
   // Sources bun compiles directly (from Provides.sources). Resolved to
   // absolute paths for (a) the ResolvedDep return and (b) declaring as
@@ -1197,7 +1199,15 @@ function emitCargo(n: Ninja, cfg: Config, name: DepName, spec: CargoBuild, input
   // bundled clang resource dir (not the sysroot), so we add that -L too.
   if (cfg.crossTarget !== undefined && spec.rustTarget !== undefined) {
     const envKey = `CARGO_TARGET_${spec.rustTarget.toUpperCase().replace(/-/g, "_")}_LINKER`;
-    env[envKey] = cfg.cc;
+    // OHOS native (host==target==aarch64-unknown-linux-ohos): use the signing
+    // linker wrapper so build-script binaries are signed synchronously after
+    // each link. Unsigned ELFs trip OHOS's "Permission denied" exec guard.
+    const ohosLinker = process.env.OHOS_BUN_SIGNING_LINKER;
+    if (cfg.ohos && ohosLinker !== undefined) {
+      env[envKey] = ohosLinker;
+    } else {
+      env[envKey] = cfg.cc;
+    }
     const linkArgs = [`-Clink-arg=--target=${cfg.crossTarget}`];
     if (cfg.sysroot !== undefined) linkArgs.push(`-Clink-arg=--sysroot=${cfg.sysroot}`);
     if (cfg.androidNdkRuntimeDir !== undefined) {
@@ -1264,7 +1274,7 @@ interface EmitDirectInput {
  * apt.llvm.org clang did not.
  */
 function picFlags(cfg: Config, pic: boolean | undefined): string[] {
-  if (pic || cfg.abi === "android") return cfg.windows ? [] : ["-fPIC"];
+  if (pic || cfg.abi === "android" || cfg.ohos) return cfg.windows ? [] : ["-fPIC"];
   if (cfg.hardened) return [];
   return cfg.unix ? ["-fno-pic", "-fno-pie"] : [];
 }

@@ -6,7 +6,7 @@
 // the install reports success, and a file that cannot be installed has to fail
 // the package (as it does with the hardlink backend) rather than exit bun.
 import { describe, expect, test } from "bun:test";
-import { bunEnv, bunExe, isLinux, isMacOS, isRoot, isWindows, readdirSorted, tempDir } from "harness";
+import { bunEnv, bunExe, isLinux, isMacOS, isOhos, isRoot, isWindows, readdirSorted, tempDir } from "harness";
 import {
   chmodSync,
   closeSync,
@@ -634,7 +634,10 @@ describe("file: folder dependencies with the hoisted linker", () => {
         const first = await bunInstall();
         expect(first.stdout).toContain("1 package installed");
         expect(first.exitCode).toBe(0);
-        expect(statSync(join(installed, "dist", "a.js")).ino).toBe(statSync(join(source, "dist", "a.js")).ino);
+        // OHOS: link(2) is denied, so the copy cannot share the source's inode.
+        if (!isOhos) {
+          expect(statSync(join(installed, "dist", "a.js")).ino).toBe(statSync(join(source, "dist", "a.js")).ino);
+        }
 
         const before = { dir: statSync(installed).ino, ctime: statSync(join(source, "index.js")).ctimeMs };
         const second = await bunInstall();
@@ -644,9 +647,13 @@ describe("file: folder dependencies with the hoisted linker", () => {
         expect({ dir: statSync(installed).ino, ctime: statSync(join(source, "index.js")).ctimeMs }).toEqual(before);
 
         // Written in place: the hard link shows it without an install.
-        writeFileSync(join(source, "index.js"), "module.exports = 'second';");
-        expect(await run(projectDir, "console.log(require('lib'))")).toBe("second");
-        expect((await bunInstall()).stdout).toContain("(no changes)");
+        // OHOS: the copy cannot show an edit before an install runs; the next
+        // install picks the mtime up and copies again.
+        if (!isOhos) {
+          writeFileSync(join(source, "index.js"), "module.exports = 'second';");
+          expect(await run(projectDir, "console.log(require('lib'))")).toBe("second");
+          expect((await bunInstall()).stdout).toContain("(no changes)");
+        }
       });
 
       for (const [change, apply, expected] of [

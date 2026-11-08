@@ -1,0 +1,35 @@
+diff --git a/Source/JavaScriptCore/aot/image/AOTImageLoading.cpp b/Source/JavaScriptCore/aot/image/AOTImageLoading.cpp
+index bb1a23f9219b..a7aadf322382 100644
+--- a/Source/JavaScriptCore/aot/image/AOTImageLoading.cpp
++++ b/Source/JavaScriptCore/aot/image/AOTImageLoading.cpp
+@@ -447,8 +447,17 @@ static const void* mapCodeOfImage(std::span<const uint8_t> bytes, std::optional<
+     size_t size = header.size - header.codeOffset;
+     size_t executableSize = header.executableSize;
+     std::span<const uint8_t> code = bytes.subspan(header.codeOffset, size);
+-    if (file)
+-        return mapCode(file->descriptor, file->offset + header.codeOffset, size, executableSize);
++    if (file) {
++        if (void* mapped = mapCode(file->descriptor, file->offset + header.codeOffset, size, executableSize))
++            return mapped;
++#if OS(LINUX) && !defined(BUN_HARDENED)
++        // OHOS refuses file-backed executable mappings (EPERM) while allowing
++        // anonymous executable memory. `bytes` already holds the image.
++        if (void* copy = copyCodeToAnonymousMemory(code, executableSize))
++            return copy;
++#endif
++        return nullptr;
++    }
+ #if OS(LINUX) || OS(FREEBSD)
+     std::optional<SegmentOfExecutable> segment = findSegmentOfExecutable(code.data());
+     bool isLoadedExecutable = segment && segment->mayBeExecuted;
+@@ -486,6 +495,10 @@ static const void* mapCodeOfImage(std::span<const uint8_t> bytes, std::optional<
+     if (isLoadedExecutable)
+         return code.data();
+ #endif
++#if OS(LINUX) && !defined(BUN_HARDENED)
++    if (void* copy = copyCodeToAnonymousMemory(code, executableSize))
++        return copy;
++#endif
+ #if OS(LINUX)
+     return nullptr;
+ #else

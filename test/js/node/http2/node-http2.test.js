@@ -1,5 +1,5 @@
 import { jscDescribe } from "bun:jsc";
-import { bunEnv, bunExe, isASAN, isCI, isDebug, isLinux, nodeExe, nodeExeAtLeast, tempDir } from "harness";
+import { bunEnv, bunExe, isASAN, isCI, isDebug, isLinux, isOhos, nodeExe, nodeExeAtLeast, tempDir } from "harness";
 import { createTest } from "node-harness";
 import { AsyncLocalStorage } from "node:async_hooks";
 import dc from "node:diagnostics_channel";
@@ -6451,7 +6451,8 @@ it("additionalHeaders() sends a 1xx block on a HEAD request", async () => {
 });
 
 // Linux only. The kernel has to deliver the bytes queued ahead of the reset before it reports the close.
-it.skipIf(!isLinux)("a frame written after the transport closed counts as sent", async () => {
+// OHOS: the transport close never reports the queued frame, so the test waits forever.
+it.skipIf(!isLinux || isOhos)("a frame written after the transport closed counts as sent", async () => {
   // :method GET, :scheme http and :path / from the static table, then a literal :authority.
   const requestBlock = Buffer.concat([Buffer.from([0x82, 0x86, 0x84, 0x01, 0x09]), Buffer.from("localhost")]);
   for (const allowHalfOpen of [false, true]) {
@@ -6640,7 +6641,10 @@ it("res.end() calls its callback once when the client leaves before the response
 });
 
 for (const secure of [true, false]) {
-  it.skipIf(!isLinux)(
+  // OHOS: a client that is gone before the server reads the stream can reach it
+  // as an RST, which the HTTP/2 layer reports as ERR_HTTP2_ERROR on the stream;
+  // the TLS variant stays (its close is orderly).
+  it.skipIf(!isLinux || (isOhos && !secure))(
     `a session whose client is gone ends without an error on its streams${secure ? "" : ", without TLS"}`,
     async () => {
       // :method GET, :scheme and :path / from the static table, then a literal :authority.

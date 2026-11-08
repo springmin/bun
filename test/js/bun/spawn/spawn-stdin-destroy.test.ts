@@ -12,6 +12,12 @@ test("stdin destroy after exit crash", async () => {
     });
 
     // The crash was in the first read of `child.stdin` after the exit.
+    // The fixture throws immediately, so the child has always exited by the time
+    // stdin is touched. Wait for the runtime to report it instead of racing a
+    // fixed sleep: process startup alone is ~70ms on OHOS, so an 80ms sleep lands
+    // inside the exit window and the flush below can hit the pipe the kernel just
+    // closed (EPIPE) — a different failure than the stdin-destroy crash this
+    // guards against.
     await child.exited;
     await child.stdin.write("dylan\n");
     await child.stdin.write("999\n");

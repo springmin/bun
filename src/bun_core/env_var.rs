@@ -146,6 +146,13 @@ new!(pub BUN_INSTALL_STREAMING_DRAIN_THRESHOLD: unsigned, "BUN_INSTALL_STREAMING
 // How long `bun install` retries a rename Windows refuses while a scanner holds a file open.
 new!(pub BUN_INSTALL_WINDOWS_RENAME_RETRY_MS: unsigned, "BUN_INSTALL_WINDOWS_RENAME_RETRY_MS", { default: 5_000 });
 new!(pub BUN_NEEDS_PROC_SELF_WORKAROUND: boolean, "BUN_NEEDS_PROC_SELF_WORKAROUND", { default: false });
+// Set by ohos_node_userinfo.rs on a spawned node child's env, not read by
+// bun itself -- registered for discoverability/grep, not consumed here.
+// The preload it injects (ohos_node_userinfo.rs's PRELOAD_JS) reads it as
+// the getpwuid_r-resolved username for os.userInfo(), since $USER is empty
+// on a `bun build --compile` output shipped to a device with no shell
+// profile.
+new!(pub BUN_OHOS_USERNAME: string, "BUN_OHOS_USERNAME", {});
 new!(pub BUN_OPTIONS: string, "BUN_OPTIONS", {});
 new!(pub BUN_POSTGRES_SOCKET_MONITOR: string, "BUN_POSTGRES_SOCKET_MONITOR", {});
 new!(pub BUN_POSTGRES_SOCKET_MONITOR_READER: string, "BUN_POSTGRES_SOCKET_MONITOR_READER", {});

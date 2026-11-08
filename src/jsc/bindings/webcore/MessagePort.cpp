@@ -410,6 +410,7 @@ void MessagePort::contextDestroyed()
     // close() can drop the last reference if no stop phase ran first, e.g. for a collected ShadowRealm.
     Ref protectedThis { *this };
     close();
+
     ActiveDOMObject::contextDestroyed();
 }
 

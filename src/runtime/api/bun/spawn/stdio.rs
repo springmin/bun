@@ -118,6 +118,13 @@ impl Stdio {
 
     #[cfg(any(target_os = "linux", target_os = "android"))]
     pub(crate) fn can_use_memfd(&self) -> bool {
+        // OHOS: memfd writes not visible to fstat (see use_memfd).
+        #[cfg(target_env = "ohos")]
+        {
+            return false;
+        }
+
+        #[cfg(not(target_env = "ohos"))]
         match self {
             Self::Blob(blob) => !blob.needs_to_read_file(),
             Self::Memfd(_) => true,
@@ -129,61 +136,68 @@ impl Stdio {
 
     #[cfg(any(target_os = "linux", target_os = "android"))]
     pub(crate) fn use_memfd(&mut self, index: u32) -> bool {
-        use crate::api::bun_process::spawn_sys;
-        if !spawn_sys::can_use_memfd() {
-            return false;
-        }
-        let label: &core::ffi::CStr = match index {
-            0 => c"spawn_stdio_stdin",
-            1 => c"spawn_stdio_stdout",
-            2 => c"spawn_stdio_stderr",
-            _ => c"spawn_stdio_memory_file",
-        };
+        // OHOS: memfd writes not visible to fstat after child exits
+        // (verified 2026-06-11: dup2(memfd,1/2) → child writes → fstat size=0).
+        // Falls through to socketpair there via the can_use_memfd() check
+        // below; the body stays compiled on OHOS so `Stdio::Memfd` and
+        // `byte_slice` stay reachable.
+        {
+            use crate::api::bun_process::spawn_sys;
+            if !spawn_sys::can_use_memfd() {
+                return false;
+            }
+            let label: &core::ffi::CStr = match index {
+                0 => c"spawn_stdio_stdin",
+                1 => c"spawn_stdio_stdout",
+                2 => c"spawn_stdio_stderr",
+                _ => c"spawn_stdio_memory_file",
+            };
 
-        let fd = match spawn_sys::memfd_create(label, spawn_sys::MemfdFlag::CrossProcess) {
-            Ok(fd) => fd,
-            Err(_) => return false,
-        };
+            let fd = match spawn_sys::memfd_create(label, spawn_sys::MemfdFlag::CrossProcess) {
+                Ok(fd) => fd,
+                Err(_) => return false,
+            };
 
-        let mut remain = self.byte_slice();
+            let mut remain = self.byte_slice();
 
-        if !remain.is_empty() {
-            // Hint at the size of the file
-            let _ = sys::ftruncate(fd, i64::try_from(remain.len()).expect("int cast"));
-        }
+            if !remain.is_empty() {
+                // Hint at the size of the file
+                let _ = sys::ftruncate(fd, i64::try_from(remain.len()).expect("int cast"));
+            }
 
-        // Dump all the bytes in there
-        let mut written: i64 = 0;
-        while !remain.is_empty() {
-            match sys::pwrite(fd, remain, written) {
-                Err(err) => {
-                    if err.get_errno() == sys::E::EAGAIN {
-                        continue;
-                    }
+            // Dump all the bytes in there
+            let mut written: i64 = 0;
+            while !remain.is_empty() {
+                match sys::pwrite(fd, remain, written) {
+                    Err(err) => {
+                        if err.get_errno() == sys::E::EAGAIN {
+                            continue;
+                        }
 
-                    bun_core::debug_warn!(
-                        "Failed to write to memfd: {}",
-                        bstr::BStr::new(err.name()),
-                    );
-                    fd.close();
-                    return false;
-                }
-                Ok(result) => {
-                    if result == 0 {
-                        bun_core::debug_warn!("Failed to write to memfd: EOF");
+                        bun_core::debug_warn!(
+                            "Failed to write to memfd: {}",
+                            bstr::BStr::new(err.name()),
+                        );
                         fd.close();
                         return false;
                     }
-                    written += i64::try_from(result).expect("int cast");
-                    remain = &remain[result..];
+                    Ok(result) => {
+                        if result == 0 {
+                            bun_core::debug_warn!("Failed to write to memfd: EOF");
+                            fd.close();
+                            return false;
+                        }
+                        written += i64::try_from(result).expect("int cast");
+                        remain = &remain[result..];
+                    }
                 }
             }
-        }
 
-        // Assigning to `*self` drops the previous variant via `Drop`
-        // (and closes a prior `.memfd`).
-        *self = Stdio::Memfd(fd);
-        true
+            // Assigning to `*self` drops the previous variant via `Drop`
+            // (and closes a prior `.memfd`).
+            *self = Stdio::Memfd(fd);
+            true
+        }
     }
 
     pub(crate) fn to_sync(&mut self, i: u32) {

@@ -3,6 +3,15 @@
 
 #undef HWY_TARGET_INCLUDE
 #define HWY_TARGET_INCLUDE "highway_json.cpp"
+// BitsFromMask is only defined for fixed-size SVE (SVE2_128/SVE_256) and
+// NEON, not for scalable SVE/SVE2. Disable all SVE on ARM64 and use NEON
+// instead. Must not be gated on __OHOS__ — the CI host build (aarch64-linux-gnu
+// on Ampere SVE) hits the same missing symbol.
+#if defined(__aarch64__)
+#ifndef HWY_DISABLED_TARGETS
+#define HWY_DISABLED_TARGETS (HWY_ALL_SVE)
+#endif
+#endif
 #include <hwy/foreach_target.h>
 #include <hwy/highway.h>
 #include "highway_dispatch.h"

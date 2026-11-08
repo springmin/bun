@@ -1,6 +1,6 @@
 import { spawn } from "bun";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, setDefaultTimeout } from "bun:test";
-import { copyFile, mkdir, writeFile } from "fs/promises";
+import { copyFile, mkdir, rm, writeFile } from "fs/promises";
 import {
   bunEnv,
   bunExe,
@@ -8,6 +8,7 @@ import {
   githubTarball,
   isDebug,
   isLinux,
+  isOHOS,
   isWindows,
   readdirSorted,
   tempDir,
@@ -30,6 +31,7 @@ import {
   utimesSync,
   writeFileSync,
 } from "node:fs";
+import { tmpdir } from "os";
 import { delimiter, dirname, join, resolve } from "path";
 import { dummyAfterAll, dummyBeforeAll, dummyBeforeEach, dummyRegistry, getPort, setHandler } from "./dummy.registry";
 
@@ -44,16 +46,17 @@ function setup() {
   const install_cache_dir = tmpdirSync();
   const current_tmpdir = tmpdirSync();
   const x_dir = tmpdirSync();
-  return {
-    x_dir,
-    env: {
-      ...bunEnv,
-      TEMP: current_tmpdir,
-      BUN_TMPDIR: current_tmpdir,
-      TMPDIR: current_tmpdir,
-      BUN_INSTALL_CACHE_DIR: install_cache_dir,
-    } as Record<string, string>,
-  };
+  const env = {
+    ...bunEnv,
+    TEMP: current_tmpdir,
+    BUN_TMPDIR: current_tmpdir,
+    TMPDIR: current_tmpdir,
+    BUN_INSTALL_CACHE_DIR: install_cache_dir,
+  } as Record<string, string>;
+  // Bun only sets npm_config_user_agent when it is not already present, so a
+  // value inherited from the caller would leak into the "set to bun" assertion.
+  delete env.npm_config_user_agent;
+  return { x_dir, env };
 }
 
 // Drop every PATH entry that already provides `name`, so `bunx <name>` cannot
@@ -65,6 +68,19 @@ function pathWithout(name: string, PATH: string | undefined): string {
     .filter(dir => dir && !Bun.which(name, { PATH: dir }))
     .join(delimiter);
 }
+
+beforeAll(async () => {
+  // Clean stale bunx cache dirs from previous runs once up front instead of before every test.
+  // OHOS has no readable /tmp; the caches live under the OS temp dir there.
+  const tmp = isWindows || isOHOS ? tmpdir() : "/tmp";
+  const waiting: Promise<void>[] = [];
+  readdirSync(tmp).forEach(file => {
+    if (file.startsWith("bunx-") || file.startsWith("bun-x.test")) {
+      waiting.push(rm(join(tmp, file), { recursive: true, force: true }));
+    }
+  });
+  await Promise.all(waiting);
+});
 
 // Cases that need bunx to install something get a per-test in-process registry
 // serving throwaway packages: what they assert is bunx's own behavior (name ->
@@ -769,7 +785,10 @@ describe("bunx --no-install", () => {
       2. http-server checks for non-alphanumeric edge cases. Plus it's small
       3. eslint is alphanumeric and extremely common
    */
-  it.concurrent.each(["typescript", "http-server", "eslint"])(
+  // OHOS: `typescript` (v7) pulls the `bun` npm package, whose postinstall
+  // downloads a platform binary over the network, which OHOS CI cannot reach;
+  // the other two have no such dependency.
+  it.concurrent.each(isOHOS ? ["http-server", "eslint"] : ["typescript", "http-server", "eslint"])(
     "`bunx --no-install %s` should find cached packages",
     async pkg => {
       const bin = pkg === "typescript" ? "tsc" : pkg;

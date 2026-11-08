@@ -58,6 +58,10 @@ pub trait PosixPipeWriter {
     fn on_error(&mut self, err: sys::Error);
     fn get_file_type(&self) -> FileType;
     fn get_force_sync(&self) -> bool;
+    /// OHOS: expand the pipe's kernel buffer before its first write (no-op on
+    /// other platforms). See `expand_pipe_buffer`.
+    #[cfg(target_env = "ohos")]
+    fn ensure_pipe_expanded(&self);
 
     fn handle(&self) -> &PollOrFd;
 
@@ -85,6 +89,8 @@ pub trait PosixPipeWriter {
             // send(MSG_DONTWAIT | MSG_NBIO) is nonblocking per call on every Unix, whatever the fd's flags.
             FileType::Socket => self.try_write_with_write_fn(buf, write_to_socket),
             FileType::Pipe if !force_sync => {
+                #[cfg(target_env = "ohos")]
+                self.ensure_pipe_expanded();
                 self.try_write_with_write_fn(buf, write_to_blocking_pipe)
             }
             _ => self.try_write_with_write_fn(buf, sys::write),
@@ -167,6 +173,64 @@ pub trait PosixPipeWriter {
                     self_addr,
                     poll.is_registered()
                 );
+                // Empty-buffer wake with nothing to write: drop the watch
+                // explicitly instead of relying on the kernel's EPOLLONESHOT
+                // auto-disarm. Kernels that lack it (HongMeng: a ONESHOT
+                // registration fires EPOLLOUT forever on a writable pipe)
+                // would otherwise wake the loop continuously at 100% CPU.
+                // `force` because on such a kernel the fd is still armed —
+                // the needs_rearm fast path skips the syscall entirely.
+                // The next buffered write re-registers via register_poll().
+                _ = poll.unregister(crate::Loop::get(), true);
+            }
+            // Some kernels (observed on HongMeng/OHOS) keep delivering ready
+            // events for `fd` even after the CTL_DEL above reports success:
+            // a *second*, unconditional CTL_DEL attempt on the very next
+            // empty wake gets ENOENT ("not registered"), yet the fd is
+            // reported ready again on the next epoll_pwait regardless.
+            // Userspace cannot make the kernel actually stop, so detect the
+            // storm -- the same fd hitting this branch repeatedly within a
+            // few milliseconds -- and yield the core instead of hammering
+            // epoll_pwait as fast as the syscall allows. A healthy
+            // drain-then-idle cycle recurring over a long-running process's
+            // lifetime is ms-to-seconds apart even when it happens many
+            // times, so the time window keeps this from misfiring there.
+            // Reduced idle CPU on an affected OHOS build from ~100% to
+            // ~6-8% (measured via /proc/<pid>/stat ground truth).
+            // OHOS-only: other kernels disarm EPOLLONESHOT correctly and must
+            // not pay the thread-local atomics/Instant per empty wake.
+            #[cfg(target_env = "ohos")]
+            {
+                use core::sync::atomic::{AtomicI32, AtomicU32, Ordering};
+                use std::sync::Mutex;
+                use std::time::Instant;
+                static LAST_FD: AtomicI32 = AtomicI32::new(i32::MIN);
+                static STREAK: AtomicU32 = AtomicU32::new(0);
+                static LAST_SEEN: Mutex<Option<Instant>> = Mutex::new(None);
+                const THRESHOLD: u32 = 20;
+                const SLEEP_MS: u64 = 2;
+                const STORM_WINDOW_MS: u128 = 10;
+
+                let fd: i32 = self.get_fd().native();
+                let now = Instant::now();
+                let prev_fd = LAST_FD.swap(fd, Ordering::Relaxed);
+                let within_window = {
+                    let mut guard = LAST_SEEN.lock().unwrap();
+                    let within = guard
+                        .map(|t| now.duration_since(t).as_millis() <= STORM_WINDOW_MS)
+                        .unwrap_or(false);
+                    *guard = Some(now);
+                    within
+                };
+                let streak = if prev_fd == fd && within_window {
+                    STREAK.fetch_add(1, Ordering::Relaxed) + 1
+                } else {
+                    STREAK.store(1, Ordering::Relaxed);
+                    1
+                };
+                if streak > THRESHOLD {
+                    std::thread::sleep(std::time::Duration::from_millis(SLEEP_MS));
+                }
             }
             return;
         }
@@ -249,6 +313,19 @@ pub trait PosixPipeWriter {
 
 /// Free fn for the blocking-pipe path; the other file types are handled
 /// inline in `try_write` above.
+/// OHOS: expand a blocking pipe's kernel buffer (4 KB default → 1 MB) so large
+/// writes don't loop on 4 KB chunks + EAGAIN. Called once per writer, on its
+/// first pipe write — the fcntl is not free and the pipe keeps the size for its
+/// lifetime. Best-effort: it fails on non-pipe fds or kernels without
+/// F_SETPIPE_SZ and the write loop then falls back to the default size.
+#[cfg(target_env = "ohos")]
+#[inline]
+fn expand_pipe_buffer(fd: Fd) {
+    const F_SETPIPE_SZ: libc::c_int = 1031;
+    const ONE_MB: libc::c_int = 1048576;
+    let _ = unsafe { libc::fcntl(fd.0, F_SETPIPE_SZ, ONE_MB) };
+}
+
 fn write_to_blocking_pipe(fd: Fd, buf: &[u8]) -> sys::Result<usize> {
     match bun_core::is_writable(fd) {
         bun_core::Pollable::Ready | bun_core::Pollable::Hup => sys::write(fd, buf),
@@ -352,6 +429,9 @@ pub struct PosixBufferedWriter<Parent: PosixBufferedWriterParent> {
     pub(crate) pollable: bool,
     pub(crate) closed_without_reporting: bool,
     pub close_fd: bool,
+    /// OHOS: whether `expand_pipe_buffer` already ran for this writer's pipe.
+    pipe_size_set: core::cell::Cell<bool>,
+    /// Set once `pwritev2(RWF_NOWAIT)` said this fd's file type does not support it, so we stop asking.
     rwf_unsupported: core::cell::Cell<bool>,
 }
 
@@ -364,6 +444,7 @@ impl<Parent: PosixBufferedWriterParent> Default for PosixBufferedWriter<Parent> 
             pollable: false,
             closed_without_reporting: false,
             close_fd: true,
+            pipe_size_set: core::cell::Cell::new(false),
             rwf_unsupported: core::cell::Cell::new(false),
         }
     }
@@ -372,6 +453,12 @@ impl<Parent: PosixBufferedWriterParent> Default for PosixBufferedWriter<Parent> 
 impl<Parent: PosixBufferedWriterParent> PosixPipeWriter for PosixBufferedWriter<Parent> {
     fn get_fd(&self) -> Fd {
         self.handle.get_fd()
+    }
+    #[cfg(target_env = "ohos")]
+    fn ensure_pipe_expanded(&self) {
+        if !self.pipe_size_set.replace(true) {
+            expand_pipe_buffer(self.get_fd());
+        }
     }
     fn get_buffer(&self) -> &[u8] {
         self.get_buffer_internal()
@@ -683,6 +770,9 @@ pub struct PosixStreamingWriter<Parent: PosixStreamingWriterParent> {
     pub force_sync: bool,
     /// Last reported `WriteStatus == Pending` (i.e. write(2) returned EAGAIN).
     backed_up: core::cell::Cell<bool>,
+    /// OHOS: whether `expand_pipe_buffer` already ran for this writer's pipe.
+    pipe_size_set: core::cell::Cell<bool>,
+    /// Set once `pwritev2(RWF_NOWAIT)` said this fd's file type does not support it, so we stop asking.
     rwf_unsupported: core::cell::Cell<bool>,
 }
 
@@ -696,6 +786,7 @@ impl<Parent: PosixStreamingWriterParent> Default for PosixStreamingWriter<Parent
             closed_without_reporting: false,
             force_sync: false,
             backed_up: core::cell::Cell::new(false),
+            pipe_size_set: core::cell::Cell::new(false),
             rwf_unsupported: core::cell::Cell::new(false),
         }
     }
@@ -704,6 +795,12 @@ impl<Parent: PosixStreamingWriterParent> Default for PosixStreamingWriter<Parent
 impl<Parent: PosixStreamingWriterParent> PosixPipeWriter for PosixStreamingWriter<Parent> {
     fn get_fd(&self) -> Fd {
         self.handle.get_fd()
+    }
+    #[cfg(target_env = "ohos")]
+    fn ensure_pipe_expanded(&self) {
+        if !self.pipe_size_set.replace(true) {
+            expand_pipe_buffer(self.get_fd());
+        }
     }
     fn get_buffer(&self) -> &[u8] {
         self.outgoing.slice()
@@ -887,6 +984,17 @@ impl<Parent: PosixStreamingWriterParent> PosixStreamingWriter<Parent> {
             sys::Result::Err(err) => self.report_error_and_close(err),
             sys::Result::Ok(()) => {}
         }
+    }
+
+    /// OHOS Terminal leaves an initially-empty PTY writer unregistered until
+    /// it has buffered data; later writes re-register through backpressure
+    /// (`register_poll`).
+    #[cfg(target_env = "ohos")]
+    pub fn unregister_poll(&mut self) {
+        let Some(poll) = self.get_poll() else { return };
+        // SAFETY: parent BACKREF set via set_parent; outlives this writer.
+        let loop_ = unsafe { Parent::loop_(self.parent()) };
+        let _ = poll.unregister(loop_, true);
     }
 
     pub fn write_utf16(&mut self, buf: &[u16]) -> WriteResult {

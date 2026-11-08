@@ -7,7 +7,7 @@ use bun_core::{ZStr, strings};
 use bun_paths::resolve_path::{dirname, join_abs_string_buf_z_checked, join_z_buf};
 use bun_paths::{AbsPath, AutoAbsPath, MAX_PATH_BYTES, PathBuffer, SEP, platform};
 use bun_semver::String;
-use bun_sys::{Dir, Fd};
+use bun_sys::{self as Syscall, Dir, Fd};
 
 use crate::bin_real as bin;
 use crate::bin_real::Bin;
@@ -2363,6 +2363,14 @@ impl<'a> PackageInstaller<'a> {
                 }
             };
 
+            #[cfg(target_env = "ohos")]
+            if let package_install::InstallResult::Success = &install_result {
+                let mut fd_path_buf = bun_paths::path_buffer_pool::get();
+                if let Ok(pkg_path) = Syscall::get_fd_path(destination_fd, &mut fd_path_buf) {
+                    ohos_sign_native_binaries(pkg_path);
+                }
+            }
+
             // A folder that a published package ships inside itself is copied from that package's
             // directory, not from the cwd, so its symlinks are not recreated.
             if resolution.tag == resolution::Tag::Folder
@@ -2819,5 +2827,41 @@ impl<'a> PackageInstaller<'a> {
             needs_verify,
             is_pending_package_install,
         );
+    }
+}
+
+// ───────────────────────────── OHOS install-time signing ─────────────────────────────
+
+/// On OHOS, scan a package directory for native binaries (.so, .node) and
+/// sign any that are not already signed. Called after a package is installed
+/// into node_modules, before lifecycle scripts run.
+#[cfg(target_env = "ohos")]
+pub(crate) fn ohos_sign_native_binaries(pkg_dir: &[u8]) {
+    let dir = match Dir::open(pkg_dir) {
+        Ok(d) => d,
+        Err(_) => return,
+    };
+    let w = match Syscall::walker_skippable::walk(dir.fd(), &[], &[]) {
+        Ok(w) => w,
+        Err(_) => return,
+    };
+    let mut w = w;
+    while let Ok(Some(entry)) = w.next() {
+        if entry.kind != Syscall::EntryKind::File {
+            continue;
+        }
+        let name = entry.basename.as_bytes();
+        // Sign any ELF file — not just .so/.node. Postinstall scripts
+        // download/compile executables (esbuild, node-gyp output, .bin links)
+        // that also need signing. `ensure_signed_inplace` checks the ELF
+        // magic with a 4-byte read and skips files this process already
+        // signed unchanged; non-ELF files are rejected without being read.
+        let mut full = Vec::with_capacity(pkg_dir.len() + 1 + name.len());
+        full.extend_from_slice(pkg_dir);
+        full.push(b'/');
+        full.extend_from_slice(name);
+        use std::os::unix::ffi::OsStrExt;
+        let p = std::path::Path::new(std::ffi::OsStr::from_bytes(&full));
+        let _ = bun_sys::ensure_signed_inplace(p);
     }
 }

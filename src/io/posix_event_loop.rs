@@ -534,9 +534,20 @@ impl FilePoll {
         &mut self,
         loop_: &Loop,
         flag: Flags,
-        one_shot: OneShotFlag,
+        mut one_shot: OneShotFlag,
         fd: Fd,
     ) -> sys::Result<()> {
+        // OHOS kernel (HongMeng) never disarms EPOLLONESHOT interests after
+        // they fire, and one-shot state tracking on fds sharing a file
+        // description (Terminal dups the pty master into separate read/write
+        // fds) loses the co-registered read interest's events entirely.
+        // Scope the fix to pty fds only: pipes/sockets must keep one-shot
+        // (level-triggered registration there re-fires forever and hangs
+        // parallel multi-run output capture). isatty() distinguishes the two.
+        #[cfg(target_env = "ohos")]
+        if one_shot == OneShotFlag::OneShot && unsafe { libc::isatty(fd.native()) } == 1 {
+            one_shot = OneShotFlag::None;
+        }
         #[cfg(any(
             target_os = "linux",
             target_os = "android",
@@ -630,11 +641,27 @@ impl FilePoll {
             // `Pollable`. `deinit` removes the entry, or leaves one that `EPOLLONESHOT` disarmed
             // when it fired, which is not reported again. `Store::put` then holds the slot back,
             // marked `IgnoreUpdates`, until a tick returns, when no event fetched for it is left.
-            let ctl = unsafe { linux::epoll_ctl(watcher_fd, op, fd.native(), Some(&event)) };
+            #[cfg_attr(not(target_env = "ohos"), allow(unused_mut))]
+            let mut ctl = unsafe { linux::epoll_ctl(watcher_fd, op, fd.native(), Some(&event)) };
             self.flags.insert(Flags::WasEverRegistered);
+            #[cfg(target_env = "ohos")]
+            if op == EPOLL::CTL_ADD && sys::get_errno(ctl) == sys::E::EEXIST {
+                // OHOS: a closed fd's kernel registration can outlive the close
+                // (the DEL lands on whichever fd reused the number), so a fresh
+                // fd that reuses it fails ADD with EEXIST and then never
+                // receives events. Re-issue as MOD so the kernel entry is
+                // repointed at this poll; MOD is safe when the entry belongs to
+                // this same poll too, and unlike DEL+ADD it cannot drop a live
+                // registration.
+                // SAFETY: the same epoll instance and fd as the call above; MOD only repoints the entry.
+                ctl = unsafe { linux::epoll_ctl(watcher_fd, EPOLL::CTL_MOD, fd.native(), Some(&event)) };
+            }
             if let Some(errno) = errno_sys(ctl, sys::Tag::epoll_ctl) {
                 self.deactivate(loop_);
                 return errno;
+            }
+            if flag == Flags::Readable && self.flags.contains(Flags::EpollRearmWatch) {
+                epoll_rearm_watchdog::track(loop_, watcher_fd, fd.native(), flags, event.u64);
             }
         }
         #[cfg(target_os = "macos")]
@@ -882,6 +909,13 @@ impl FilePoll {
         force_unregister: bool,
     ) -> sys::Result<()> {
         debug_assert!(fd.native() >= 0 && fd != INVALID_FD);
+
+        // Unconditional and cheap when untracked. Covers every unregister
+        // path (including the `needs_rearm` skip below, which returns before
+        // reaching the real CTL_DEL) so a closed/reused fd number is never
+        // left poking a stale watchdog entry.
+        #[cfg(any(target_os = "linux", target_os = "android"))]
+        epoll_rearm_watchdog::untrack(fd.native());
 
         let registered = self.flags.contains(Flags::PollReadable)
             || self.flags.contains(Flags::PollWritable)
@@ -1189,9 +1223,317 @@ pub enum Flags {
 
     Socket,
     Tty,
+
+    /// Opt-in only (set via `FilePollRef::set_flag` before the first
+    /// registration; currently only `Bun.Terminal`'s PTY-master reader).
+    /// OHOS's epoll implementation has a confirmed real-device defect where
+    /// `epoll_ctl` reports success but the kernel silently stops delivering
+    /// events for the fd (see OHOS_TEST_STATUS.md, 2026-08-20). This flag
+    /// enrolls the fd in `epoll_rearm_watchdog`'s backoff-poked redundant
+    /// `CTL_MOD` recovery. Narrowly scoped (not default-on for every
+    /// Readable registration in the runtime) since the defect is only
+    /// confirmed for this fd class and the watchdog carries a background
+    /// thread + syscall cost that unrelated I/O shouldn't pay for.
+    EpollRearmWatch,
 }
 
 pub type FlagsSet = enumset::EnumSet<Flags>;
+
+/// Userspace recovery for a confirmed real-device OHOS kernel epoll defect:
+/// `epoll_ctl` reports success but the kernel silently stops delivering
+/// events for the fd (root-caused down to the raw syscall level, see
+/// OHOS_TEST_STATUS.md 2026-08-20 -- `register_with_fd_impl`'s own ADD/MOD
+/// calls and their return codes were verified byte-for-byte correct on a
+/// real device that never went on to fire `on_poll`). A real-device A/B
+/// (3 paired trials on a prototype, then 5 independent trials on this
+/// implementation) confirmed a redundant `epoll_ctl(CTL_MOD)` from a second
+/// thread reliably unsticks it.
+///
+/// Only fds whose `FilePoll` opted in via `Flags::EpollRearmWatch` are
+/// tracked (currently just `Bun.Terminal`'s PTY-master reader -- see
+/// `PosixFlags::EPOLL_REARM_WATCH` in `PipeReader.rs`): this is a targeted
+/// fix for a fd class with confirmed exposure, not a blanket tax on every
+/// Readable registration in the runtime.
+///
+/// The backoff follows the deleted LD_PRELOAD shim's `epoll_pipe`
+/// interceptor for the same defect family: any real registration activity (a
+/// fresh ADD or a natural WouldBlock-driven MOD) resets an fd's poke interval to
+/// `BASE_POKE_INTERVAL`; each watchdog-driven poke with no intervening
+/// natural activity doubles it, capped at `MAX_POKE_INTERVAL`. A healthy,
+/// actively-read fd re-registers constantly on its own and never accrues a
+/// poke; only a genuinely silent (stuck, or legitimately idle) fd gets
+/// touched, and the redundant `CTL_MOD` is a harmless no-op either way.
+#[cfg(any(target_os = "linux", target_os = "android"))]
+mod epoll_rearm_watchdog {
+    use super::{FilePoll, Flags, FlagsSet, Loop};
+    use core::ffi::c_void;
+    use std::collections::HashMap;
+    use std::sync::{Mutex, Once, OnceLock};
+    use std::time::{Duration, Instant};
+
+    const BASE_POKE_INTERVAL: Duration = Duration::from_millis(250);
+    const MAX_POKE_INTERVAL: Duration = Duration::from_millis(1000);
+    const TICK: Duration = Duration::from_millis(100);
+
+    struct Entry {
+        watcher_fd: i32,
+        events: u32,
+        // The FilePoll pointer the real registration stored as the kernel's
+        // event userdata. CTL_MOD replaces that data wholesale, so this must
+        // be round-tripped byte-for-byte -- a wrong/stale value would hand
+        // the dispatcher a bad pointer the moment the kernel next delivers.
+        userdata: u64,
+        last_activity: Instant,
+        interval: Duration,
+    }
+
+    fn table() -> &'static Mutex<HashMap<i32, Entry>> {
+        static TABLE: OnceLock<Mutex<HashMap<i32, Entry>>> = OnceLock::new();
+        TABLE.get_or_init(|| Mutex::new(HashMap::new()))
+    }
+
+    fn disabled() -> bool {
+        static DISABLED: OnceLock<bool> = OnceLock::new();
+        *DISABLED.get_or_init(|| std::env::var_os("BUN_DISABLE_EPOLL_REARM_WATCHDOG").is_some())
+    }
+
+    /// Latch flipped when the process begins exiting. The watchdog checks it
+    /// every tick and again immediately before waking the loop; the dispatch
+    /// thunk checks it before touching any FilePoll. Neither the uWS loop nor
+    /// a FilePoll owner is guaranteed alive past that point (a wakeup on a
+    /// freed loop is write-after-free).
+    static SHUTDOWN: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+
+    #[inline]
+    fn is_shutdown() -> bool {
+        SHUTDOWN.load(core::sync::atomic::Ordering::Acquire) || bun_core::is_exiting()
+    }
+
+    /// Registered via `bun_core::add_exit_callback` at first track. Runs on
+    /// the main thread inside the exit path while the watchdog may be
+    /// mid-tick, so it only publishes state; the watchdog and dispatch thunks
+    /// observe it and stand down.
+    extern "C" fn on_process_exit() {
+        SHUTDOWN.store(true, core::sync::atomic::Ordering::Release);
+        // After this, `js_loop_ptr()` reads 0 and no wakeup is issued again,
+        // even if this exit path frees the loop (worker teardown).
+        JS_LOOP.store(0, core::sync::atomic::Ordering::Release);
+        pending_dispatch()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clear();
+        table().lock().unwrap_or_else(|e| e.into_inner()).clear();
+    }
+
+    static JS_LOOP: core::sync::atomic::AtomicUsize = core::sync::atomic::AtomicUsize::new(0);
+
+    #[inline]
+    fn js_loop_ptr() -> usize {
+        JS_LOOP.load(core::sync::atomic::Ordering::Acquire)
+    }
+
+    static PENDING_DISPATCH: OnceLock<Mutex<Vec<u64>>> = OnceLock::new();
+
+    fn pending_dispatch() -> &'static Mutex<Vec<u64>> {
+        PENDING_DISPATCH.get_or_init(|| Mutex::new(Vec::new()))
+    }
+
+    /// Post-handler map key: the address of this static is the identity, so
+    /// the value behind it is never read.
+    static POST_HANDLER_KEY: u8 = 0;
+
+    extern "C" fn dispatch_pending(ctx: *mut c_void, _loop: *mut Loop) {
+        let _ = ctx;
+        // Shutdown-window dispatch: a wakeup already in flight can land one
+        // last post phase during teardown. Owners may be mid-teardown; drain
+        // and bail instead of running update_flags + on_update.
+        if is_shutdown() {
+            pending_dispatch()
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .clear();
+            return;
+        }
+        let items: Vec<u64> = {
+            let mut pending = pending_dispatch().lock().unwrap_or_else(|e| e.into_inner());
+            core::mem::take(&mut *pending)
+        };
+        if items.is_empty() {
+            return;
+        }
+        for userdata in items {
+            // The tracked table is the ownership registry: if the FilePoll was
+            // deregistered, `untrack` removed its entry before this drain ran;
+            // if a new poll re-registered the same fd, the userdata differs.
+            let still_tracked = table()
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .values()
+                .any(|e| e.userdata == userdata);
+            if !still_tracked {
+                continue;
+            }
+            let poll = userdata as *mut FilePoll;
+            // SAFETY: `userdata` is the `Pollable` pointer registered in
+            // `register_with_fd_impl` for a still-tracked entry, and this runs
+            // on the loop thread while that entry's unregister path cannot run
+            // concurrently.
+            let poll: &mut FilePoll = unsafe { &mut *poll };
+            let mut flags = FlagsSet::empty();
+            flags.insert(Flags::Readable);
+            poll.update_flags(flags);
+            poll.on_update(0);
+        }
+    }
+
+    unsafe extern "C" {
+        fn us_wakeup_loop(loop_: *mut Loop);
+        fn uws_loop_add_post_handler(
+            loop_: *mut Loop,
+            key: *mut c_void,
+            handler: unsafe extern "C" fn(*mut c_void, *mut Loop),
+            ctx: *mut c_void,
+        );
+    }
+
+    /// Called from `register_with_fd_impl` after a successful ADD/MOD for a
+    /// `Flags::EpollRearmWatch`-tagged fd. Any call resets the fd to the base
+    /// interval -- this fires on every natural WouldBlock-driven MOD for an
+    /// actively-read fd, so a healthy fd's interval never has a chance to grow.
+    pub(crate) fn track(loop_: &Loop, watcher_fd: i32, fd: i32, events: u32, userdata: u64) {
+        if disabled() {
+            return;
+        }
+        {
+            let mut t = table().lock().unwrap_or_else(|e| e.into_inner());
+            t.insert(
+                fd,
+                Entry {
+                    watcher_fd,
+                    events,
+                    userdata,
+                    last_activity: Instant::now(),
+                    interval: BASE_POKE_INTERVAL,
+                },
+            );
+        }
+        static STARTED: Once = Once::new();
+        STARTED.call_once(|| {
+            let loop_ptr = loop_ as *const Loop as usize;
+            debug_assert_eq!(
+                JS_LOOP.swap(loop_ptr, core::sync::atomic::Ordering::Release),
+                0,
+                "second loop opted into EpollRearmWatch: JS_LOOP assumes one JS loop"
+            );
+            bun_core::add_exit_callback(on_process_exit);
+            // SAFETY: `loop_ptr` is the live JS loop this FilePoll registered
+            // on; the handler runs on that loop's thread.
+            unsafe {
+                uws_loop_add_post_handler(
+                    loop_ptr as *mut Loop,
+                    &raw const POST_HANDLER_KEY as *mut c_void,
+                    dispatch_pending,
+                    core::ptr::null_mut(),
+                );
+            }
+            let _ = std::thread::Builder::new()
+                .name("bun-epoll-rearm-wd".into())
+                .spawn(run);
+        });
+    }
+
+    /// Called from `unregister_with_fd_impl` for every unregister attempt
+    /// (unconditionally -- removing an untracked fd is a cheap no-op), so a
+    /// closed/reused fd number is never left with a stale watchdog entry.
+    pub(crate) fn untrack(fd: i32) {
+        if let Ok(mut t) = table().lock() {
+            t.remove(&fd);
+        }
+    }
+
+    fn run() {
+        use bun_sys::linux::{self, EPOLL};
+        loop {
+            std::thread::sleep(TICK);
+            // Exit promptly once exiting; exit_group would reap us anyway,
+            // but standing down stops all cross-thread traffic immediately.
+            if is_shutdown() {
+                return;
+            }
+            let now = Instant::now();
+            // Collect due pokes under the lock, issue the syscalls after
+            // releasing it -- don't hold the table lock across a syscall.
+            let due: Vec<(i32, i32, u32, u64)> = {
+                let mut t = match table().lock() {
+                    Ok(t) => t,
+                    Err(e) => e.into_inner(),
+                };
+                let mut due = Vec::new();
+                for (&fd, entry) in t.iter_mut() {
+                    if now.duration_since(entry.last_activity) >= entry.interval {
+                        due.push((entry.watcher_fd, fd, entry.events, entry.userdata));
+                        entry.last_activity = now;
+                        entry.interval = (entry.interval * 2).min(MAX_POKE_INTERVAL);
+                    }
+                }
+                due
+            };
+            for (watcher_fd, fd, events, userdata) in due {
+                let event = linux::epoll_event {
+                    events,
+                    u64: userdata,
+                };
+                // Redundant CTL_MOD from a second thread; epoll_ctl is
+                // documented safe to call concurrently with epoll_wait/pwait
+                // on the same epfd from another thread. A failure here (most
+                // likely ENOENT: unregistered/closed between our snapshot and
+                // this call) is inert -- nothing to recover, the fd is gone.
+                // SAFETY: the fd was tracked by a successful registration; MOD only repoints the entry.
+                let _ = unsafe { linux::epoll_ctl(watcher_fd, EPOLL::CTL_MOD, fd, Some(&event)) };
+            }
+
+            // ── force-drain pass ─────────────────────────────────────────
+            // The redundant CTL_MOD above recovers some silent-registration
+            // deaths, but the OHOS kernel can go fully deaf for a tracked pty
+            // master: after a master-side write, the slave→master data sits in
+            // the kernel buffer with the readiness flag stuck cleared, so even
+            // a fresh poll(2) reports nothing. The only trusted source of
+            // truth is read(2) itself, so every tick the tracked fds are
+            // handed to the loop thread (wakeup → post handler →
+            // FilePoll::on_update) for a non-blocking read -- the exact path
+            // an epoll delivery would have run. A read with no data is an
+            // inert EAGAIN, same as a spurious epoll event.
+            if is_shutdown() {
+                continue;
+            }
+            let userdatas: Vec<u64> = {
+                let t = table().lock().unwrap_or_else(|e| e.into_inner());
+                t.values().map(|e| e.userdata).collect()
+            };
+            if !userdatas.is_empty() {
+                {
+                    let mut pending = pending_dispatch().lock().unwrap_or_else(|e| e.into_inner());
+                    for userdata in userdatas {
+                        if !pending.contains(&userdata) {
+                            pending.push(userdata);
+                        }
+                    }
+                }
+                // Re-check AFTER queueing: Global::exit may have flipped while
+                // we held the lock; on_process_exit then cleared JS_LOOP.
+                let loop_ptr = js_loop_ptr();
+                if loop_ptr != 0 && !is_shutdown() {
+                    // SAFETY: `us_wakeup_loop` is documented thread-safe
+                    // (pending_wakeups bump + eventfd write). `loop_ptr` is
+                    // the live JS loop registered by `track`; its liveness is
+                    // guaranteed by the SHUTDOWN/exit handshake above, not by
+                    // keep-alive (which proves nothing during teardown).
+                    unsafe { us_wakeup_loop(loop_ptr as *mut Loop) };
+                }
+            }
+        }
+    }
+}
 
 impl Flags {
     #[cfg(any(target_os = "macos", target_os = "freebsd"))]

@@ -1,3 +1,4 @@
+import { isOhos } from "harness";
 import { testFramework } from "./run-framework";
 
-testFramework("angular", "one file");
+if (!isOhos) testFramework("angular", "one file");

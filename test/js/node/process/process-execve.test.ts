@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { bunEnv, bunExe, isLinux, isWindows, tempDir } from "harness";
+import { bunEnv, bunExe, isLinux, isOHOS, isWindows, tempDir } from "harness";
 import { join } from "node:path";
 
 describe.concurrent("process.execve", () => {
@@ -178,7 +178,11 @@ describe.concurrent("process.execve", () => {
   // before the first exec (the call returns once they run) and record both a
   // failed spawn and running out of iterations, so an empty file means they
   // spawned without failure for the whole exec loop.
-  test.skipIf(!isLinux)("does not make pthread_create fail on other threads while the exec runs", async () => {
+  // OHOS: a process that repeatedly calls execve while other threads hammer
+  // pthread_create crashes in the platform (SIGSEGV in musl/kernel, reproduced
+  // with a dependency-free C program), independent of Bun's wrapper, so the
+  // upstream guard cannot be exercised there.
+  test.skipIf(!isLinux || isOHOS)("does not make pthread_create fail on other threads while the exec runs", async () => {
     using dir = tempDir("process-execve-pthread-create", {
       "index.js": `
         import { spawnThreadsForTesting } from "bun:internal-for-testing";

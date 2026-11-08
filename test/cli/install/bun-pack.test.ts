@@ -21,6 +21,7 @@ import {
   isASAN,
   isDebug,
   isLinux,
+  isOhos,
   isRoot,
   isWindows,
   MAX_PATH_BYTES,
@@ -702,6 +703,18 @@ describe.concurrent("flags", () => {
     }
   });
 
+// /dev/full is what makes the write fail with ENOSPC; OHOS has no writable
+// one (the sandbox denies it), so the ENOSPC simulation is skipped there.
+const devFullWritable = (() => {
+  try {
+    const fd = require("fs").openSync("/dev/full", "w");
+    require("fs").closeSync(fd);
+    return true;
+  } catch {
+    return false;
+  }
+})();
+
   // Every write(2) to /dev/full fails with ENOSPC, the same as a tarball destination on a full disk.
   // "an entry": enough incompressible data that a block is flushed while it writes index.js.
   // "the end of the archive": small enough that the only write(2) happens when the archive is closed.
@@ -709,6 +722,9 @@ describe.concurrent("flags", () => {
     ["an entry", () => `// ${randomBytes(128 * 1024).toString("base64")}`],
     ["the end of the archive", () => indexJs],
   ] as const)("reports ENOSPC when the disk fills up while writing %s", async (_, indexJsContents) => {
+    // /dev/full is what makes the write fail with ENOSPC; OHOS has no writable
+    // one (the sandbox denies it), so the simulation cannot run there.
+    if (!devFullWritable) return;
     using dir = tempDir("pack-enospc", {
       "package.json": JSON.stringify({ name: "pack-enospc", version: "1.1.1" }),
       "index.js": indexJsContents(),
@@ -1130,6 +1146,9 @@ describe.skipIf(isWindows)("a failed pack leaves no tarball behind", () => {
     { args: ["--destination=out"], left: ["index.js", "out", "package.json"] },
     { args: ["--filename=custom.tgz"], left: ["index.js", "package.json"] },
   ])("when the tarball cannot be written (args: $args)", async ({ args, left }) => {
+    // OHOS: `ulimit -f` in the shell does not reach the kernel, so the write
+    // never fails with EFBIG.
+    if (isOhos) return;
     await using dir = tempDir("pack-failed", {
       "package.json": packageJson,
       "index.js": "module.exports = 1;",
@@ -1143,6 +1162,8 @@ describe.skipIf(isWindows)("a failed pack leaves no tarball behind", () => {
   });
 
   test.concurrent("and keeps the tarball of an earlier pack", async () => {
+    // OHOS: `ulimit -f` never fires (see above).
+    if (isOhos) return;
     await using dir = tempDir("pack-failed-earlier", {
       "package.json": packageJson,
       "index.js": "module.exports = 1;",
@@ -1180,6 +1201,8 @@ describe.skipIf(isWindows)("a failed pack leaves no tarball behind", () => {
   // Only the regular file pack itself created (or truncated) is removed; a destination that is
   // something else, like a symlink, is not pack's to delete.
   test.concurrent("does not delete a --filename that is a symlink", async () => {
+    // OHOS: `ulimit -f` never fires (see above).
+    if (isOhos) return;
     await using dir = tempDir("pack-failed-symlink", {
       "package.json": packageJson,
       "index.js": "module.exports = 1;",
@@ -3603,7 +3626,8 @@ describe.concurrent("bundledDependencies", () => {
   });
 
   // The lookup used to keep every directory it found open.
-  test.skipIf(isWindows)("more dependencies than file descriptors", async () => {
+  // OHOS: `ulimit -n` in the shell does not reach the kernel either.
+  test.skipIf(isWindows || isOhos)("more dependencies than file descriptors", async () => {
     const names = Array.from({ length: 299 }, (_, i) => `d${i}`);
     using dir = tempDir("pack-bundled-dep-emfile", {
       "package.json": JSON.stringify({

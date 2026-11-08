@@ -8,6 +8,7 @@ import {
   isLinux,
   isMacOS,
   isMusl,
+  isOhos,
   isWindows,
   normalizeBunSnapshot,
   runCommandMaxRSS,
@@ -1907,7 +1908,7 @@ describe.concurrent("bun lint", () => {
         expect(fixed.exitCode).toBe(0);
         // A debug build takes seconds to start the engine that the rules run in.
       },
-      isDebug || isASAN ? 120_000 : 30_000,
+      isDebug || isASAN || isOhos ? 120_000 : 30_000,
     );
 
     test("--rule and --global apply, and --no-config-lookup ignores the config file", async () => {
@@ -3702,7 +3703,7 @@ describe.concurrent("bun lint", () => {
           expect(await after("--fix", "--fix-suggestions")).toBe("done; done;\n");
           expect(await after("--fix-dangerously")).toBe("done; done;\n");
         },
-        isDebug || isASAN ? 120_000 : 30_000,
+        isDebug || isASAN || isOhos ? 120_000 : 30_000,
       );
 
       // oxlint 1.87 removes it with --fix, but then the function no longer yields to its caller.
@@ -5320,7 +5321,7 @@ maybe(() => { return f; });
           expect(foundExactly(raw, names)).toEqual(expected(names));
           expect(marked(raw, names)).toEqual(expectedMarks(names));
         },
-        isDebug || isASAN ? 120_000 : 30_000,
+        isDebug || isASAN || isOhos ? 120_000 : 30_000,
       );
 
       // Each project is its own program. They're split into twelve runs because one program takes seconds in a debug
@@ -5341,7 +5342,7 @@ maybe(() => { return f; });
           expect(foundExactly(raw, names)).toEqual(expected(names));
           expect(marked(raw, names)).toEqual(expectedMarks(names));
         },
-        isDebug || isASAN ? 120_000 : 30_000,
+        isDebug || isASAN || isOhos ? 120_000 : 30_000,
       );
 
       // parentheses.json has code in parentheses that aren't needed, for the type-aware rules that used to treat it
@@ -6182,7 +6183,7 @@ maybe(() => { return f; });
             ),
           );
         },
-        isDebug || isASAN ? 120_000 : 30_000,
+        isDebug || isASAN || isOhos ? 120_000 : 30_000,
       );
 
       // tsgolint's fix writes code that doesn't parse or that behaves differently. `bun lint` reports the same problem,
@@ -8023,7 +8024,8 @@ export default { meta: { name: "q" }, rules: { marks, marked } };\n`,
       }
       const read = (dir: string, name: string) => readFileSync(join(dir, name), "utf8");
 
-      test("keeps the file's hard links", async () => {
+      // OHOS: link(2) does not produce a hard link there (the sandbox denies it).
+      test.skipIf(isOhos)("keeps the file's hard links", async () => {
         using dir = tempDir("bun-lint", files);
         linkSync(join(String(dir), "a.js"), join(String(dir), "other-name.txt"));
         await fix(String(dir), ["a.js"]);
@@ -9029,7 +9031,7 @@ export default { meta: { name: "q" }, rules: { marks, marked } };\n`,
 
     // Every write to /dev/full fails with ENOSPC, as on a full disk.
     test
-      .skipIf(!isLinux)
+      .skipIf(!isLinux || isOhos)
       .each([[["-f", "json"]], [["--fix-dry-run", "-f", "json"]], [["--print-config", "a.js"]], [["--rules"]]])(
       "exits with code 2 when writing to standard output fails: %j",
       async args => {
@@ -10060,7 +10062,7 @@ export default { meta: { name: "q" }, rules: { marks, marked } };\n`,
           }
           expect(reports).toEqual(Object.fromEntries(Object.entries(probes).map(([name, it]) => [name, it[expected]])));
         },
-        isDebug || isASAN ? 120_000 : 30_000,
+        isDebug || isASAN || isOhos ? 120_000 : 30_000,
       );
     });
 
@@ -10122,7 +10124,7 @@ export default { meta: { name: "q" }, rules: { marks, marked } };\n`,
       expect(exitCode).toBe(0);
     });
 
-    const slow = isDebug || isASAN ? 120_000 : 30_000;
+    const slow = isDebug || isASAN || isOhos ? 120_000 : 30_000;
 
     // True if the file system that holds these tests' temp directories is case-insensitive.
     const foldsCase = (() => {
@@ -12969,7 +12971,7 @@ foo(b)
 // Some plugins' rules are built in, and run instead of the rules of the package that the config loads.
 describe.concurrent("nativePluginRules", () => {
   // A debug build takes seconds to start a JavaScript engine.
-  const timeout = isDebug || isASAN ? 120_000 : 10_000;
+  const timeout = isDebug || isASAN || isOhos ? 120_000 : 10_000;
 
   /** Returns a package named `name` whose rules report "the package ran" at the top of every file. */
   const standIn = (name: string, rules: string[], report = `context.report({ node, message: "the package ran" })`) => ({

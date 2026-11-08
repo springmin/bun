@@ -328,7 +328,19 @@ pub fn create_deferred_symlinks(dir_fd: Fd, symlinks: &[DeferredSymlink], log: b
     for symlink in symlinks {
         let (target, path) = (symlink.target.as_zstr(), symlink.path.as_bytes());
         let is_safe = |path: &[u8]| is_symlink_target_safe(path, target.as_bytes(), &mut join_buf);
-        match beneath::symlinkat_where_safe(target, dir_fd, path, is_safe) {
+        let result = beneath::symlinkat_where_safe(target, dir_fd, path, is_safe);
+        // OHOS can refuse the first symlinkat with EPERM/EACCES while a lazy
+        // mkdir settles; one retry is enough (the parent now exists).
+        #[cfg(target_env = "ohos")]
+        let result = match result {
+            Err(e) if matches!(e.get_errno(), bun_sys::E::EPERM | bun_sys::E::EACCES) => {
+                let is_safe =
+                    |path: &[u8]| is_symlink_target_safe(path, target.as_bytes(), &mut join_buf);
+                beneath::symlinkat_where_safe(target, dir_fd, path, is_safe)
+            }
+            other => other,
+        };
+        match result {
             Ok(()) => created += 1,
             Err(_) => {
                 if log {

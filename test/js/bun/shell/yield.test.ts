@@ -1,6 +1,6 @@
 import { $ } from "bun";
 import { describe, expect, test } from "bun:test";
-import { bunEnv, bunExe, isLinux, tempDir } from "harness";
+import { bunEnv, bunExe, isLinux, isOhos, tempDir } from "harness";
 import { join } from "node:path";
 import { createTestBuilder } from "./test_builder";
 const TestBuilder = createTestBuilder(import.meta.path);
@@ -186,7 +186,9 @@ describe("yield", async () => {
 
     // No misuse of the API here: the shell's own stderr is full, so the write
     // of "bun: command not found" fails, and that failure is thrown.
-    test.concurrent.if(isLinux)("a failed write of the command-not-found message", async () => {
+    // OHOS: the sandbox denies /dev/full (posix_spawn of the child fails with
+    // EACCES), so the write-failure path this exercises cannot run there.
+    test.concurrent.if(isLinux && !isOhos)("a failed write of the command-not-found message", async () => {
       await using proc = Bun.spawn({
         cmd: child(`
           const out = [await settle($\`\${bun} --version > /dev/null; command-that-does-not-exist-xyz\`)];

@@ -10,6 +10,7 @@ import {
   expiredTls,
   isDebug,
   isLinux,
+  isOhos,
   isWindows,
   tls as localhostTls,
   tempDir,
@@ -122,7 +123,7 @@ function clientSockets(serverPort: number) {
     .map(([, local, , , , timer]) => ({ port: parseInt(local.split(":")[1], 16), timer }));
 }
 
-test.skipIf(!isLinux)("the socket of a failed connection is closed when onclose runs", async () => {
+test.skipIf(!isLinux || isOhos)("the socket of a failed connection is closed when onclose runs", async () => {
   await using server = await simpleQueryServer(() => ready);
   const closed = Promise.withResolvers<number>();
   await using sql = new SQL(server.url, {
@@ -137,7 +138,7 @@ test.skipIf(!isLinux)("the socket of a failed connection is closed when onclose 
   expect(await closed.promise).toBe(0);
 });
 
-describe.skipIf(!isLinux).concurrent("TCP keepalive", () => {
+describe.skipIf(!isLinux || isOhos).concurrent("TCP keepalive", () => {
   /**
    * Seconds until the kernel probes the peer: Infinity when keepalive is off. The `tr` column is 02 while the keepalive
    * timer of a socket with nothing to retransmit is armed and 00 when no timer is; `tm->when` is what is left in 1/100 s.

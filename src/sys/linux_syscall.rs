@@ -90,6 +90,7 @@ pub(crate) fn openat(dir: Fd, path: &ZStr, flags: i32, mode: Mode) -> Result<Fd,
 }
 
 /// Android's seccomp answers `openat2`/`fchmodat2` with SIGSYS; Termux runs the linux build.
+#[cfg(not(target_env = "ohos"))]
 pub(crate) fn is_android_kernel() -> bool {
     static CACHED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *CACHED.get_or_init(|| {
@@ -113,14 +114,24 @@ pub(crate) fn openat2(
     mode: Mode,
     resolve: ResolveFlags,
 ) -> Result<Fd, i32> {
-    use bun_core::env_var::feature_flag::BUN_FEATURE_FLAG_DISABLE_RESOLVE_BENEATH as DISABLED;
-    if is_android_kernel() || DISABLED.get().unwrap_or(false) {
+    // OHOS seccomp answers openat2 (437) with SIGSYS; `beneath` falls back to
+    // its user-space resolver when this says the kernel cannot do it.
+    #[cfg(target_env = "ohos")]
+    {
+        let _ = (dir, path, flags, mode, resolve);
         return Err(libc::ENOSYS);
     }
-    let oflags = rustix::fs::OFlags::from_bits_retain(flags as u32);
-    let mode = rustix::fs::Mode::from_raw_mode(mode);
-    let dir = dir.as_borrowed_fd();
-    retry(|| rustix::fs::openat2(dir, path.as_cstr(), oflags, mode, resolve)).map(own_fd)
+    #[cfg(not(target_env = "ohos"))]
+    {
+        use bun_core::env_var::feature_flag::BUN_FEATURE_FLAG_DISABLE_RESOLVE_BENEATH as DISABLED;
+        if is_android_kernel() || DISABLED.get().unwrap_or(false) {
+            return Err(libc::ENOSYS);
+        }
+        let oflags = rustix::fs::OFlags::from_bits_retain(flags as u32);
+        let mode = rustix::fs::Mode::from_raw_mode(mode);
+        let dir = dir.as_borrowed_fd();
+        retry(|| rustix::fs::openat2(dir, path.as_cstr(), oflags, mode, resolve)).map(own_fd)
+    }
 }
 
 #[inline]

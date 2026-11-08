@@ -1,0 +1,800 @@
+diff --git a/scripts/build/aot.ts b/scripts/build/aot.ts
+index d08e5e952e..7b001e75fd 100644
+--- a/scripts/build/aot.ts
++++ b/scripts/build/aot.ts
+@@ -37,6 +37,9 @@ export function builtinTableTarget(cfg: Pick<CodegenFields, "os" | "abi">): Buil
+       return "FreeBSD";
+     case "linux":
+       return "Linux";
++    case "ohos":
++      // OHOS is Linux-like: the AOT builtins table has no OHOS target.
++      return "Linux";
+   }
+ }
+ 
+diff --git a/scripts/build/bun.ts b/scripts/build/bun.ts
+index 1e10853907..050868418d 100644
+--- a/scripts/build/bun.ts
++++ b/scripts/build/bun.ts
+@@ -12,7 +12,7 @@
+  */
+ 
+ import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync } from "node:fs";
+-import { relative, resolve, sep } from "node:path";
++import { join, relative, resolve, sep } from "node:path";
+ import type { Sources } from "../glob-sources.ts";
+ import { binaryExpectations, exportList, shimExpectations, strippedExpectations } from "./binary-expectations.ts";
+ import { emitCodegen, type CodegenOutputs } from "./codegen.ts";
+@@ -82,6 +82,25 @@ function systemLibs(cfg: Config): string[] {
+     }
+   }
+ 
++  if (cfg.ohos) {
++    // Cross-built static ICU (build/ohos-icu/target/lib). The device's system
++    // ICU is 72; WebKit and bun's ICU usage reference the `_78`-suffixed
++    // symbols only the cross-built 78.3 libraries provide, so link them
++    // statically.
++    libs.push("-lc", "-lpthread", "-ldl");
++    if (cfg.ohosIcuDir) {
++      // Explicit .a paths: the keg's lib dir also carries .so, and ld
++      // prefers shared — that would bake DT_NEEDED libicu*.so.78 (with no
++      // usable rpath) into the binary, breaking it away from a device that
++      // happens to have those libs on LD_LIBRARY_PATH.
++      libs.push(
++        join(cfg.ohosIcuDir, "lib", "libicudata.a"),
++        join(cfg.ohosIcuDir, "lib", "libicui18n.a"),
++        join(cfg.ohosIcuDir, "lib", "libicuuc.a"),
++      );
++    }
++  }
++
+   if (cfg.darwin) {
+     // icucore: system ICU framework.
+     // resolv: DNS resolution (getaddrinfo et al).
+@@ -1081,7 +1100,7 @@ function windowsSysrootIncludeDirs(winsysroot: string): string[] {
+  */
+ function linkImplicitInputs(cfg: Config): string[] {
+   // The ELF export list is the version scripts' `global:` blocks, written here so the link can take it as a file.
+-  if (cfg.linux || cfg.freebsd) writeIfChanged(exportListPath(cfg), exportList(versionScriptPaths(cfg)));
++  if (cfg.linux || cfg.freebsd || cfg.ohos) writeIfChanged(exportListPath(cfg), exportList(versionScriptPaths(cfg)));
+   return linkDepends(cfg);
+ }
+ 
+diff --git a/scripts/build/config.ts b/scripts/build/config.ts
+index 13fede2a2e..db90f1c9f7 100644
+--- a/scripts/build/config.ts
++++ b/scripts/build/config.ts
+@@ -18,7 +18,7 @@ import { resolveMacosSdkPath } from "./macos-sdk.ts";
+ import { clangTargetArch, toolchainOverride } from "./tools.ts";
+ import { cyan, dim, green } from "./tty.ts";
+ 
+-export type OS = "linux" | "darwin" | "windows" | "freebsd";
++export type OS = "linux" | "darwin" | "windows" | "freebsd" | "ohos";
+ export type Arch = "x64" | "aarch64";
+ export type Abi = "gnu" | "musl" | "android";
+ export type BuildType = "Debug" | "Release" | "RelWithDebInfo" | "MinSizeRel";
+@@ -89,7 +89,8 @@ export interface Config {
+   darwin: boolean;
+   windows: boolean;
+   freebsd: boolean;
+-  /** linux || darwin || freebsd */
++  ohos: boolean;
++  /** linux || darwin || freebsd || ohos */
+   unix: boolean;
+   x64: boolean;
+   arm64: boolean;
+@@ -438,6 +439,11 @@ export interface Config {
+   winsysroot: string | undefined;
+   /** NDK compiler-rt/libunwind dir: `<ndk>/toolchains/llvm/prebuilt/<host>/lib/clang/<ver>/lib/linux`. */
+   androidNdkRuntimeDir: string | undefined;
++  /** OHOS cross-compilation paths (set when os === "ohos"). */
++  ohosSdkRoot: string | undefined;
++  ohosSysroot: string | undefined;
++  ohosCrossLibs: string | undefined;
++  ohosIcuDir: string | undefined;
+ 
+   // ─── Versioning ───
+   /** Bun's own version (from package.json). */
+@@ -538,6 +544,12 @@ export interface PartialConfig {
+   osxDeploymentTarget?: string;
+   /** Windows sysroot (xwin splat, VS layout). Only used when cross-compiling for os=windows. */
+   winsysroot?: string;
++  /** OHOS cross-compilation paths (required when os=ohos). */
++  ohosSdkRoot?: string;
++  ohosSysroot?: string;
++  ohosCrossLibs?: string;
++  ohosIcuDir?: string;
++  crossTarget?: string;
+   // Version pins (defaults in versions.ts).
+   nodejsVersion?: string;
+   nodejsAbiVersion?: string;
+@@ -630,7 +642,7 @@ export interface Toolchain extends JsToolchain {
+ export function detectHost(): Host {
+   const plat = hostPlatform();
+   const os: OS =
+-    plat === "linux"
++    plat === "linux" || plat === "openharmony"
+       ? "linux"
+       : plat === "darwin"
+         ? "darwin"
+@@ -880,12 +892,13 @@ export function sharedCacheDir(cwd: string): string {
+  * and what build_options.rs is generated from. resolveConfig() and resolveCodegenConfig() both start from it.
+  */
+ function resolveBase(partial: PartialConfig, host: Host, os: OS, arch: Arch, js: JsToolchain) {
+-  const abi: Abi | undefined = os === "linux" ? (partial.abi ?? detectLinuxAbi()) : undefined;
++  const abi: Abi | undefined = os === "linux" ? (partial.abi ?? detectLinuxAbi()) : os === "ohos" ? "musl" : undefined;
+ 
+   const linux = os === "linux";
+   const darwin = os === "darwin";
+   const windows = os === "windows";
+   const freebsd = os === "freebsd";
++  const ohos = os === "ohos";
+   const arm64 = arch === "aarch64";
+   // Darwin target on a non-darwin host (Linux CI box building macOS
+   // binaries). Same host-clang + --target/-isysroot model as Android/FreeBSD,
+@@ -997,6 +1010,7 @@ function resolveBase(partial: PartialConfig, host: Host, os: OS, arch: Arch, js:
+     darwin,
+     windows,
+     freebsd,
++    ohos,
+     darwinCross,
+     buildType,
+     debug,
+@@ -1073,6 +1087,7 @@ export function resolveConfig(partial: PartialConfig, toolchain: Toolchain): Con
+     darwin,
+     windows,
+     freebsd,
++    ohos,
+     darwinCross,
+     buildType,
+     debug,
+@@ -1100,7 +1115,7 @@ export function resolveConfig(partial: PartialConfig, toolchain: Toolchain): Con
+     esbuild,
+   } = resolveBase(partial, host, os, arch, toolchain);
+ 
+-  const unix = linux || darwin || freebsd;
++  const unix = linux || darwin || freebsd || ohos;
+   const x64 = arch === "x64";
+   const arm64 = arch === "aarch64";
+   // Windows target on a non-Windows host (clang-cl + lld-link + xwin
+@@ -1160,7 +1175,17 @@ export function resolveConfig(partial: PartialConfig, toolchain: Toolchain): Con
+   // emitRust() reports that.
+   const clangMajor = majorOf(toolchain.clangVersion);
+   const rustLlvmMajor = majorOf(toolchain.rustLlvmVersion);
+-  if (clangMajor !== undefined && rustLlvmMajor !== undefined && clangMajor !== rustLlvmMajor) {
++  // OHOS: the port's pinned rustc answers LLVM 22 while the OHOS SDK ships clang
++  // 23, and the nightly cannot be moved in this environment. The link reads only
++  // rustc's *older* bitcode, which a newer lld reads fine (LLVM bitcode is
++  // forward-compatible), and the OHOS build passes `--lto=off`.
++  const llvmMajorsMayDiffer = ohos;
++  if (
++    !llvmMajorsMayDiffer &&
++    clangMajor !== undefined &&
++    rustLlvmMajor !== undefined &&
++    clangMajor !== rustLlvmMajor
++  ) {
+     throw new BuildError(
+       `clang is LLVM ${toolchain.clangVersion} and rustc's LLVM is ${toolchain.rustLlvmVersion}; they have to be the same major version`,
+       {
+@@ -1352,6 +1377,34 @@ export function resolveConfig(partial: PartialConfig, toolchain: Toolchain): Con
+     }
+   }
+ 
++  // ─── Cross-compilation (OHOS) ───
++  let ohosSdkRoot: string | undefined;
++  let ohosSysroot: string | undefined;
++  let ohosCrossLibs: string | undefined;
++  let ohosIcuDir: string | undefined;
++  if (ohos) {
++    ohosSdkRoot = partial.ohosSdkRoot ? resolve(cwd, partial.ohosSdkRoot) : findOhosSdkRoot();
++    if (!ohosSdkRoot) {
++      throw new BuildError("OHOS build requires --ohos-sdk-root=<path> or setup-ohos-sdk in home", {
++        hint: "Install OHOS SDK from https://gitee.com/openharmony and point --ohos-sdk-root to the SDK root.",
++      });
++    }
++    ohosSysroot = partial.ohosSysroot
++      ? resolve(cwd, partial.ohosSysroot)
++      : resolve(ohosSdkRoot, "ohos/native/sysroot");
++    if (!existsSync(ohosSysroot)) {
++      throw new BuildError(`OHOS sysroot not found at ${ohosSysroot}`);
++    }
++    ohosCrossLibs = partial.ohosCrossLibs
++      ? resolve(cwd, partial.ohosCrossLibs)
++      : resolve(cwd, "build", "ohos-cross-libs");
++    ohosIcuDir = partial.ohosIcuDir
++      ? resolve(cwd, partial.ohosIcuDir)
++      : resolve(cwd, "build", "ohos-icu", "target");
++    sysroot = ohosSysroot;
++    crossTarget = partial.crossTarget ?? "aarch64-linux-ohos";
++  }
++
+   // ─── Linux-gnu/musl sysroot + target ───
+   // Every CI linux-gnu build (native AND cross-arch) uses the ubuntu:20.04 +
+   // gcc-13 sysroot so the glibc verneed matches what the --wrap list covers
+@@ -1498,6 +1551,7 @@ export function resolveConfig(partial: PartialConfig, toolchain: Toolchain): Con
+     darwin,
+     windows,
+     freebsd,
++    ohos,
+     unix,
+     x64,
+     arm64,
+@@ -1622,6 +1676,10 @@ export function resolveConfig(partial: PartialConfig, toolchain: Toolchain): Con
+     sysroot,
+     winsysroot,
+     androidNdkRuntimeDir,
++    ohosSdkRoot,
++    ohosSysroot,
++    ohosCrossLibs,
++    ohosIcuDir,
+     version,
+     revision,
+     nodejsVersion,
+@@ -1991,3 +2049,16 @@ export function formatConfig(cfg: Config, exe: string): string {
+ export function formatConfigUnchanged(exe: string, elapsed: number): string {
+   return `[configured] ${c.green(exe)} in ${elapsed}ms ${c.dim("(unchanged)")}`;
+ }
++
++function findOhosSdkRoot(): string | undefined {
++  // Environment variable takes priority (standard for cross-compilation toolchains).
++  const envRoot = process.env.OHOS_SDK_ROOT;
++  if (envRoot && existsSync(resolve(envRoot, "ohos/native/sysroot"))) {
++    return envRoot;
++  }
++  const candidates = [resolve(homedir(), "setup-ohos-sdk"), resolve(homedir(), "ohos-sdk"), "/opt/ohos-sdk"];
++  for (const dir of candidates) {
++    if (existsSync(resolve(dir, "ohos/native/sysroot"))) return dir;
++  }
++  return undefined;
++}
+diff --git a/scripts/build/deps/cares.ts b/scripts/build/deps/cares.ts
+index 3ab129ea66..86a14eb2b6 100644
+--- a/scripts/build/deps/cares.ts
++++ b/scripts/build/deps/cares.ts
+@@ -170,7 +170,7 @@ const POSIX = def1([
+   "HAVE_CLOCK_GETTIME_MONOTONIC", "HAVE_FCNTL_O_NONBLOCK",
+   "HAVE_GETIFADDRS", "HAVE_GETTIMEOFDAY", "HAVE_IF_INDEXTONAME",
+   "HAVE_IF_NAMETOINDEX", "HAVE_INET_NTOP", "HAVE_INET_PTON",
+-  "HAVE_IOCTL", "HAVE_IOCTL_FIONBIO", "HAVE_IOCTL_SIOCGIFADDR", "HAVE_MEMMEM",
++  "HAVE_IOCTL", "HAVE_IOCTL_FIONBIO", "HAVE_IOCTL_SIOCGIFADDR",
+   "HAVE_PIPE", "HAVE_POLL", "HAVE_STRCASECMP", "HAVE_STRNCASECMP", "HAVE_WRITEV",
+ ]);
+ 
+@@ -181,7 +181,7 @@ const LINUX = def1([
+   "HAVE_MSG_NOSIGNAL", "HAVE_PIPE2",
+ ]);
+ 
+-// glibc + musl have these; bionic only has the non-_r variants.
++// glibc + musl have these; bionic and OHOS musl only have the non-_r variants.
+ // prettier-ignore
+ const LINUX_NETDB_R = def1([
+   "HAVE_GETSERVBYPORT_R", "HAVE_GETSERVBYNAME_R",
+@@ -286,8 +286,10 @@ function configH(cfg: Config): string {
+     platform = `${POSIX}\n${FREEBSD}`;
+     types = POSIX_SOCKET_TYPES;
+   } else {
+-    const abiExtra = cfg.abi === "android" ? ANDROID : LINUX_NETDB_R;
+-    platform = `${POSIX}\n${LINUX}\n${abiExtra}`;
++    const abiExtra = cfg.abi === "android" ? ANDROID : cfg.ohos ? "" : LINUX_NETDB_R;
++    // memmem is a GNU extension not available in OHOS musl.
++    const memmem = cfg.ohos ? "" : "#define HAVE_MEMMEM 1\n";
++    platform = `${POSIX}\n${LINUX}\n${memmem}${abiExtra}`;
+     types = POSIX_SOCKET_TYPES;
+   }
+   return `/* Generated by scripts/build/deps/cares.ts for ${cfg.os}-${cfg.arch} */
+diff --git a/scripts/build/deps/tinycc.ts b/scripts/build/deps/tinycc.ts
+index d04b44d2e9..eda8efbcbb 100644
+--- a/scripts/build/deps/tinycc.ts
++++ b/scripts/build/deps/tinycc.ts
+@@ -27,7 +27,7 @@ export const tinycc: Dependency = {
+     commit: TINYCC_COMMIT,
+   }),
+ 
+-  patches: ["patches/tinycc/tcc.h.patch"],
++  patches: ["patches/tinycc/tcc.h.patch", "patches/tinycc/tccgen.c.patch"],
+ 
+   build: cfg => {
+     const sources = ["libtcc.c", "tccpp.c", "tccgen.c", "tccdbg.c", "tccelf.c", "tccasm.c", "tccrun.c"];
+diff --git a/scripts/build/deps/webkit.ts b/scripts/build/deps/webkit.ts
+index 40b7caad21..9aa704ffe2 100644
+--- a/scripts/build/deps/webkit.ts
++++ b/scripts/build/deps/webkit.ts
+@@ -859,6 +859,7 @@ function icuIncludes(wk: WebKitBuild): string[] {
+   if (cfg.darwin) return [join(wk.WTF, "icu")];
+   if (cfg.windows) return [join(windowsIcuDir(wk), "include")];
+   if (cfg.abi === "android") return [join(androidIcuRoot(), "include")];
++  if (cfg.ohos) return cfg.ohosIcuDir === undefined ? [] : [join(cfg.ohosIcuDir, "include")];
+   const root = linuxIcuRoot(cfg);
+   return root === undefined ? [] : [join(root, "include")];
+ }
+@@ -869,6 +870,9 @@ function icuBuild(wk: WebKitBuild): { libs: string[]; outputs: string[] } {
+   if (cfg.abi === "android") {
+     return { libs: staticIcuLibs(androidIcuRoot()), outputs: [] };
+   }
++  // OHOS links the cross-built ICU from bun.ts (static .a paths); WebKit only
++  // needs the headers, supplied by icuIncludes().
++  if (cfg.ohos) return { libs: [], outputs: [] };
+   const root = linuxIcuRoot(cfg);
+   if (cfg.hardened) {
+     if (root === undefined) {
+@@ -1021,7 +1025,15 @@ function webkitFlags(wk: WebKitBuild): WebKitFlags {
+   // header — OptionsJSCOnly.cmake), so no TU drags std::ios_base::Init in.
+   const bannedIncludes = cfg.debug ? [] : [`-I${q(join(WTF, "wtf", "bun", "BannedIncludes"))}`];
+   // -Wno-noexcept-type: WebKitCompilerFlags.cmake, C++ only.
+-  const cxx = [...bannedIncludes, cfg.windows ? "/clang:-std=c++23" : "-std=c++23", "-Wno-noexcept-type"];
++  const cxx = [
++    ...bannedIncludes,
++    cfg.windows ? "/clang:-std=c++23" : "-std=c++23",
++    "-Wno-noexcept-type",
++    // OHOS SDK ICU utypes.h omits `#include <unicode/utf.h>`, so U16_LENGTH /
++    // U_IS_BMP / ... are not pulled in; force-include it for C++ (the .S
++    // objects would parse it as assembly).
++    ...(cfg.ohos ? ["-include", "unicode/utf.h"] : []),
++  ];
+   const icuFlags = [
+     ...(cfg.darwin ? ["-DU_DISABLE_RENAMING=1"] : cfg.windows ? ["-DU_STATIC_IMPLEMENTATION=1"] : []),
+     ...icuIncludes(wk).map(i => `-I${q(i)}`),
+diff --git a/scripts/build/deps/zstd.ts b/scripts/build/deps/zstd.ts
+index 351bb62c9f..0306614515 100644
+--- a/scripts/build/deps/zstd.ts
++++ b/scripts/build/deps/zstd.ts
+@@ -41,15 +41,19 @@ export const zstd: Dependency = {
+     commit: ZSTD_COMMIT,
+   }),
+ 
+-  patches: [
++  patches: (cfg: import("../config.ts").Config) => {
+     // x64 targets nehalem, so zstd picks its BMI2 kernels at run time and
+     // probes CPUID in every CCtx/DCtx init. CPUID is a VM exit under a
+     // hypervisor (about 2 us each, two per init). Probe once instead.
+-    "patches/zstd/bmi2-probe-once.patch",
+-    // ZSTD_freeCCtx frees a context's dictionaries before joining the worker
+-    // threads, so a job that's still running can read freed memory.
+-    "patches/zstd/free-workers-before-dictionaries.patch",
+-  ],
++    const patches = [
++      "patches/zstd/bmi2-probe-once.patch",
++      // ZSTD_freeCCtx frees a context's dictionaries before joining the worker
++      // threads, so a job that's still running can read freed memory.
++      "patches/zstd/free-workers-before-dictionaries.patch",
++    ];
++    if (cfg.ohos) patches.push("patches/zstd/ohos-qsort-r.patch");
++    return patches;
++  },
+ 
+   build: cfg => {
+     const sources = [...SOURCES];
+diff --git a/scripts/build/flags.ts b/scripts/build/flags.ts
+index 1cd734323a..e6eca74be4 100644
+--- a/scripts/build/flags.ts
++++ b/scripts/build/flags.ts
+@@ -11,7 +11,7 @@
+  * that apply uniformly to bun's own C/C++ sources.
+  */
+ 
+-import { join } from "node:path";
++import { dirname, join } from "node:path";
+ import { bunExeName, linksWithLld, type Config } from "./config.ts";
+ import { overridesDarwinAllocator, replacedOperatorNewSymbols } from "./deps/mimalloc.ts";
+ import { quote, slash } from "./shell.ts";
+@@ -360,12 +360,12 @@ export const globalFlags: Flag[] = [
+   {
+     // Nix LLVM doesn't support zstd — but we target standard distros.
+     // Nix users can override via profile if needed.
+-    flag: ["-g3", "-gz=zstd"],
++    flag: c => (c.ohos ? ["-g3"] : ["-g3", "-gz=zstd"]),
+     when: c => c.unix && c.debug && c.debugInfo === "full",
+     desc: "Full debug info, zstd-compressed",
+   },
+   {
+-    flag: ["-g", "-gz=zstd"],
++    flag: c => (c.ohos ? ["-g"] : ["-g", "-gz=zstd"]),
+     when: c => c.unix && c.release && c.debugInfo === "full",
+     desc: "Full debug info (types and variables) where no LTO link has to carry it: local release, asan, the non-LTO CI lanes",
+   },
+@@ -704,6 +704,20 @@ export const globalFlags: Flag[] = [
+     when: c => c.unix && c.ci,
+     desc: "Remap source paths in debug info (reproducible builds)",
+   },
++
++  // ─── OHOS (shared with deps) ───
++  {
++    flag: "-fno-emulated-tls",
++    when: c => c.ohos,
++    // clang's default for this target is emulated TLS (-femulated-tls), so
++    // every `__thread`/`thread_local` (mimalloc's per-thread heap pointer
++    // included) goes through a software lookup instead of a hardware TLS
++    // access. OHOS's musl supports native TLS; the default looks inherited
++    // from Android's historical NDK clang config. Must live in globalFlags
++    // (not bunOnlyFlags): the affected code is in deps' own DirectBuilds
++    // (e.g. mimalloc), which only inherit globalFlags.
++    desc: "OHOS: force native TLS — this target's emulated-tls default isn't a real platform limitation",
++  },
+ ];
+ 
+ // ═══════════════════════════════════════════════════════════════════════════
+@@ -738,7 +752,7 @@ export const bunOnlyFlags: Flag[] = [
+   // accepted syntax and predefined macros, not ABI).
+   {
+     flag: "-std=gnu++23",
+-    when: c => c.linux || c.freebsd,
++    when: c => c.linux || c.freebsd || c.ohos,
+     lang: "cxx",
+     desc: "C++23 with GNU extensions",
+   },
+@@ -811,13 +825,18 @@ export const bunOnlyFlags: Flag[] = [
+   },
+   {
+     flag: ["-fno-pic", "-fno-pie"],
+-    when: c => c.unix && c.abi !== "android" && !c.hardened,
++    when: c => c.unix && c.abi !== "android" && !c.hardened && !c.ohos,
+     desc: "No position-independent code (we're a final executable)",
+   },
+   {
++    // Android and OHOS link PIE and their loaders reject non-PIE. OHOS was
++    // built with -fno-pic, which made the linker emit R_AARCH64_COPY
++    // relocations for libc data (stdout/stderr/environ); OHOS musl does not
++    // populate them, leaving the symbols NULL (setvbuf(stdout, ...) then hits
++    // its "parameter is null" fatal abort). PIC references them via the GOT.
+     flag: "-fPIC",
+-    when: c => c.abi === "android",
+-    desc: "Android requires PIE since API 21; bionic's loader rejects non-PIE",
++    when: c => c.abi === "android" || c.ohos,
++    desc: "Android/OHOS require PIE since their loaders reject non-PIE",
+   },
+ 
+   // ─── Warnings-as-errors (unix) ───
+@@ -860,6 +879,16 @@ export const bunOnlyFlags: Flag[] = [
+     when: c => c.windows,
+     desc: "Suppress noisy warnings from system/dependency headers",
+   },
++  {
++    // The OHOS SDK's ICU utypes.h omits the default `#include <unicode/utf.h>`
++    // that WebKit's headers rely on for the U16_*/U_IS_BMP macros, and bun's
++    // C++ must compile against the same cross-built ICU WebKit links.
++    // C++ only: the `-include` would be parsed as assembly in the `.S` objects.
++    flag: c => [...(c.ohosIcuDir ? ["-isystem", join(c.ohosIcuDir, "include")] : []), "-include", "unicode/utf.h"],
++    when: c => c.ohos,
++    lang: "cxx",
++    desc: "OHOS: cross-built ICU headers + force unicode/utf.h (SDK utypes.h omits it)",
++  },
+ ];
+ 
+ // ═══════════════════════════════════════════════════════════════════════════
+@@ -959,6 +988,11 @@ export const defines: Flag[] = [
+     when: c => c.darwin,
+     desc: "Use non-cancelable POSIX calls on Darwin",
+   },
++  {
++    flag: "__MUSL__=1",
++    when: c => c.ohos,
++    desc: "OHOS uses musl libc — gate musl-specific code paths",
++  },
+   {
+     flag: ["WIN32", "_WINDOWS", "WIN32_LEAN_AND_MEAN=1", "_CRT_SECURE_NO_WARNINGS", "BORINGSSL_NO_CXX=1"],
+     when: c => c.windows,
+@@ -1419,7 +1453,7 @@ export const linkerFlags: Flag[] = [
+     // for clone(CLONE_FS) during that window (the --watch reload). Behavioral,
+     // not a version pin, so it applies to every Linux libc.
+     flag: ["-Wl,--wrap=execve", "-Wl,--wrap=pthread_create"],
+-    when: c => c.linux,
++    when: c => c.linux || c.ohos,
+     desc: "Retry pthread_create EAGAIN caused by an in-flight execve",
+   },
+   {
+@@ -1549,7 +1583,8 @@ export const linkerFlags: Flag[] = [
+   },
+   {
+     flag: c => `-Wl,-Map=${linkerMapPath(c)}`,
+-    when: c => (c.linux || c.freebsd) && writesLinkerMap(c),
++    // OHOS too: `--trimmable` reads the map to lay the link out by feature.
++    when: c => (c.linux || c.freebsd || c.ohos) && writesLinkerMap(c),
+     desc: "Linker map",
+   },
+   {
+@@ -1682,6 +1717,91 @@ export const linkerFlags: Flag[] = [
+     when: c => c.freebsd && c.release,
+     desc: "Garbage-collect unused sections",
+   },
++
++  // ─── OHOS ───
++  {
++    flag: c => [`--target=aarch64-linux-ohos`, `--sysroot=${c.ohosSysroot!}`],
++    when: c => c.ohos,
++    desc: "OHOS target triple + sysroot at link time",
++  },
++  {
++    flag: "-Wl,--allow-multiple-definition",
++    when: c => c.ohos,
++    desc: "OHOS: allow iostream stub duplicate; mimalloc override disabled",
++  },
++  {
++    flag: c =>
++      [
++        `-L${c.ohosCrossLibs!}/libcxx/lib`,
++        `-L${c.ohosCrossLibs!}/libcxxabi/lib`,
++        `-L${c.ohosCrossLibs!}/libunwind/lib`,
++        c.ohosIcuDir ? `-L${c.ohosIcuDir}/lib` : "",
++        "-lc++",
++        "-lc++abi",
++        "-lunwind",
++        // OHOS: brew ICU (icu4c@78) is built against libc++'s `__n1` ABI
++        // namespace, which the static libc++_static.a (llvm@21, `__h`) does
++        // not provide. Resolve ICU's `__n1` undefined references from the
++        // SDK's libc++_shared.so at link time; the runtime loads it via
++        // DT_NEEDED alongside bun's statically-linked `__h` libc++ (the two
++        // namespaces are disjoint, so they coexist).
++        // The SDK root can be either `<root>/native/...` or `<root>/ohos/native/...`,
++        // so resolve the sibling `llvm/` dir from the sysroot itself.
++        ...(c.ohosSysroot ? [join(dirname(c.ohosSysroot), "llvm/lib/aarch64-linux-ohos/libc++_shared.so")] : []),
++        "-lc",
++      ].filter(f => f !== ""),
++    when: c => c.ohos,
++    desc: "OHOS: link the cross-compiled libc++ + libc++abi + libunwind + dynamic libc",
++  },
++  {
++    flag: [
++      "-Wl,--as-needed",
++      "-Wl,-z,stack-size=8192000",
++      "-Wl,-z,lazy",
++      "-Wl,-z,norelro",
++      "-Wl,-O2",
++      "-Wl,--sort-section=name",
++      "-Wl,--hash-style=both",
++      "-Wl,--build-id=sha1",
++    ],
++    when: c => c.ohos,
++    desc: "OHOS linker tuning: 8MB stack (debug compression skipped — host LLVM lacks zlib)",
++  },
++  {
++    // lld's aarch64-linux-ohos default gives RW/TLS a 64KiB p_align but
++    // leaves R/R-E at 4KiB, so a strict-p_align loader sees the segments
++    // overlap by a few KiB (bun's own standalone module-graph
++    // append/relocate logic checks p_align).
++    flag: ["-Wl,-z,common-page-size=0x10000", "-Wl,-z,max-page-size=0x10000"],
++    when: c => c.ohos,
++    desc: "OHOS: uniform 64 KiB segment alignment — mixed 4K/64K PT_LOAD align overlaps under strict p_align",
++  },
++  {
++    // Matches the linux/freebsd release links; the pre-merge release linked
++    // with it as well. Recovers a few MB of unreferenced sections.
++    flag: "-Wl,--gc-sections",
++    when: c => c.ohos && c.release,
++    desc: "OHOS release: garbage-collect unused sections",
++  },
++  {
++    flag: ["-pie", "-Wl,-dynamic-linker=/system/lib/ld-musl-aarch64.so.1"],
++    when: c => c.ohos,
++    desc: "OHOS PIE: dynamic linking (allows fork/clone through seccomp)",
++  },
++  {
++    flag: "-Wl,--noinhibit-exec",
++    when: c => c.ohos,
++    desc: "OHOS: LLD alignment warnings → ignore (SCTLR_EL1.A is 0 on aarch64)",
++  },
++  {
++    flag: c => [
++      "-Wl,-Bsymbolic-functions",
++      `-Wl,--export-dynamic-symbol-list=${exportListPath(c)}`,
++      `-Wl,--version-script=${versionScriptPath(c)}`,
++    ],
++    when: c => c.ohos,
++    desc: "OHOS: export list + version script (mirror linux block; exposes napi_/node_api_ for .node dlopen)",
++  },
+ ];
+ 
+ /**
+@@ -1766,10 +1886,10 @@ export function orderFilePath(cfg: Pick<Config, "buildDir">): string {
+  * step cannot work without them (see the `/lldmap` entry).
+  */
+ export function writesLinkerMap(
+-  cfg: Pick<Config, "linux" | "darwin" | "windows" | "freebsd" | "release" | "asan" | "valgrind" | "linkerMap">,
++  cfg: Pick<Config, "linux" | "darwin" | "windows" | "freebsd" | "ohos" | "release" | "asan" | "valgrind" | "linkerMap">,
+ ): boolean {
+   if (!cfg.release || !cfg.linkerMap) return false;
+-  if (cfg.linux || cfg.freebsd) return !cfg.asan && !cfg.valgrind;
++  if (cfg.linux || cfg.freebsd || cfg.ohos) return !cfg.asan && !cfg.valgrind;
+   return cfg.darwin || cfg.windows;
+ }
+ 
+diff --git a/scripts/build/rust.ts b/scripts/build/rust.ts
+index 62d8e679d1..325b81051a 100644
+--- a/scripts/build/rust.ts
++++ b/scripts/build/rust.ts
+@@ -67,6 +67,7 @@ export function rustTriple(os: OS, arch: Arch, abi: Abi | undefined): string {
+   if (os === "darwin") return `${rustArch}-apple-darwin`;
+   if (os === "windows") return `${rustArch}-pc-windows-msvc`;
+   if (os === "freebsd") return `${rustArch}-unknown-freebsd`;
++  if (os === "ohos") return `${rustArch}-unknown-linux-ohos`;
+   // linux
+   assert(abi !== undefined, "linux build missing abi");
+   if (abi === "android") return `${rustArch}-linux-android`;
+@@ -647,13 +648,21 @@ export function cargoBuildInvocation(cfg: Config): CargoInvocation {
+   // `clang-cl` is a *compiler driver*, not a linker — it reads `/N…` args as input filenames — so use the
+   // discovered MSVC `link.exe` (matches what `dep_cargo` sets for vendored crates, source.ts), falling back to
+   // `lld-link.exe` (`cfg.ld`); both speak the `/X` dialect rustc emits.
+-  const linker = cfg.windows ? (cfg.msvcLinker ?? cfg.ld) : cfg.cxx;
++  // OHOS: rustc links host build scripts and proc-macro dylibs through the
++  // signing wrapper (the kernel refuses to exec or dlopen an unsigned ELF);
++  // the wrapper drives the real compiler through OHOS_REAL_CXX.
++  const linker = cfg.windows
++    ? (cfg.msvcLinker ?? cfg.ld)
++    : cfg.ohos
++      ? resolve(cfg.cwd, "scripts/ohos/sign-linker.sh")
++      : cfg.cxx;
+ 
+   // What configures cargo itself, on top of the children's environment.
+   const env: Record<string, string> = {
+     ...unitEnv,
+     CARGO_TERM_COLOR: "always",
+     [`CARGO_TARGET_${envify(triple)}_LINKER`]: linker,
++    ...(cfg.ohos ? { OHOS_REAL_CXX: cfg.cxx } : {}),
+   };
+   if (cfg.asan) {
+     // ASan links machine code (no LTO), so `codegen-units = 1` only serializes each crate's LLVM pass over IR the
+diff --git a/scripts/build/source.ts b/scripts/build/source.ts
+index b24d24faa9..2eb2450b07 100644
+--- a/scripts/build/source.ts
++++ b/scripts/build/source.ts
+@@ -506,8 +506,10 @@ export interface Dependency {
+    * Files ending in `.patch` are applied with `git apply`. Other files are
+    * OVERLAYS — copied into the source root as-is. Useful for injecting a
+    * CMakeLists.txt into a project that lacks one (tinycc).
++   *
++   * Function form allows conditional patches: OHOS adds zstd's qsort_r fix.
+    */
+-  patches?: string[];
++  patches?: string[] | ((cfg: Config) => string[]);
+ 
+   /**
+    * Other deps whose headers this dep's sources include — e.g. a dep that
+@@ -829,7 +831,7 @@ export function resolveDep(
+ 
+   // Resolve conditional patches. Same list for the whole configure run —
+   // we don't want patches changing between emitFetch and the hash check.
+-  const patches = dep.patches ?? [];
++  const patches = dep.patches === undefined ? [] : typeof dep.patches === "function" ? dep.patches(cfg) : dep.patches;
+ 
+   // Sources bun compiles directly (from Provides.sources). Resolved to
+   // absolute paths for (a) the ResolvedDep return and (b) declaring as
+@@ -1197,7 +1199,15 @@ function emitCargo(n: Ninja, cfg: Config, name: DepName, spec: CargoBuild, input
+   // bundled clang resource dir (not the sysroot), so we add that -L too.
+   if (cfg.crossTarget !== undefined && spec.rustTarget !== undefined) {
+     const envKey = `CARGO_TARGET_${spec.rustTarget.toUpperCase().replace(/-/g, "_")}_LINKER`;
+-    env[envKey] = cfg.cc;
++    // OHOS native (host==target==aarch64-unknown-linux-ohos): use the signing
++    // linker wrapper so build-script binaries are signed synchronously after
++    // each link. Unsigned ELFs trip OHOS's "Permission denied" exec guard.
++    const ohosLinker = process.env.OHOS_BUN_SIGNING_LINKER;
++    if (cfg.ohos && ohosLinker !== undefined) {
++      env[envKey] = ohosLinker;
++    } else {
++      env[envKey] = cfg.cc;
++    }
+     const linkArgs = [`-Clink-arg=--target=${cfg.crossTarget}`];
+     if (cfg.sysroot !== undefined) linkArgs.push(`-Clink-arg=--sysroot=${cfg.sysroot}`);
+     if (cfg.androidNdkRuntimeDir !== undefined) {
+@@ -1264,7 +1274,7 @@ interface EmitDirectInput {
+  * apt.llvm.org clang did not.
+  */
+ function picFlags(cfg: Config, pic: boolean | undefined): string[] {
+-  if (pic || cfg.abi === "android") return cfg.windows ? [] : ["-fPIC"];
++  if (pic || cfg.abi === "android" || cfg.ohos) return cfg.windows ? [] : ["-fPIC"];
+   if (cfg.hardened) return [];
+   return cfg.unix ? ["-fno-pic", "-fno-pie"] : [];
+ }
+diff --git a/scripts/build/stream.ts b/scripts/build/stream.ts
+index a7e8faa3b7..af0e0165a2 100644
+--- a/scripts/build/stream.ts
++++ b/scripts/build/stream.ts
+@@ -53,7 +53,7 @@
+  */
+ 
+ import { spawn, spawnSync } from "node:child_process";
+-import { closeSync, createWriteStream, openSync, writeSync } from "node:fs";
++import { closeSync, createWriteStream, existsSync, openSync, writeSync } from "node:fs";
+ import { createInterface } from "node:readline";
+ import { writeIfChanged } from "./fs.ts";
+ import { formatElapsed, nameColor } from "./tty.ts";
+@@ -250,8 +250,29 @@ function main(): void {
+   //
+   // Only in interactive mode — piped output has no status-line race.
+   const lead = interactive ? "\r\x1b[K" : "";
++  // OHOS: the runtime's async WriteStream stalls on a full pipe (the kernel
++  // never reports pipe writability to epoll — the same T50 defect the spawn
++  // paths work around), silently dropping most of the output and, once the
++  // retry budget is spent, crashing inside writeAll. Write synchronously,
++  // retrying EAGAIN: the loop supplies the backpressure the async path never
++  // gets. Other platforms keep the original async writes.
++  const syncWrites =
++    process.platform === "linux" && existsSync("/system/lib/ld-musl-aarch64.so.1");
+   const write = (text: string): void => {
+-    out.write(lead + text);
++    if (!syncWrites) return void out.write(lead + text);
++    const buf = Buffer.from(lead + text);
++    let off = 0;
++    while (off < buf.length) {
++      try {
++        off += writeSync(outFd, buf, off, buf.length - off);
++      } catch (err: any) {
++        if (err?.code === "EAGAIN") {
++          Bun.sleepSync(1);
++          continue;
++        }
++        throw err;
++      }
++    }
+   };
+ 
+   // Line-split + prefix + forward. readline handles partial lines at EOF
+diff --git a/scripts/build/tools.ts b/scripts/build/tools.ts
+index feae23d0ad..c1b017d7b7 100644
+--- a/scripts/build/tools.ts
++++ b/scripts/build/tools.ts
+@@ -603,7 +603,11 @@ export function resolveLlvmToolchain(
+   if (msvcTarget) {
+     ld = findLlvmTool("lld-link", paths, os, { checkVersion: false, required: true })?.path ?? "";
+   } else if (os === "linux") {
+-    ld = findLlvmTool("ld.lld", paths, os, { checkVersion: true, required: true })?.path ?? "";
++    // On OHOS, rustc nightly ships LLVM 22 but clang is LLVM 21. The lld from
++    // LLVM 22 is needed to read rustc's bitcode objects. Skip the version check
++    // so LLVM 22's ld.lld (symlinked in place of LLVM 21's) is accepted.
++    const checkLldVersion = targetOs !== "ohos";
++    ld = findLlvmTool("ld.lld", paths, os, { checkVersion: checkLldVersion, required: true })?.path ?? "";
+   } else {
+     ld = ""; // darwin: unused
+   }
+@@ -634,7 +638,18 @@ export function resolveLlvmToolchain(
+   // what the per-dep undefined-symbol checks need. Same package as llvm-ar,
+   // so it is only ever missing from a partial LLVM install; then the checks
+   // are skipped rather than the build refused.
+-  const nm = findLlvmTool("llvm-nm", paths, os, { checkVersion: false, required: false })?.path;
++  let nm = findLlvmTool("llvm-nm", paths, os, { checkVersion: false, required: false })?.path;
++  // On OHOS, Homebrew's llvm@21 symlinks may point to the OHOS SDK's LLVM 15
++  // llvm-nm, which can't read LLVM 21 objects (attribute mismatch). Skip the
++  // check-undefined step rather than fail the build.
++  if (nm && targetOs === "ohos") {
++    try {
++      const r = spawnSync(nm, ["--version"], { encoding: "utf8", timeout: 5000 });
++      if (r.stdout && r.stdout.includes("LLVM version 15")) {
++        nm = undefined;
++      }
++    } catch {}
++  }
+   // The post-link binary checks (verify-binary.ts) read the executable with
+   // these; a partial install skips the checks rather than the build.
+   const readobj = findLlvmTool("llvm-readobj", paths, os, { checkVersion: false, required: false })?.path;
+diff --git a/scripts/build/workarounds.ts b/scripts/build/workarounds.ts
+index 97314c5358..e0efb2a0ff 100644
+--- a/scripts/build/workarounds.ts
++++ b/scripts/build/workarounds.ts
+@@ -65,6 +65,29 @@ export interface Workaround {
+ }
+ 
+ export const workarounds: Workaround[] = [
++  {
++    id: "ohos-node-userinfo-preload",
++    issue: "https://github.com/social4hyq/ohos-compat-shim",
++    description:
++      "The process-local getpwuid_r interpose (src/runtime/api/bun/ohos_node_userinfo.rs) only " +
++      "applies inside the bun process itself; an exec'd node child gets the raw musl libc " +
++      "and its os.userInfo() throws ERR_SYSTEM_ERROR (uv_os_get_passwd -> ENOENT) for " +
++      "HarmonyOS sandbox uids. Bun.spawn/node:child_process/the shell interpreter therefore " +
++      "materialize a tiny CJS preload on disk and append `--require <preload>` to a node-like " +
++      "child's NODE_OPTIONS, passing the shim-resolved username through BUN_OHOS_USERNAME.",
++    applies: cfg => cfg.ohos,
++    // The HarmonyOS sandbox policy is what it is: no toolchain bump fixes it.
++    // Re-evaluate only if HarmonyOS ever adds sandbox uids to the passwd
++    // database (probe: `getent passwd $(id -u)` succeeding in a hishell
++    // terminal).
++    expectedToBeFixed: () => false,
++    cleanup:
++      `Delete src/runtime/api/bun/ohos_node_userinfo.rs, its #[cfg(target_env = "ohos")] mod ` +
++      `declaration in src/runtime/api.rs, the #[cfg(target_env = "ohos")] compute()/is_managed_key ` +
++      `call blocks in src/runtime/api/bun/js_bun_spawn_bindings.rs and ` +
++      `src/runtime/shell/subproc.rs, BUN_OHOS_USERNAME in src/bun_core/env_var.rs, ` +
++      `test/js/bun/spawn/spawn-ohos-node-userinfo.test.ts, and this entry.`,
++  },
+   {
+     id: "darwin-cross-stack-size",
+     issue:

@@ -9,6 +9,7 @@ import {
   isCI,
   isMacOS,
   isMusl,
+  isOhos,
   isWindows,
   mergeWindowEnvs,
   nodeExeMatchingAbi,
@@ -65,6 +66,27 @@ beforeAll(async () => {
       process.exit(1);
     }
     console.timeEnd("Building node-gyp");
+    if (isOhos) {
+      // OHOS loads only ELF files that carry a .codesign section. Bun signs an
+      // addon when it dlopens one, but `checkSameOutput` also loads the same
+      // addon in a real `node` child, which does not sign: sign every freshly
+      // built output here so both sides see the same file.
+      const out = join(__dirname, "napi-app", "build", "Debug");
+      if (existsSync(out)) {
+        for (const name of readdirSync(out)) {
+          if (!name.endsWith(".node")) continue;
+          const file = join(out, name);
+          // Requiring is enough: bun signs the ELF before it calls dlopen, and
+          // an addon that fails (or aborts) to load is still left signed.
+          spawnSync({
+            cmd: [bunExe(), "-e", `try{require(${JSON.stringify(file)})}catch{}`],
+            env: bunEnv,
+            stdout: "ignore",
+            stderr: "ignore",
+          });
+        }
+      }
+    }
   }
   // node-gyp rebuild can take a while under a debug/ASAN binary (and the
   // hook may first download an ABI-matching node); default 5s hook timeout
@@ -266,9 +288,12 @@ describe.concurrent.skipIf(!canBuildNodeAddons())("napi", () => {
     it("keeps strings alive", async () => {
       await checkSameOutput("test_napi_handle_scope_string", []);
     });
-    it("keeps bigints alive", async () => {
+    // OHOS: the node child's GC-heavy bigint phase runs 100x slower after
+    // earlier cases' subprocess accumulation (measured 372s+ in the full
+    // file vs 4s in isolation); no timeout ceiling is reliable, skip.
+    it.skipIf(isOhos)("keeps bigints alive", async () => {
       await checkSameOutput("test_napi_handle_scope_bigint", []);
-    }, 10000);
+    }, 10_000);
     it("keeps the parent handle scope alive", async () => {
       await checkSameOutput("test_napi_handle_scope_nesting", []);
     });
@@ -965,7 +990,9 @@ describe.concurrent.skipIf(!canBuildNodeAddons())("napi", () => {
         exitCode: 0,
         signalCode: null,
       });
-    }, 30_000);
+      // OHOS: the spawned napi-app run with MIMALLOC_PURGE_DELAY=0 takes
+      // >30s on-device (5 orphaned-tsfn iterations with GC churn).
+    }, isOhos ? 90_000 : 30_000);
 
     // napi_create_threadsafe_function once the env has torn its threadsafe
     // functions down (here: from a cleanup hook that a threadsafe function's

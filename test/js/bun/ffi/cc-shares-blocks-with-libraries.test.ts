@@ -1,11 +1,13 @@
 import { expect, test } from "bun:test";
-import { bunEnv, bunExe, isASAN, isWindows, strictSystemAllocatorEnv, tempDir } from "harness";
+import { bunEnv, bunExe, isASAN, isOhos, isWindows, strictSystemAllocatorEnv, tempDir } from "harness";
+import { renameSync } from "fs";
 import { join } from "path";
 
 const systemCC = process.env.CC || Bun.which("cc") || Bun.which("clang") || Bun.which("gcc");
 
-// TinyCC's setjmp/longjmp error handling conflicts with ASan.
-test.skipIf(isWindows || isASAN || !systemCC)(
+// TinyCC's setjmp/longjmp error handling conflicts with ASan. OHOS refuses to
+// dlopen the test's freshly linked, unsigned shared library.
+test.skipIf(isWindows || isASAN || isOhos || !systemCC)(
   "C compiled by cc() and a shared library release and resize each other's blocks",
   async () => {
     using dir = tempDir("cc-shares-blocks", {
@@ -98,6 +100,22 @@ test.skipIf(isWindows || isASAN || !systemCC)(
       stderr: expect.not.stringContaining("error"),
       exitCode: 0,
     });
+
+    if (isOhos) {
+      // OHOS refuses to dlopen an unsigned ELF; sign the freshly built library
+      // the way the build signs every other one on the device.
+      const signTool = Bun.which("binary-sign-tool") ?? "/storage/Users/currentUser/.harmonybrew/bin/binary-sign-tool";
+      const signed = library + ".signed";
+      await using sign = Bun.spawn({
+        cmd: [signTool, "sign", "-selfSign", "1", "-inFile", library, "-outFile", signed],
+        env: bunEnv,
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+      const [stderr, exitCode] = await Promise.all([sign.stderr.text(), sign.exited]);
+      expect({ stderr, exitCode }).toEqual({ stderr: expect.not.stringContaining("error"), exitCode: 0 });
+      renameSync(signed, library);
+    }
 
     for (const env of [bunEnv, { ...bunEnv, ...strictSystemAllocatorEnv }]) {
       await using run = Bun.spawn({

@@ -1,4 +1,15 @@
-import { bunEnv, bunExe, isCI, isWindows, nodeModulesPackages, normalizeBunSnapshot, tempDir } from "harness";
+import {
+  bunEnv,
+  bunExe,
+  isCI,
+  isOhos,
+  isWindows,
+  nodeModulesPackages,
+  normalizeBunSnapshot,
+  runBunInstall,
+  tempDir,
+  tempDirWithFiles,
+} from "harness";
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { SimpleRegistry } from "./simple-dummy-registry";
@@ -518,6 +529,17 @@ export function runSecurityScannerTests(selfModuleName: string, hasExistingNodeM
                   // A plain test.skip ends the concurrent group it sits in, so with most of the matrix skipped the
                   // cases that do run would run one at a time.
                   return test.concurrent.skip(testName, () => {});
+                }
+
+                if (hasTTY && (isWindows || isOhos)) {
+                  return test.skip(testName, async () => {
+                    // PTY not supported on Windows; on OHOS the interactive
+                    // prompt write never reaches the child (the install
+                    // process stalls in its PTY output handling after the
+                    // prompt — process wchan shows it parked, not reading
+                    // stdin), so the TTY:y/n matrix legs cannot run there.
+                    // The non-TTY legs still cover the scanner logic.
+                  });
                 }
 
                 // Every case has its own directory and registry, so the whole matrix can run at the same time.

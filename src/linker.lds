@@ -4,7 +4,6 @@ BUN_1.2 {
 	node_api_*;
 	node_module_register;
 
-
   uv_accept;
   uv_async_init;
   uv_async_send;

@@ -2,7 +2,7 @@
 // It is built with the system's C++ compiler against the headers in src/runtime/napi, without node-gyp.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { rmSync } from "fs";
-import { bunEnv, bunExe, isASAN, isLinux, isMacOS, isWindows, strictSystemAllocatorEnv, tempDir } from "harness";
+import { bunEnv, bunExe, isASAN, isLinux, isMacOS, isOhos, isWindows, strictSystemAllocatorEnv, tempDir } from "harness";
 import { join, resolve } from "path";
 
 const compiler = process.env.CXX || Bun.which("c++") || Bun.which("clang++") || Bun.which("g++");
@@ -27,6 +27,7 @@ describe.skipIf(isWindows || !compiler)("a native addon's allocations", () => {
     "the system allocator as it is": { env: { MallocDebugReport: "crash" }, callsExit },
     ...(isMacOS && { "the system allocator checking itself": { env: strictSystemAllocatorEnv, callsExit } }),
     ...(isLinux &&
+      !isOhos &&
       !callsExit && { "exit() in place of quick_exit()": { env: { LD_PRELOAD: exitLibrary }, callsExit: true } }),
   };
 
@@ -71,7 +72,8 @@ describe.skipIf(isWindows || !compiler)("a native addon's allocations", () => {
   beforeAll(async () => {
     await Promise.all([
       compile("addon.cpp", addon),
-      ...(isLinux ? [compile("exit-instead-of-quick-exit.cpp", exitLibrary)] : []),
+      // OHOS: LD_PRELOAD does not replace quick_exit (musl runs no atexit handlers).
+      ...(isLinux && !isOhos ? [compile("exit-instead-of-quick-exit.cpp", exitLibrary)] : []),
     ]);
   }, 120_000);
 

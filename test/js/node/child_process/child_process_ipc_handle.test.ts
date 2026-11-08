@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { bunEnv, bunExe, isWindows, nodeExe, tempDir, tls } from "harness";
+import { bunEnv, bunExe, isOhos, isWindows, nodeExe, tempDir, tls } from "harness";
 
 const node = nodeExe();
 

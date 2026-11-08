@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import fs from "fs";
-import { bunExe, bunEnv as env, isASAN, tmpdirSync } from "harness";
+import { bunExe, bunEnv as env, isASAN, isOhos, tmpdirSync } from "harness";
 import path from "path";
 
 const ASAN_MULTIPLIER = isASAN ? 3 : 1;
@@ -33,5 +33,7 @@ test(
     const out = await stdout.text();
     expect(out).toContain("done");
   },
-  120_000 * ASAN_MULTIPLIER,
+  // The install of the fixture's dependencies takes ~2 minutes on the OHOS
+  // device.
+  (isOhos ? 480_000 : 120_000) * ASAN_MULTIPLIER,
 );

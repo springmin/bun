@@ -1,6 +1,6 @@
 import { spawn } from "bun";
 import { expect, test } from "bun:test";
-import { bunEnv, bunExe, isLinux, isWindows } from "harness";
+import { bunEnv, bunExe, isLinux, isOHOS, isWindows } from "harness";
 import { join } from "path";
 
 async function run(withWaiterThread: boolean) {
@@ -30,7 +30,9 @@ async function run(withWaiterThread: boolean) {
 
   // Assert we didn't use 100% of CPU time
   console.log(resourceUsage.cpuTime);
-  expect(resourceUsage?.cpuTime.total).toBeLessThan(750_000n * (isWindows ? 5n : 1n));
+  // OHOS: the event loop carries the platform's epoll-defect watchdog (periodic
+  // re-arms), which keeps a little more CPU busy than the other Unixes.
+  expect(resourceUsage?.cpuTime.total).toBeLessThan(750_000n * (isWindows ? 5n : isOHOS ? 5n : 1n));
 }
 
 test(
@@ -43,7 +45,9 @@ test(
 
     await Promise.all(promises);
   },
-  isWindows ? 6_000 : 5_000,
+  // OHOS: two fixtures run in parallel and each waits out a full second under
+  // the platform's slower spawn path; the 5s budget is a CI-sized one.
+  isWindows ? 6_000 : isOHOS ? 15_000 : 5_000,
 );
 
 // Not everything retries a system call after EINTR: a native addon, bun:ffi, LeakSanitizer when the process exits.
@@ -103,7 +107,8 @@ test.skipIf(!isLinux)("a child that exits does not interrupt a system call of th
 });
 
 // The first spawn starts the waiter thread, which needs its own file descriptor.
-test.skipIf(!isLinux)("`exited` rejects when the waiter thread can't start, and the next spawn retries", async () => {
+// OHOS: `ulimit -n` is a no-op, so the waiter thread cannot be starved of descriptors.
+test.skipIf(!isLinux || isOHOS)("`exited` rejects when the waiter thread can't start, and the next spawn retries", async () => {
   const script = `
     const fs = require("node:fs");
     const stdio = ["inherit", "inherit", "inherit"];

@@ -1,5 +1,5 @@
 import { expect } from "bun:test";
-import { bunEnv, bunExe, isLinux, libcPathForDlopen, readElf64ProgramHeaders, tempDir } from "harness";
+import { bunEnv, bunExe, isLinux, isOhos, libcPathForDlopen, readElf64ProgramHeaders, tempDir } from "harness";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { isHardened } from "./hardened";
@@ -75,7 +75,9 @@ function symbolsOf(path: string, file: Buffer, names: string[]) {
   return Object.keys(found).length || sections.some(section => isNamed(section, ".debug_info")) ? found : undefined;
 }
 
-describe.skipIf(!isLinux)("the file of the Bun under test", () => {
+// OHOS's signed ELF keeps no local names in its symbol table, so the layout
+// this file reads is not the one the test knows.
+describe.skipIf(!isLinux || isOhos)("the file of the Bun under test", () => {
   const file = isLinux ? readFileSync(process.execPath) : Buffer.alloc(0);
   const places = new Map(marks.map(mark => [mark, placesOf(file, mark.text)]));
   const holds = (mark: (typeof marks)[number]) => places.get(mark)!.length > 0;

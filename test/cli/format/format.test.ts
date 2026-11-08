@@ -8,6 +8,7 @@ import {
   isLinux,
   isMacOS,
   isMusl,
+  isOhos,
   isWindows,
   normalizeBunSnapshot,
   tempDir,
@@ -423,7 +424,8 @@ describe.concurrent("bun fmt", () => {
     }
     const read = (dir: string, name: string) => readFileSync(join(dir, name), "utf8");
 
-    test("keeps its hard links", async () => {
+    // OHOS: link(2) does not produce a hard link there (the sandbox denies it).
+    test.skipIf(isOhos)("keeps its hard links", async () => {
       using dir = tempDir("bun-format", { "a.js": ugly });
       linkSync(join(String(dir), "a.js"), join(String(dir), "other-name.txt"));
       const { exitCode } = await write(String(dir), ["a.js"]);
@@ -467,7 +469,7 @@ describe.concurrent("bun fmt", () => {
     });
 
     // With `ulimit -f 16` a write fails with EFBIG once it's 8 KB into a file, much like on a full disk.
-    test.skipIf(isWindows)("keeps its old text when writing it in place fails partway", async () => {
+    test.skipIf(isWindows || isOhos)("keeps its old text when writing it in place fails partway", async () => {
       const text = `{${Array.from({ length: 3000 }, (_, i) => `"k${i}":   [1,2,3]`).join(",")}}\n`;
       using dir = tempDir("bun-format", { "a.json": text });
       linkSync(join(String(dir), "a.json"), join(String(dir), "other-name.txt"));
@@ -583,7 +585,7 @@ describe.concurrent("bun fmt", () => {
   });
 
   // Every write to /dev/full fails with ENOSPC, as on a full disk.
-  describe.skipIf(!isLinux)("standard output", () => {
+  describe.skipIf(!isLinux || isOhos)("standard output", () => {
     /** Runs `bun fmt` wrapped in the shell `script`, where `"$0" "$@"` is the command. */
     async function inShell(script: string, args: string[]) {
       using dir = tempDir("bun-format", { "a.js": ugly });
@@ -4276,7 +4278,8 @@ describe.concurrent("bun fmt", () => {
 
   describe("a language that only a Prettier plugin supports", () => {
     // A run starts a VM, and the leak check at exit takes seconds with a VM's threads.
-    const timeout = isDebug || isASAN ? 120_000 : 5_000;
+    // OHOS starts that VM slowly, so these paths need longer than a release build's 5 s.
+    const timeout = isDebug || isASAN ? 120_000 : isOhos ? 60_000 : 5_000;
     // Stand-ins. This Prettier collapses spaces and logs the arguments of each call.
     const packages = {
       "node_modules/prettier/package.json": '{ "name": "prettier", "version": "3.0.0", "main": "index.cjs" }',

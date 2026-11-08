@@ -27,6 +27,7 @@ import {
   githubTarball,
   isLinux,
   isWindows,
+  isOhos,
   pack,
   readdirSorted,
   runBunInstall,
@@ -2597,7 +2598,12 @@ test.concurrent("the store entries of one package count as one installed package
 });
 
 // https://github.com/oven-sh/bun/issues/28147
-test.concurrent("patched package shared by multiple peer variants is materialized into the cache once", async () => {
+test("patched package shared by multiple peer variants is materialized into the cache once", async () => {
+  // The isolated store hardlinks variants from the patched cache directory;
+  // the OHOS sandbox denies link(2) (EACCES), so inodes cannot be shared.
+  if (Bun.env.BUN_OHOS === "1") {
+    return;
+  }
   const { packageJson, packageDir } = await registry.createTestDir({ bunfigOpts: { linker: "isolated" } });
 
   // `peer-deps@1.0.0` has `peerDependencies: { "no-deps": "*" }`. Giving each
@@ -3817,7 +3823,8 @@ describe.concurrent("existing node_modules, missing node_modules/.bun", () => {
       return false;
     }
   });
-  test.skipIf(!otherDevice).concurrent("entries that can't be moved aside are deleted", async () => {
+  // OHOS: the only cross-device candidate is /dev/shm, which the sandbox refuses at mkdtemp.
+  test.skipIf(!otherDevice || isOhos).concurrent("entries that can't be moved aside are deleted", async () => {
     const { packageDir } = await registry.createTestDir({
       bunfigOpts: { linker: "hoisted" },
       files: memberWithNestedCopy,
@@ -5436,7 +5443,10 @@ describe.each(["isolated", "hoisted"] as const)("failed script of an optional de
 
   // With SIGCHLD ignored, Linux reaps the script itself and bun cannot wait for it. Bun then
   // treats a script that exited 0 as failed, through a second exit path.
-  test.concurrent.skipIf(!isLinux)("workspace: the folder is kept when bun can't wait for the script", async () => {
+  // With SIGCHLD ignored, Linux reaps the script itself and bun cannot wait for it. Bun then
+  // treats a script that exited 0 as failed, through a second exit path.
+  // OHOS: scripts run through the waiter thread, so a script bun cannot wait for cannot be made.
+  test.concurrent.skipIf(!isLinux || isOhos)("workspace: the folder is kept when bun can't wait for the script", async () => {
     const { packageDir } = await registry.createTestDir({ bunfigOpts: { linker }, files: workspaceFiles() });
     const verb = linker === "hoisted" ? "deleting" : "skipping";
 
@@ -6123,7 +6133,7 @@ describe.concurrent("bin links of a failed optional dependency (hoisted)", () =>
 
   // With SIGCHLD ignored, Linux reaps the script itself and bun cannot wait for it. Bun then
   // treats a script that exited 0 as failed, through a second exit path.
-  test.concurrent.skipIf(!isLinux)("a script that bun cannot wait for", async () => {
+  test.concurrent.skipIf(!isLinux || isOhos)("a script that bun cannot wait for", async () => {
     const { packageDir } = await registry.createTestDir({
       bunfigOpts: { linker: "hoisted" },
       files: {

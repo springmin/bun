@@ -1141,7 +1141,7 @@ describe.concurrent.each(["hoisted", "isolated"] as const)("tarball integrity mi
   // means the failure happens in the resolve phase, where the runTasks
   // callback is the void `onPackageDownloadError = {}` — i.e. the branch the
   // fix in runTasks.zig now cleans up.
-  it("should fail (not hang) when tarball bytes don't match manifest SHA-512", { timeout: 60_000 }, async () => {
+  it("should fail (not hang) when tarball bytes don't match manifest SHA-512", { timeout: Bun.env.BUN_OHOS === "1" ? 120_000 : 60_000 }, async () => {
     function buildTarball(body: Buffer) {
       const tgz = tarball({ "package.json": body });
       return { tgz, integrity: "sha512-" + createHash("sha512").update(tgz).digest("base64") };
@@ -1201,7 +1201,7 @@ describe.concurrent.each(["hoisted", "isolated"] as const)("tarball integrity mi
       env: { ...env, BUN_INSTALL_CACHE_DIR: join(String(dir), ".cache") },
       stdout: "pipe",
       stderr: "pipe",
-      timeout: 15_000,
+      timeout: Bun.env.BUN_OHOS === "1" ? 60_000 : 15_000,
     });
     const [stderr, stdout, exitCode] = await Promise.all([proc.stderr.text(), proc.stdout.text(), proc.exited]);
 

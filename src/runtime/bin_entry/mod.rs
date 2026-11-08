@@ -217,6 +217,32 @@ pub(crate) unsafe extern "C" fn main(argc: c_int, argv: *const *const c_char) ->
     #[cfg(any(target_os = "linux", target_os = "android"))]
     pregrow_fd_table();
 
+    // OHOS: /tmp is writable but rename(2) is denied by the MAC layer
+    // (hmmac=inherit_parent), which install/extract and subprocesses need.
+    // Always provide a writable fallback when TMPDIR is unset.
+    #[cfg(target_env = "ohos")]
+    {
+        if std::env::var("TMPDIR").is_err() {
+            let fallback = if let Ok(home) = std::env::var("HOME") {
+                let p = format!("{}/tmp", home);
+                let cs = std::ffi::CString::new(p.as_str()).unwrap();
+                if unsafe { libc::access(cs.as_ptr(), libc::W_OK) } == 0 {
+                    p
+                } else {
+                    "/data/storage/el2/base/tmp".to_string()
+                }
+            } else {
+                "/data/storage/el2/base/tmp".to_string()
+            };
+            let _ = unsafe { std::env::set_var("TMPDIR", &fallback) };
+        }
+
+        // OHOS forces the waiter thread; create its eventfd before user code
+        // runs so an FD baseline a script or test takes does not gain a stray
+        // +1 the first time a child is spawned (see WaiterThreadPosix::prewarm).
+        bun_spawn::process::WaiterThread::prewarm();
+    }
+
     // 5. Per-thread stack-limit cache for the JS recursion guard.
     StackCheck::configure_thread();
     bun_io::ParentDeathWatchdog::install();

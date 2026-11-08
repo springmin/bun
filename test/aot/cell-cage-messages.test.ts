@@ -1,5 +1,5 @@
 import { afterAll, expect } from "bun:test";
-import { bunEnv, bunExe, isASAN, isDebug, isLinux, isWindows, tempDir } from "harness";
+import { bunEnv, bunExe, isASAN, isDebug, isLinux, isOhos, isWindows, tempDir } from "harness";
 import { join } from "node:path";
 import { locksEnvironment } from "./hardened";
 import { withoutCoreDump } from "./harness/commands";
@@ -9,7 +9,8 @@ import { beforeAll, describe, test } from "./supported";
 
 raiseDefaultTimeout(120_000);
 
-const canLimitAddressSpace = isLinux && !isASAN && !isDebug;
+// OHOS does not enforce RLIMIT_AS, so `ulimit -v` leaves the heap its full range.
+const canLimitAddressSpace = isLinux && !isASAN && !isDebug && !isOhos;
 const cageSize = (size: string | undefined) => ({ ...bunEnv, BUN_JSC_markedBlockCageSizeInMB: size });
 
 async function run(cmd: string[], cwd: string, env: Record<string, string | undefined>) {

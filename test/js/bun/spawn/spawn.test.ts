@@ -10,6 +10,7 @@ import {
   isBroken,
   isDebug,
   isLinux,
+  isOhos,
   isPosix,
   isRoot,
   isWindows,
@@ -168,7 +169,12 @@ for (let [gcTick, label] of [
       });
 
       it("check exit code from onExit", async () => {
-        const count = isWindows || isDebug ? 100 : 1000;
+        // OHOS: 1000 pairs = 2000 children at ~2-3s startup each over 40
+        // batches of 25 concurrent pairs overran the 600s test timeout
+        // (measured: 647s+ hung in onExit waits). Reduce like
+        // isWindows/isDebug do; 100 pairs still exercises the onExit
+        // contract (batched 25x4) in ~30s on-device.
+        const count = isWindows || isDebug || isOhos ? 100 : 1000;
         // Bounded concurrency: 25 pairs (50 children) at a time keeps this from
         // being 1000 strictly-serial spawn pairs without overwhelming CI runners.
         const batchSize = 25;
@@ -595,7 +601,7 @@ for (let [gcTick, label] of [
             const out = await proc.stdout.text();
             expect(out).not.toBe("");
           }
-        });
+        }, isOhos ? 30_000 : 5_000);
       });
 
       it("throws errors for invalid arguments", async () => {
@@ -668,7 +674,7 @@ describe("spawn unref and kill should not hang", () => {
     expect().pass();
   });
   it("kill and unref", async () => {
-    for (let i = 0; i < (isWindows ? 10 : 100); i++) {
+    for (let i = 0; i < (isWindows || isOhos ? 10 : 100); i++) {
       const proc = spawn({
         cmd,
         stdout: "ignore",
@@ -686,7 +692,9 @@ describe("spawn unref and kill should not hang", () => {
     expect().pass();
   });
   it("unref and kill", async () => {
-    for (let i = 0; i < (isWindows ? 10 : 100); i++) {
+    // OHOS: 100 serial spawns at ~2.5s startup each hangs the file past its
+    // watchdogs; 10 still exercises the kill/unref contract.
+    for (let i = 0; i < (isWindows || isOhos ? 10 : 100); i++) {
       const proc = spawn({
         cmd,
         stdout: "ignore",
@@ -713,7 +721,10 @@ describe("spawn unref and kill should not hang", () => {
 
 async function runTest(sleep: string, order = ["sleep", "kill", "unref", "exited"]) {
   console.log("running", order.join(","), "x 100");
-  const total = isWindows ? 10 : 100;
+  // OHOS: 16 orders x 100 iterations = 1600 spawns at ~2.5s startup each
+  // overruns the 128s case timeout; 10 iterations keep the fd-leak
+  // assertion meaningful (160 spawns) in ~80s.
+  const total = isWindows || isOhos ? 10 : 100;
   // Iterations are independent; run a few at a time instead of strictly
   // serially. Kept small (5) because all 16 orders run in parallel.
   const batchSize = 5;
@@ -1882,7 +1893,9 @@ describe("uid/gid", () => {
   it.if(isPosix && !isRoot)("throws EPERM for a uid the process cannot set", () => {
     let thrown: any;
     try {
-      spawn({ cmd: ["id"], uid: 0 });
+      // bunExe is on PATH everywhere; the sandbox PATH on OHOS lacks 'id',
+      // which would surface ENOENT before the uid check.
+      spawn({ cmd: [bunExe(), "-e", ""], uid: 0 });
     } catch (e) {
       thrown = e;
     }
@@ -1912,6 +1925,29 @@ it.if(parentThp() === "1")("spawned children keep the system THP policy", async 
   expect(exitCode).toBe(0);
 });
 
+describe("stdin ownership", () => {
+  it("mutating an ArrayBuffer/Uint8Array passed as stdin after spawn() returns does not corrupt what the child receives", async () => {
+    const original = "the quick brown fox jumps over the lazy dog\n".repeat(500);
+    const bytes = new TextEncoder().encode(original);
+
+    await using proc = spawn({
+      cmd: [bunExe(), "-e", "process.stdin.pipe(process.stdout)"],
+      stdin: bytes,
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+
+    // The write to the child's stdin pipe happens asynchronously on the
+    // event loop, not inline in this call. Mutate the buffer right after
+    // handing it to spawn() — before anything is awaited — so that if
+    // spawn() kept a live view into it instead of copying it up front, the
+    // child observes this corruption instead of the original bytes.
+    bytes.fill(0);
+
+    const [stdout, stderr, exitCode] = await Promise.all([proc.stdout.text(), proc.stderr.text(), proc.exited]);
+    expect({ stdout, stderr, exitCode }).toEqual({ stdout: original, stderr: "", exitCode: 0 });
+  });
+});
 // Runs a script in a fresh bun process, so its fd numbers are low and known and a blocked spawnSync cannot block this runner.
 async function runInFreshProcess(script: string) {
   await using proc = spawn({
@@ -2264,7 +2300,9 @@ describe.skipIf(!isPosix)("a spawn while fd 0, 1 or 2 is closed", () => {
     });
   });
 
-  it.concurrent.skipIf(!isLinux)("a stdin memfd that is moved off fd 1 keeps its close-on-exec state", async () => {
+  // OHOS: memfd stdio is disabled there (memfd-backed stdio makes children abort),
+  // so stdin is a socketpair and there is no memfd to look at.
+  it.concurrent.skipIf(!isLinux || isOhos)("a stdin memfd that is moved off fd 1 keeps its close-on-exec state", async () => {
     // /proc/self/fdinfo shows FD_CLOEXEC of the parent's memfd as O_CLOEXEC in "flags".
     const stdinMemfd = (closeFirst: boolean) =>
       run(`
@@ -2289,7 +2327,9 @@ describe.skipIf(!isPosix)("a spawn while fd 0, 1 or 2 is closed", () => {
     expect(moved).toEqual(inPlace);
   });
 
-  it.concurrent.skipIf(!isLinux)(
+  // OHOS: the spawn path needs more than one free descriptor at the limit (the
+  // exit watcher and the pre-exec signing open), so a single free fd is EMFILE.
+  it.concurrent.skipIf(!isLinux || isOhos)(
     "at the descriptor limit a spawn still works when only the closed fd 1 is free",
     async () => {
       // No number at 3 or above is free, so the pidfd (or the waiter thread's eventfd) cannot move.

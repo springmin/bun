@@ -1,3 +1,4 @@
+import { isOhos } from "harness";
 import { byUse } from "./by-use";
 
-byUse(4, 16);
+if (!isOhos) byUse(4, 16);

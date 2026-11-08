@@ -621,8 +621,7 @@ function test(label: string, fn: (ws: WebSocket, done: (err?: unknown) => void) 
         fn(ws, done);
       })
       .catch(done);
-  });
-}
+  });}
 
 async function listen(): Promise<URL> {
   const pathname = path.resolve(import.meta.dir, "../../web/websocket/websocket-server-echo.mjs");

@@ -1,11 +1,12 @@
 import { spawn } from "bun";
 import { expect, it } from "bun:test";
-import { bunEnv, bunExe } from "harness";
+import { bunEnv, bunExe, isOhos } from "harness";
 import { join } from "path";
 
 // https://github.com/oven-sh/bun/issues/2499
 it("onAborted() and onWritable are not called after receiving an empty response body due to a promise rejection", async testDone => {
-  var timeout = AbortSignal.timeout(10_000);
+  // OHOS under 5-way parallel load needs a wider budget for the 40 iterations.
+  var timeout = AbortSignal.timeout(isOhos ? 25_000 : 10_000);
   timeout.onabort = e => {
     testDone(new Error("Test timed out, which means it failed"));
   };
@@ -88,4 +89,4 @@ it("onAborted() and onWritable are not called after receiving an empty response 
   }
   timeout.onabort = () => {};
   testDone();
-}, 30_000);
+}, isOhos ? 60_000 : 30_000);

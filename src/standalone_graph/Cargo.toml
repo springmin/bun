@@ -22,6 +22,7 @@ bitflags.workspace = true
 bun_alloc.workspace = true
 bun_aot = { package = "bun_aot_interface", path = "../aot/interface" }
 bun_core.workspace = true
+ohos_sign = { path = "../ohos_sign" }
 bun_bundler.workspace = true
 bun_collections.workspace = true
 bun_dotenv.workspace = true

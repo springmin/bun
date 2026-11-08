@@ -9,6 +9,9 @@
 #![feature(optimize_attribute)]
 // For `__rust_no_alloc_shim_is_unstable_v2` in bin_entry.
 #![feature(rustc_attrs)]
+// The OHOS build pins nightly-2026-07-20, where `Box<[u8]>::into_parts` (the
+// new PNG codec) is still behind this gate; the upstream toolchain has it.
+#![cfg_attr(target_env = "ohos", feature(box_vec_non_null))]
 #![allow(internal_features)]
 // The unit-test harness leaves out `bin_entry` (below), the root that keeps
 // this crate's `pub(crate)` items alive, so in a test build most of the crate

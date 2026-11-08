@@ -24,6 +24,8 @@ pub(crate) use bun_jsc::BuildMessage;
 pub(crate) use bun_jsc::ResolveMessage;
 
 // ─── compiling submodules (api/ dir) ─────────────────────────────────────────
+#[path = "api/ant.rs"]
+pub(crate) mod ant;
 #[path = "api/Archive.rs"]
 pub(crate) mod archive;
 #[path = "api/BunObject.rs"]
@@ -94,6 +96,14 @@ pub(crate) mod bun_subprocess;
 // Bun.spawn() / Bun.spawnSync() host fns. Entirely JSC (~75 jsc refs).
 #[path = "api/bun/js_bun_spawn_bindings.rs"]
 pub(crate) mod js_bun_spawn_bindings;
+
+// Gives an exec'd `node` child a working os.userInfo(): the runtime patch
+// (see js_bun_spawn_bindings.rs's OHOS PWD block for the sibling workaround)
+// only covers this process, not a spawned child.
+// workarounds.ts: "ohos-node-userinfo-preload".
+#[cfg(target_env = "ohos")]
+#[path = "api/bun/ohos_node_userinfo.rs"]
+pub(crate) mod ohos_node_userinfo;
 
 // Bun.Terminal — PTY/ConPTY. JsRef lifecycle + BufferedReader/StreamingWriter
 // generic owner wiring (~120 jsc refs).

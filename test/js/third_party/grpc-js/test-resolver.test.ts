@@ -33,7 +33,7 @@ import {
 import { GrpcUri, parseUri } from "@grpc/grpc-js/build/src/uri-parser";
 import assert from "assert";
 import { beforeAll as before, describe, it } from "bun:test";
-import { isIPv6 } from "harness";
+import { isIPv6, isOhos } from "harness";
 
 function hasMatchingAddress(endpointList: Endpoint[], expectedAddress: SubchannelAddress): boolean {
   for (const endpoint of endpointList) {
@@ -68,7 +68,9 @@ describe("Name Resolver", () => {
           // Only handle the first resolution result
           listener.onSuccessfulResolution = () => {};
           assert(hasMatchingAddress(endpointList, { host: "127.0.0.1", port: 50051 }));
-          if (isIPv6()) {
+          // OHOS's hosts file maps ::1 to ip6-localhost, so "localhost" has no
+          // AAAA record even though the system supports IPv6.
+          if (isIPv6() && !isOhos) {
             assert(hasMatchingAddress(endpointList, { host: "::1", port: 50051 }));
           }
           done();
@@ -94,7 +96,9 @@ describe("Name Resolver", () => {
           // Only handle the first resolution result
           listener.onSuccessfulResolution = () => {};
           assert(hasMatchingAddress(endpointList, { host: "127.0.0.1", port: 443 }));
-          if (isIPv6()) {
+          // OHOS's hosts file maps ::1 to ip6-localhost, so "localhost" has no
+          // AAAA record even though the system supports IPv6.
+          if (isIPv6() && !isOhos) {
             assert(hasMatchingAddress(endpointList, { host: "::1", port: 443 }));
           }
           done();

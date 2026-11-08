@@ -8,6 +8,7 @@ import {
   isDebug,
   isGlibc,
   isLinux,
+  isOhos,
   isPosix,
   isWindows,
   mergeWindowEnvs,
@@ -150,7 +151,8 @@ describe.if(isPosix)("terminal signal reflects the crash cause", () => {
 
 // mimalloc provides `operator new` only on Linux without ASAN.
 describe.if(isLinux && !isASAN)("operator new that fails to allocate", () => {
-  test.concurrent("reports out of memory", async () => {
+  // OHOS: `mi_new` returns null instead of invoking the out-of-memory crash handler.
+  test.concurrent.skipIf(isOhos)("reports out of memory", async () => {
     await using proc = Bun.spawn({
       cmd: [
         bunExe(),
@@ -594,6 +596,9 @@ describe.if(isPosix)("process.kill() aimed at the process itself is not reported
   // pid 0 is the caller's own process group and -pgid names that group by id
   // (the detached child leads its group, so its pgid is its pid). Both include
   // the caller, so they are self-sent signals as well.
+  // OHOS: the app sandbox filters group-directed kill(2) (kill(0) and
+  // kill(-pgid) are silently dropped — the child exits 0), so the
+  // group-self-signal semantics cannot be exercised there.
   test.concurrent.each([
     ["process.kill(0, ...)", `process.kill(0, "SIGABRT")`],
     ["process.kill(-pgid, ...)", `process.kill(-process.pid, "SIGABRT")`],

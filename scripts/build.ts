@@ -490,6 +490,10 @@ const configFlags: { [K in keyof Required<PartialConfig>]: ConfigFlagKind<NonNul
   nodejsAbiVersion: "string",
   nodejsV8Version: "string",
   webkitVersion: "string",
+  ohosSdkRoot: "string",
+  ohosSysroot: "string",
+  ohosCrossLibs: "string",
+  ohosIcuDir: "string",
 };
 
 /** `ninja -d list` */

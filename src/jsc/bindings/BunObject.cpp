@@ -997,6 +997,7 @@ JSC_DEFINE_HOST_FUNCTION(functionFileURLToPath, (JSC::JSGlobalObject * globalObj
 /* Source for BunObject.lut.h
 @begin bunObjectTable
     $                                              constructBunShell                                                   DontDelete|PropertyCallback
+    ant                                            BunObject_lazyPropCb_wrap_ant                                       DontDelete|PropertyCallback
     Archive                                        Bun::Bindgen::Generated::Archive::getArchiveConstructor             DontDelete|PropertyCallback
     ArrayBufferSink                                Bun::Bindgen::Generated::Sink::getArrayBufferSinkConstructor        DontDelete|PropertyCallback
     Cookie                                         constructCookieObject                                               DontDelete|ReadOnly|PropertyCallback

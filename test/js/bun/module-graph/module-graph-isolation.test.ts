@@ -3,7 +3,7 @@
 // happened to be running when it was opened.
 import { afterAll, beforeAll, describe, expect, setSystemTime, test } from "bun:test";
 import { existsSync, readFileSync, rmSync, writeFileSync } from "fs";
-import { bunEnv, bunExe, isWindows, tempDir, tls as tlsCertificate } from "harness";
+import { bunEnv, bunExe, isOhos, isWindows, tempDir, tls as tlsCertificate } from "harness";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { EventEmitter, once } from "node:events";
 import http from "node:http";
@@ -13,12 +13,18 @@ import { PerformanceObserver } from "node:perf_hooks";
 import { join } from "path";
 import { WebSocketServer } from "ws";
 import {
+
   listeningServer,
   pgAuthenticationOk,
   pgCommandComplete,
   pgReadFrontendMessages,
   pgReadyForQuery,
 } from "../../sql/wire-frames";
+
+// OHOS: disposing a graph can take longer than 3s under load; the timer is only
+// a watchdog that reports "the process is still running" when it fires.
+const stillRunningMs = isOhos ? 15_000 : 3_000;
+
 
 const ModuleGraph = Bun.ModuleGraph;
 type Graph = InstanceType<typeof ModuleGraph>;
@@ -81,7 +87,7 @@ const dir = String(
       graph.dispose();
       console.log("disposed");
       // Does not keep the process running; says so if something else does.
-      setTimeout(() => { console.log("and the process is still running"); process.exit(1); }, 3000).unref();
+      setTimeout(() => { console.log("and the process is still running"); process.exit(1); }, ${stillRunningMs}).unref();
     `,
     // What a disposed graph left in something of the realm's. Each in a process of its own: they count objects.
     "left-behind-tenant.mjs": `
@@ -157,7 +163,39 @@ const dir = String(
     `,
     "pipes-of-a-disposed-graph.mjs": `
       import fs from "node:fs";
-      const descriptors = () => fs.readdirSync(process.platform === "linux" ? "/proc/self/fd" : "/dev/fd").length;
+      // OHOS: the platform's signal handler connects to its logging service
+      // (/dev/unix/socket/hilogInput) the first time JSC delivers its VM-suspend
+      // signal (SIGPWR), which happens when a busy worker is terminated; the client
+      // socket stays open afterwards. It is the platform's, not the graph's, so
+      // sockets whose peer is one of the platform's own services are not counted.
+      const isPlatformSocketFd = (() => {
+        if (process.platform !== "linux") return null;
+        try {
+          if (!fs.existsSync("/dev/unix/socket/hilogInput")) return null;
+        } catch {
+          return null;
+        }
+        const { dlopen, FFIType, ptr } = require("bun:ffi");
+        const getpeername = dlopen("libc.so", {
+          getpeername: { args: [FFIType.int, FFIType.ptr, FFIType.ptr], returns: FFIType.int },
+        }).symbols.getpeername;
+        const buf = new Uint8Array(128);
+        const len = new Int32Array(1);
+        getpeername(-1, ptr(buf), ptr(len)); // (resolve the symbol before any measurement)
+        return fd => {
+          len[0] = buf.length;
+          if (getpeername(fd, ptr(buf), ptr(len)) !== 0 || len[0] < 3) return false;
+          if (buf[0] !== 1 || buf[1] !== 0) return false; // AF_UNIX
+          return Buffer.from(buf.buffer, 2, Math.min(len[0], buf.length) - 2).toString().startsWith("/dev/unix/socket/");
+        };
+      })();
+      const countDescriptors = () => {
+        if (isPlatformSocketFd === null) return fs.readdirSync(process.platform === "linux" ? "/proc/self/fd" : "/dev/fd").length;
+        let count = 0;
+        for (const fd of fs.readdirSync("/proc/self/fd")) if (!isPlatformSocketFd(Number(fd))) count++;
+        return count;
+      };
+      const descriptors = () => countDescriptors();
       const graph = new Bun.ModuleGraph();
       const app = await graph.import(import.meta.dir + "/left-behind-tenant.mjs");
       const before = descriptors();
@@ -841,7 +879,39 @@ const dir = String(
     `,
     "closes-its-files-before-it-is-disposed.mjs": `
       import fs from "node:fs";
-      const descriptors = () => fs.readdirSync(process.platform === "linux" ? "/proc/self/fd" : "/dev/fd").length;
+      // OHOS: the platform's signal handler connects to its logging service
+      // (/dev/unix/socket/hilogInput) the first time JSC delivers its VM-suspend
+      // signal (SIGPWR), which happens when a busy worker is terminated; the client
+      // socket stays open afterwards. It is the platform's, not the graph's, so
+      // sockets whose peer is one of the platform's own services are not counted.
+      const isPlatformSocketFd = (() => {
+        if (process.platform !== "linux") return null;
+        try {
+          if (!fs.existsSync("/dev/unix/socket/hilogInput")) return null;
+        } catch {
+          return null;
+        }
+        const { dlopen, FFIType, ptr } = require("bun:ffi");
+        const getpeername = dlopen("libc.so", {
+          getpeername: { args: [FFIType.int, FFIType.ptr, FFIType.ptr], returns: FFIType.int },
+        }).symbols.getpeername;
+        const buf = new Uint8Array(128);
+        const len = new Int32Array(1);
+        getpeername(-1, ptr(buf), ptr(len)); // (resolve the symbol before any measurement)
+        return fd => {
+          len[0] = buf.length;
+          if (getpeername(fd, ptr(buf), ptr(len)) !== 0 || len[0] < 3) return false;
+          if (buf[0] !== 1 || buf[1] !== 0) return false; // AF_UNIX
+          return Buffer.from(buf.buffer, 2, Math.min(len[0], buf.length) - 2).toString().startsWith("/dev/unix/socket/");
+        };
+      })();
+      const countDescriptors = () => {
+        if (isPlatformSocketFd === null) return fs.readdirSync(process.platform === "linux" ? "/proc/self/fd" : "/dev/fd").length;
+        let count = 0;
+        for (const fd of fs.readdirSync("/proc/self/fd")) if (!isPlatformSocketFd(Number(fd))) count++;
+        return count;
+      };
+      const descriptors = () => countDescriptors();
       const dir = fs.mkdtempSync(import.meta.dir + "/managed-files-");
       const graph = new Bun.ModuleGraph();
       const app = await graph.import(import.meta.dir + "/manages-its-files.mjs");
@@ -1136,7 +1206,39 @@ const dir = String(
     `,
     "open-files-of-a-disposed-graph.mjs": `
       import fs from "node:fs";
-      const descriptors = () => (process.platform === "win32" ? 0 : fs.readdirSync(process.platform === "linux" ? "/proc/self/fd" : "/dev/fd").length);
+      // OHOS: the platform's signal handler connects to its logging service
+      // (/dev/unix/socket/hilogInput) the first time JSC delivers its VM-suspend
+      // signal (SIGPWR), which happens when a busy worker is terminated; the client
+      // socket stays open afterwards. It is the platform's, not the graph's, so
+      // sockets whose peer is one of the platform's own services are not counted.
+      const isPlatformSocketFd = (() => {
+        if (process.platform !== "linux") return null;
+        try {
+          if (!fs.existsSync("/dev/unix/socket/hilogInput")) return null;
+        } catch {
+          return null;
+        }
+        const { dlopen, FFIType, ptr } = require("bun:ffi");
+        const getpeername = dlopen("libc.so", {
+          getpeername: { args: [FFIType.int, FFIType.ptr, FFIType.ptr], returns: FFIType.int },
+        }).symbols.getpeername;
+        const buf = new Uint8Array(128);
+        const len = new Int32Array(1);
+        getpeername(-1, ptr(buf), ptr(len)); // (resolve the symbol before any measurement)
+        return fd => {
+          len[0] = buf.length;
+          if (getpeername(fd, ptr(buf), ptr(len)) !== 0 || len[0] < 3) return false;
+          if (buf[0] !== 1 || buf[1] !== 0) return false; // AF_UNIX
+          return Buffer.from(buf.buffer, 2, Math.min(len[0], buf.length) - 2).toString().startsWith("/dev/unix/socket/");
+        };
+      })();
+      const countDescriptors = () => {
+        if (isPlatformSocketFd === null) return fs.readdirSync(process.platform === "linux" ? "/proc/self/fd" : "/dev/fd").length;
+        let count = 0;
+        for (const fd of fs.readdirSync("/proc/self/fd")) if (!isPlatformSocketFd(Number(fd))) count++;
+        return count;
+      };
+      const descriptors = () => (process.platform === "win32" ? 0 : countDescriptors());
       const dir = fs.mkdtempSync(import.meta.dir + "/open-files-");
       const graph = new Bun.ModuleGraph();
       const app = await graph.import(import.meta.dir + "/left-behind-tenant.mjs");
@@ -1202,7 +1304,7 @@ const dir = String(
       graph.run(() => { Promise.resolve(app.open[kind](state, ...args)).catch(() => {}); });
       graph.dispose();
       console.log("disposed");
-      setTimeout(() => { console.log("and the process is still running"); process.exit(1); }, 3000).unref();
+      setTimeout(() => { console.log("and the process is still running"); process.exit(1); }, ${stillRunningMs}).unref();
     `,
     "disposes-then-opens.mjs": `
       const [kind, state, args] = [process.argv[2], JSON.parse(process.argv[3]), JSON.parse(process.argv[4])];
@@ -1212,7 +1314,7 @@ const dir = String(
       graph.run(() => app.call(() => queueMicrotask(() => { Promise.resolve(app.open[kind](state, ...args)).catch(() => {}); })));
       graph.dispose();
       console.log("disposed");
-      setTimeout(() => { console.log("and the process is still running"); process.exit(1); }, 3000).unref();
+      setTimeout(() => { console.log("and the process is still running"); process.exit(1); }, ${stillRunningMs}).unref();
     `,
     "app.mjs": `
       import net from "node:net";
@@ -1916,7 +2018,7 @@ async function accepts(port: number): Promise<boolean> {
 }
 /** Resolves with the first truthy `condition()`; throws after about 3s without one. */
 async function until<T>(condition: () => T | Promise<T>): Promise<T> {
-  const deadline = Date.now() + 3000;
+  const deadline = Date.now() + (isOhos ? 15_000 : 3000);
   do {
     const value = await condition();
     if (value) return value;
@@ -3945,6 +4047,7 @@ test("ModuleGraph isolation: every property of Bun is classified", () => {
         "XML",
         "YAML",
         "allocUnsafe",
+        "ant",
         "color",
         "concatArrayBuffers",
         "deepEquals",

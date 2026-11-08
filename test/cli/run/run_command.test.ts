@@ -2,7 +2,7 @@ import { spawnSync } from "bun";
 import { dlopen } from "bun:ffi";
 import { describe, expect, test } from "bun:test";
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "fs";
-import { bunEnv, bunExe, bunRun, isLinux, isWindows, tempDir } from "harness";
+import { bunEnv, bunExe, bunRun, isLinux, isOhos, isWindows, tempDir } from "harness";
 import { dirname, join } from "path";
 
 let cwd: string | undefined;
@@ -44,7 +44,8 @@ describe("bun", () => {
 
 // A working directory can be PATH_MAX - 1 bytes long. A file in it whose own path no longer fits a path buffer
 // is treated as one that cannot be read.
-describe.concurrent.skipIf(!isLinux)("a working directory close to PATH_MAX", () => {
+// OHOS: the same PATH_MAX edge as bad-workspace — getcwd fails first.
+describe.concurrent.skipIf(!isLinux || isOhos)("a working directory close to PATH_MAX", () => {
   const PATH_MAX = 4096;
   const packageJson = JSON.stringify({ name: "deep", scripts: { hi: "echo hi" } });
 
@@ -216,7 +217,10 @@ for (const mode of ctrlCModes) {
   // (the next command doesn't run) and ends the same way - bash's
   // wait-and-cooperative-exit. The child does its cleanup on the first Ctrl+C and
   // dies of the second; `bun run` must still be around for both.
-  test.concurrent(`a script killed by Ctrl+C stops bun run (${mode.name})`, async () => {
+  // OHOS: the PTY Ctrl+C (raiseCtrlC writes  to the terminal) never
+  // reaches the child — same sandbox PTY defect as the security-scanner
+  // TTY legs — so signalCode stays null.
+  test.skipIf(isOhos).concurrent(`a script killed by Ctrl+C stops bun run (${mode.name})`, async () => {
     using dir = tempDir("run-ctrl-c-dies", {
       "package.json": JSON.stringify({
         name: "t",
@@ -260,7 +264,8 @@ for (const mode of ctrlCModes) {
 
 // A signal that arrives before `bun run` knows the script's pid is forwarded once the spawn returns.
 // `bun run` blocks every signal during the spawn, which is visible in /proc/<pid>/status.
-test.skipIf(!isLinux)(
+// OHOS: the waiter thread owns child reaping and the blocked-signal window is not observable there.
+test.skipIf(!isLinux || isOhos)(
   "forwards a signal that arrives while bun run is spawning the script",
   async () => {
     using dir = tempDir("run-signal-in-spawn", {

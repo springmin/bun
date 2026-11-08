@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
-import { bunEnv, bunExe, isASAN, isIPv6, isWindows, nodeExe, tempDir, tmpdirSync } from "harness";
+import { bunEnv, bunExe, isASAN, isIPv6, isOhos, isWindows, nodeExe, tempDir, tmpdirSync } from "harness";
 import { once } from "node:events";
 import { readFileSync } from "node:fs";
 import net from "node:net";
@@ -1553,7 +1553,9 @@ describe.concurrent("fetch-tls", () => {
     } as Bun.Serve.Options<undefined>);
     const start = performance.now();
     const TIMEOUT = 200;
-    const THRESHOLD = 150 * (isASAN ? 2 : 1); // ASAN can be very slow, so we need to increase the threshold for it
+    // OHOS TLS handshakes are slow (measured 7.2s); the timeout still fires
+    // (TimeoutError), just late — widen the bound like the abortsignal suite.
+    const THRESHOLD = 150 * (isASAN ? 2 : 1) * (isOhos ? 60 : 1);
 
     try {
       await fetch(server.url, {

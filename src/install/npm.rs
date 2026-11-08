@@ -1372,7 +1372,30 @@ pub mod package_manifest {
                 }
                 // Keep the entry in place the whole time: rename over it below instead of unlinking
                 // it first.
-                bun_sys::linkat_tmpfile(file.handle, tmpdir, tmp_path)?;
+                if let Err(link_err) = bun_sys::linkat_tmpfile(file.handle, tmpdir, tmp_path) {
+                    #[cfg(target_env = "ohos")]
+                    {
+                        // OHOS: linkat from an O_TMPFILE fd can be blocked (SELinux EPERM/EACCES);
+                        // materialize the buffer into tmp_path so the rename below still works.
+                        if !matches!(link_err.get_errno(), bun_sys::E::EPERM | bun_sys::E::EACCES) {
+                            return Err(link_err.into());
+                        }
+                        if let Ok(tmp_file) = File::openat(
+                            tmpdir,
+                            tmp_path,
+                            bun_sys::O::WRONLY | bun_sys::O::CREAT | bun_sys::O::TRUNC,
+                            0o664,
+                        ) {
+                            if !tmp_file.write_all(&buffer).is_ok() {
+                                return Err(link_err.into());
+                            }
+                        } else {
+                            return Err(link_err.into());
+                        }
+                    }
+                    #[cfg(not(target_env = "ohos"))]
+                    return Err(link_err.into());
+                }
             }
 
             #[cfg(not(windows))]

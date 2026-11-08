@@ -1,5 +1,6 @@
 #![feature(allocator_api)]
 #![feature(adt_const_params)]
+#![cfg_attr(target_env = "ohos", feature(box_vec_non_null))]
 #![feature(thread_local)] // bare `__thread` slot for `thread_id::current()` cache
 #![feature(freeze)] // `impl_field_parent!`'s `shared` arm rejects `Freeze` children at compile time
 #![allow(non_snake_case)]

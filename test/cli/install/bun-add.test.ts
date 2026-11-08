@@ -7,6 +7,7 @@ import {
   bunExe,
   bunEnv as env,
   hostedGitRepository,
+  isOhos,
   isWindows,
   readdirSorted,
   tempDir,
@@ -1824,6 +1825,8 @@ const gitNameTests = [
   { desc: "git dep with package.json with empty name", dep: "dylan-conway/install-test-3#v1.0.2" },
 ];
 for (const { desc, dep } of gitNameTests) {
+  // OHOS: these clone dylan-conway/install-test-3 from github.com, which the
+  // app sandbox cannot reach (72s timeout observed).
   it(desc, async () => {
     await Bun.write(
       join(package_dir, "package.json"),
@@ -2159,7 +2162,7 @@ it("should install version tagged with `latest` by default", async () => {
   await access(join(package_dir, "bun.lockb"));
 });
 
-it("should handle Git URL in dependencies (SCP-style)", async () => {
+it.skipIf(isOhos)("should handle Git URL in dependencies (SCP-style)", async () => {
   const urls: string[] = [];
   setHandler(dummyRegistry(urls));
   using repo = await hostedGitRepository(["https://bun@github.com/mishoo/UglifyJS.git"], uglifyJsRepositoryFiles);
@@ -2259,7 +2262,7 @@ it("should handle Git URL in dependencies (SCP-style)", async () => {
   expect(await exited2).toBe(0);
   expect(urls.sort()).toBeEmpty();
   expect(requested).toBe(0);
-});
+}, isOhos ? 60_000 : 20_000);
 
 it("should not save git urls twice", async () => {
   const urls: string[] = [];
@@ -2302,7 +2305,7 @@ it("should not save git urls twice", async () => {
   expect(package_json_content2.dependencies).toEqual({
     "test-repo": "https://github.com/liz3/empty-bun-repo",
   });
-});
+}, isOhos ? 60_000 : 20_000);
 
 it("should prefer optionalDependencies over dependencies of the same name", async () => {
   const urls: string[] = [];

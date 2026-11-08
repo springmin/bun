@@ -12,7 +12,7 @@
  */
 
 import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync } from "node:fs";
-import { relative, resolve, sep } from "node:path";
+import { join, relative, resolve, sep } from "node:path";
 import type { Sources } from "../glob-sources.ts";
 import { binaryExpectations, exportList, shimExpectations, strippedExpectations } from "./binary-expectations.ts";
 import { emitCodegen, type CodegenOutputs } from "./codegen.ts";
@@ -79,6 +79,25 @@ function systemLibs(cfg: Config): string[] {
     // Android: no system ICU; the local WebKit build must bundle it.
     if (cfg.webkit === "local" && cfg.abi !== "android" && linuxIcuRoot(cfg) === undefined) {
       libs.push("-licudata", "-licui18n", "-licuuc");
+    }
+  }
+
+  if (cfg.ohos) {
+    // Cross-built static ICU (build/ohos-icu/target/lib). The device's system
+    // ICU is 72; WebKit and bun's ICU usage reference the `_78`-suffixed
+    // symbols only the cross-built 78.3 libraries provide, so link them
+    // statically.
+    libs.push("-lc", "-lpthread", "-ldl");
+    if (cfg.ohosIcuDir) {
+      // Explicit .a paths: the keg's lib dir also carries .so, and ld
+      // prefers shared — that would bake DT_NEEDED libicu*.so.78 (with no
+      // usable rpath) into the binary, breaking it away from a device that
+      // happens to have those libs on LD_LIBRARY_PATH.
+      libs.push(
+        join(cfg.ohosIcuDir, "lib", "libicudata.a"),
+        join(cfg.ohosIcuDir, "lib", "libicui18n.a"),
+        join(cfg.ohosIcuDir, "lib", "libicuuc.a"),
+      );
     }
   }
 
@@ -1076,7 +1095,7 @@ function windowsSysrootIncludeDirs(winsysroot: string): string[] {
  */
 function linkImplicitInputs(cfg: Config): string[] {
   // The ELF export list is the version scripts' `global:` blocks, written here so the link can take it as a file.
-  if (cfg.linux || cfg.freebsd) writeIfChanged(exportListPath(cfg), exportList(versionScriptPaths(cfg)));
+  if (cfg.linux || cfg.freebsd || cfg.ohos) writeIfChanged(exportListPath(cfg), exportList(versionScriptPaths(cfg)));
   return linkDepends(cfg);
 }
 

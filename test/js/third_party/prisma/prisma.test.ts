@@ -1,7 +1,10 @@
-import { createCanvas } from "@napi-rs/canvas";
 import { it as bunIt, test as bunTest, describe, expect } from "bun:test";
 import { appendFile } from "fs/promises";
-import { getSecret, isCI, rss } from "harness";
+import { getSecret, isCI, isOhos, rss } from "harness";
+
+// @napi-rs/canvas cannot load its native binding on OHOS. Its only use is
+// inside tests that are skipped in CI, so only import it when it can work.
+const { createCanvas } = isOhos ? ({} as any) : await import("@napi-rs/canvas");
 import { generate, generateClient } from "./helper.ts";
 import type { PrismaClient } from "./prisma/types.d.ts";
 

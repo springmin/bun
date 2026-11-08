@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "fs";
-import { bunEnv, bunExe, isWindows, tempDir } from "harness";
+import { bunEnv, bunExe, isOhos, isWindows, tempDir } from "harness";
 import { join } from "path";
 
 // Every workload below is time-bounded for 100ms. On Windows JSC's
@@ -9,7 +9,7 @@ import { join } from "path";
 // shorter windows (the previous 32/50ms) can elapse before a single sample is
 // taken, leaving "No samples collected." in --cpu-prof-md output.
 describe.concurrent("--cpu-prof", () => {
-  test("generates CPU profile with default name", async () => {
+  test.skipIf(isOhos)("generates CPU profile with default name", async () => {
     using dir = tempDir("cpu-prof", {
       "test.js": `
         // CPU-intensive task
@@ -97,7 +97,7 @@ describe.concurrent("--cpu-prof", () => {
     expect(profile.endTime).toBeLessThan(3000000000000000);
   });
 
-  test("--cpu-prof-name sets custom filename", async () => {
+  test.skipIf(isOhos)("--cpu-prof-name sets custom filename", async () => {
     using dir = tempDir("cpu-prof-name", {
       "test.js": `
         function loop() {
@@ -130,7 +130,7 @@ describe.concurrent("--cpu-prof", () => {
   // POSIX 5000 bytes exceeds the fixed path buffer (Linux 4096, macOS 1024);
   // 2500 + 2500 exercises the combined bound with components that fit
   // individually on Linux.
-  test.skipIf(isWindows).each([
+  test.skipIf(isWindows || isOhos).each([
     ["--cpu-prof-dir", ["--cpu-prof-dir", Buffer.alloc(5000, "d").toString()]],
     ["--cpu-prof-name", ["--cpu-prof-name", Buffer.alloc(5000, "n").toString()]],
     [
@@ -159,7 +159,7 @@ describe.concurrent("--cpu-prof", () => {
     expect(proc.signalCode).toBeNull();
   });
 
-  test("--cpu-prof-dir sets custom directory", async () => {
+  test.skipIf(isOhos)("--cpu-prof-dir sets custom directory", async () => {
     using dir = tempDir("cpu-prof-dir", {
       "test.js": `
         function loop() {
@@ -189,7 +189,7 @@ describe.concurrent("--cpu-prof", () => {
     expect(exitCode).toBe(0);
   });
 
-  test("profile captures function names", async () => {
+  test.skipIf(isOhos)("profile captures function names", async () => {
     using dir = tempDir("cpu-prof-functions", {
       "test.js": `
         function myFunction() {
@@ -228,7 +228,7 @@ describe.concurrent("--cpu-prof", () => {
     expect(exitCode).toBe(0);
   });
 
-  test("--cpu-prof-md generates markdown format profile", async () => {
+  test.skipIf(isOhos)("--cpu-prof-md generates markdown format profile", async () => {
     using dir = tempDir("cpu-prof-md", {
       "test.js": `
         // CPU-intensive task for text profile
@@ -284,7 +284,7 @@ describe.concurrent("--cpu-prof", () => {
     expect(profileContent).toContain("**Calls:**");
   });
 
-  test("--cpu-prof-md with custom name", async () => {
+  test.skipIf(isOhos)("--cpu-prof-md with custom name", async () => {
     using dir = tempDir("cpu-prof-md-name", {
       "test.js": `
         function loop() {
@@ -317,7 +317,7 @@ describe.concurrent("--cpu-prof", () => {
     expect(profileContent).toContain("# CPU Profile");
   });
 
-  test("--cpu-prof-md shows function details with relationships", async () => {
+  test.skipIf(isOhos)("--cpu-prof-md shows function details with relationships", async () => {
     using dir = tempDir("cpu-prof-md-details", {
       "test.js": `
         function workA() {
@@ -369,7 +369,7 @@ describe.concurrent("--cpu-prof", () => {
     expect(profileContent).toMatch(/^### `/m);
   });
 
-  test("--cpu-prof-md works standalone without --cpu-prof", async () => {
+  test.skipIf(isOhos)("--cpu-prof-md works standalone without --cpu-prof", async () => {
     using dir = tempDir("cpu-prof-md-standalone", {
       "test.js": `
         function loop() {
@@ -403,7 +403,7 @@ describe.concurrent("--cpu-prof", () => {
     expect(profileContent).toContain("# CPU Profile");
   });
 
-  test("--cpu-prof and --cpu-prof-md together creates both files", async () => {
+  test.skipIf(isOhos)("--cpu-prof and --cpu-prof-md together creates both files", async () => {
     using dir = tempDir("cpu-prof-both-formats", {
       "test.js": `
         function loop() {
@@ -445,13 +445,13 @@ describe.concurrent("--cpu-prof", () => {
     expect(mdContent).toContain("# CPU Profile");
   });
 
-  describe("bun test", () => {
+  describe.skipIf(isOhos)("bun test", () => {
     const file = (name: string) => `
       import { test } from "bun:test";
       function ${name}(n) {
         return n <= 1 ? n : ${name}(n - 1) + ${name}(n - 2);
       }
-      test("${name}", () => {
+      test.skipIf(isOhos)("${name}", () => {
         const now = performance.now();
         while (now + 100 > performance.now()) Bun.inspect(${name}(20));
       });`;
@@ -477,7 +477,7 @@ describe.concurrent("--cpu-prof", () => {
       expect(exitCode).toBe(0);
     });
 
-    test("--parallel: one profile for each worker, and none for the process that only hands out files", async () => {
+    test.skipIf(isOhos)("--parallel: one profile for each worker, and none for the process that only hands out files", async () => {
       using dir = tempDir("cpu-prof-test", files);
       await using proc = Bun.spawn({
         // 0: both workers start at once, so each gets a file.

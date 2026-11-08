@@ -4,7 +4,7 @@ use core::ptr::NonNull;
 
 use bun_sys::{self as sys, Fd};
 
-use crate::{EventLoopHandle, FilePollKind, FilePollRef, Owner, PollTag};
+use crate::{EventLoopHandle, FilePollFlag, FilePollKind, FilePollRef, Owner, PollTag};
 // `bun.Async.Loop` — on POSIX the uws `us_loop_t`, on Windows the embedded
 // `uv_loop_t` (`bun_io::Loop` is the cfg-aliased nominal that picks the
 // right one). `BufferedReaderParent::loop_` returns this so callers in T3+
@@ -214,6 +214,12 @@ bitflags::bitflags! {
         const KEEP_ALIVE               = 1 << 10; // default true
         /// A read failed with a non-retry errno. Set before the bytes read ahead of the failure are delivered, so a pull from inside that delivery cannot read the fd past the error. Never cleared: `start()`, `unpause()` and `from()` keep it, and only a reader from `init()` reads again.
         const READ_FAILED              = 1 << 11;
+        /// Opt-in: enroll this reader's fd in `epoll_rearm_watchdog` (a
+        /// confirmed real-device OHOS kernel epoll defect recovery -- see
+        /// `Flags::EpollRearmWatch` in posix_event_loop.rs). Set before the
+        /// first `register_poll()`/`read()` call; currently only
+        /// `Bun.Terminal`'s PTY-master reader.
+        const EPOLL_REARM_WATCH        = 1 << 12;
     }
 }
 
@@ -542,6 +548,10 @@ impl PosixBufferedReader {
         // Re-applied on every arm: `pause()` unregisters, which drops it.
         if self.flags.contains(PosixFlags::KEEP_ALIVE) {
             poll.enable_keeping_process_alive(ev);
+        }
+
+        if self.flags.contains(PosixFlags::EPOLL_REARM_WATCH) {
+            poll.set_flag(FilePollFlag::EpollRearmWatch);
         }
 
         match poll.register_with_fd(lp.cast(), FilePollKind::Readable, poll.fd()) {

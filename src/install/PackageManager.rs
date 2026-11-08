@@ -1475,6 +1475,25 @@ fn ensure_temp_node_gyp_script_run(manager: &mut PackageManager) -> Result<(), E
         "fi\n"
     );
 
+    // ── OHOS: auto-configure the C compiler for node-gyp ──
+    // node-gyp needs a C/C++ compiler to build native .node addons. On OHOS
+    // there is no system gcc/g++, so we default to cc/c++ (the harmonybrew
+    // shims). Users can override via CC/CXX/LDFLAGS env vars.
+    //
+    // No -Wl,--code-sign here: none of the available ld.lld builds accept it
+    // (verified against the current llvm@21 and ohos-sdk LLVM 15 installs),
+    // and signing is covered at runtime anyway -- `bun install` signs
+    // installed ELFs and `dlopen` signs on first load.
+    #[cfg(target_env = "ohos")]
+    {
+        if manager.env().get(b"CC").is_none() {
+            let _ = manager.env_mut().map.put(b"CC", b"cc");
+        }
+        if manager.env().get(b"CXX").is_none() {
+            let _ = manager.env_mut().map.put(b"CXX", b"c++");
+        }
+    }
+
     if let Err(e) = node_gyp_file.write_all(CONTENT.as_bytes()) {
         bun_core::pretty_errorln!(
             "<r><red>error<r>: <b><red>{}<r> writing to {} file",

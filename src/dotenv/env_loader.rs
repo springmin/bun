@@ -233,16 +233,20 @@ impl Loader {
         buf: &'b mut PathBuffer,
     ) -> Option<&'b ZStr> {
         // Check NODE or npm_node_execpath env var, but only use it if the file actually exists.
-        if let Some(node) = self
+        // The OHOS nightly is older than upstream's: keep the NLL workaround that ends the
+        // borrow of `buf` before `which` takes it mutably.
+        let env_len = self
             .get(b"NODE")
             .or_else(|| self.get(b"npm_node_execpath"))
             .filter(|n| !n.is_empty() && n.len() < MAX_PATH_BYTES)
-        {
-            buf[..node.len()].copy_from_slice(node);
-            buf[node.len()] = 0;
-            let node = ZStr::from_buf(&buf[..], node.len());
-            if bun_sys::is_executable_file_path(node) {
-                return Some(node);
+            .map(|node| {
+                buf[..node.len()].copy_from_slice(node);
+                buf[node.len()] = 0;
+                node.len()
+            });
+        if let Some(len) = env_len {
+            if bun_sys::is_executable_file_path(ZStr::from_buf(&buf[..], len)) {
+                return Some(ZStr::from_buf(&buf[..], len));
             }
         }
 

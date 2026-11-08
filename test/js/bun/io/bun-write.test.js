@@ -8,6 +8,7 @@ import {
   gcTick,
   isASAN,
   isMacOS,
+  isOhos,
   isWindows,
   tempDir,
   withoutAggressiveGC,
@@ -1486,7 +1487,11 @@ int posix_fadvise(int fd, off_t offset, off_t len, int advice) {
     );
 
     // /dev/full: every write fails with ENOSPC.
-    it.skipIf(process.platform !== "linux")("rejects with the write error, for each kind of body", async () => {
+    it.skipIf(process.platform !== "linux" || isOhos)(
+      // OHOS: the app sandbox denies open('/dev/full') with EACCES, so the
+      // write never reaches the ENOSPC path this case exercises.
+      "rejects with the write error, for each kind of body",
+      async () => {
       await using server = await origin();
       const streamed = await fetch(server.url);
       // A body that is all here behind an untouched `.body` stream is written as a blob.
@@ -1507,7 +1512,7 @@ int posix_fadvise(int fd, off_t offset, off_t len, int advice) {
 
     // The write error also closes an async-iterable body: return(), and nothing is thrown into it.
     // The body has an end, so a body that was not closed fails on its calls and does not run for ever.
-    describe.skipIf(process.platform !== "linux").each(asyncIterableBodyShapes)(
+    describe.skipIf(process.platform !== "linux" || isOhos).each(asyncIterableBodyShapes)(
       "a write that fails with ENOSPC closes %s with return()",
       (_, make) => {
         it.each([
@@ -1526,7 +1531,7 @@ int posix_fadvise(int fd, off_t offset, off_t len, int advice) {
     );
 
     // The body ends in the same tick as its only chunk, so the only write is the flush at its end.
-    it.skipIf(process.platform !== "linux").each([
+    it.skipIf(process.platform !== "linux" || isOhos).each([
       ["next() and return()", false],
       ["next(), return() and throw()", true],
     ])(

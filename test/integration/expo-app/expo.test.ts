@@ -1,6 +1,6 @@
 import { beforeAll, expect, setDefaultTimeout, test } from "bun:test";
 import fs from "fs/promises";
-import { bunEnv, bunExe, tmpdirSync } from "../../harness";
+import { bunEnv, bunExe, isOhos, tmpdirSync } from "../../harness";
 
 const tmpdir = tmpdirSync();
 
@@ -10,7 +10,9 @@ beforeAll(async () => {
   await fs.cp(import.meta.dir, tmpdir, { recursive: true, force: true });
 });
 
-test("expo export works (no ajv issues)", async () => {
+// expo's export pipeline needs esbuild and other native tooling that ships no
+// OpenHarmony builds.
+test.skipIf(isOhos)("expo export works (no ajv issues)", async () => {
   console.log({ tmpdir });
   let { exitCode } = Bun.spawnSync([bunExe(), "install"], {
     stderr: "inherit",

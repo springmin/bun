@@ -6,7 +6,18 @@ import { dlopen } from "bun:ffi";
 import { existsSync, readFileSync } from "node:fs";
 
 let isNonblocking;
-if (existsSync("/proc/self/fdinfo")) {
+// OHOS: /proc/self/fdinfo exists but its entries are not readable (ENOENT),
+// so probe readability and fall back to fcntl instead of trusting the
+// directory's presence.
+let useFdinfo = existsSync("/proc/self/fdinfo");
+if (useFdinfo) {
+  try {
+    readFileSync(`/proc/self/fdinfo/${process.argv[2] ?? 0}`, "utf8");
+  } catch {
+    useFdinfo = false;
+  }
+}
+if (useFdinfo) {
   isNonblocking = fd => {
     const flags = readFileSync(`/proc/self/fdinfo/${fd}`, "utf8").match(/^flags:\s*([0-7]+)/m)[1];
     return (parseInt(flags, 8) & 0o4000) !== 0;

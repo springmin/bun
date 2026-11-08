@@ -46,8 +46,11 @@
 //! `<[MaybeUninit<u8>]>` slice ops over [`Col`]/[`ColMut`] views.
 
 use core::alloc::Layout;
+use core::any::TypeId;
+
+
 use core::marker::PhantomData;
-use core::mem::type_info;
+use core::mem::type_info::{Type as TypeInfo, TypeKind};
 use core::mem::{ManuallyDrop, MaybeUninit};
 use core::ptr::{self, NonNull};
 use std::alloc::{Allocator, Global};
@@ -243,19 +246,35 @@ macro_rules! __mal_column_impl {
 
 /// Upper bound on struct field count. The reflected per-field metadata is
 /// cached in fixed-size `[_; MAX_FIELDS]` arrays so `Slice<T>` can be a plain
-/// value type without a `where [(); Reflected::<T>::COUNT]:` bound propagating
-/// to every caller.
+/// value type without a `where [(); field_count::<T>()]:` bound propagating to
+/// every caller.
 const MAX_FIELDS: usize = 32;
 
 // ──────────────────────── const-eval reflection helpers ───────────────────
 
 use crate::const_str_eq;
 
-// The reflection methods on `TypeId` are compile-time-only functions: they can
-// be called from a `const` item or an inline `const { }` block, not from a
-// `const fn` body. `type_info::of::<F>()` is `TypeId::of` without the `'static`
-// bound — reflected field ids are not `'static`-restricted, and column callers
-// routinely use lifetime-carrying field types (`&'a [u8]`, `Ref<'a>`).
+/// `TypeId` of `F`. Uses the reflection API (`TypeInfo::of`) which works
+/// without `'static` and is the same source that `Field::ty` comes from.
+/// `TypeKind::type_id()` returns the same `TypeId` that `Field::ty` provides.
+#[inline(always)]
+const fn type_id_of<F: ?Sized>() -> TypeId {
+    const { core::intrinsics::type_id::<F>() }
+}
+
+/// Reflected fields of `T` (struct only). Panics at const-eval for non-structs.
+const fn fields_of<T>() -> &'static [core::mem::type_info::Field] {
+    match TypeInfo::of::<T>().kind {
+        TypeKind::Struct(s) => s.fields,
+        _ => panic!("MultiArrayList<T>: T must be a struct with named fields"),
+    }
+}
+
+/// Number of fields in `T`.
+#[inline(always)]
+const fn field_count<T>() -> usize {
+    fields_of::<T>().len()
+}
 
 /// Column-layout sort key for a field of `size` bytes within a struct of
 /// alignment `struct_align`.
@@ -308,41 +327,7 @@ const ZERO_META: FieldMeta = FieldMeta {
 struct Reflected<T>(PhantomData<T>);
 
 impl<T> Reflected<T> {
-    /// Number of fields in `T`; const-panics unless `T` is laid out as a struct.
-    ///
-    /// The reflection API has no "is this a struct" query (`Type::of::<T>().kind`
-    /// ICEs on nightly-2026-09-15, and `variant(0)` is a hard error on a struct),
-    /// so the check is on what the scatter/gather needs: one variant (not a
-    /// multi-variant enum), fields unless `T` is zero-sized (not a primitive,
-    /// pointer or array), and fields that do not overlap (not a union; disjoint
-    /// fields cannot sum past `size_of::<T>()`). A single-variant enum with an
-    /// explicit `#[repr(int)]` still passes; its tag would never be written.
-    const COUNT: usize = {
-        let id = type_info::of::<T>();
-        assert!(
-            id.variants() == 1,
-            "MultiArrayList<T>: T must be a struct with named fields",
-        );
-        let n = id.fields(0);
-        assert!(
-            n > 0 || core::mem::size_of::<T>() == 0,
-            "MultiArrayList<T>: T must be a struct with named fields",
-        );
-        let mut sum = 0usize;
-        let mut i = 0;
-        while i < n {
-            sum += match id.field(0, i).type_id().size() {
-                Some(s) => s,
-                None => panic!("MultiArrayList: field type must be Sized"),
-            };
-            i += 1;
-        }
-        assert!(
-            sum <= core::mem::size_of::<T>(),
-            "MultiArrayList<T>: T must be a struct with named fields",
-        );
-        n
-    };
+    const COUNT: usize = field_count::<T>();
     const ALIGN: usize = core::mem::align_of::<T>();
 
     /// Dangling sentinel for an empty buffer. Aligned to `align_of::<T>()`,
@@ -352,8 +337,8 @@ impl<T> Reflected<T> {
 
     /// `[FieldMeta; COUNT]` in declaration order.
     const META: [FieldMeta; MAX_FIELDS] = {
-        let id = type_info::of::<T>();
-        let n = Self::COUNT;
+        let fields = fields_of::<T>();
+        let n = fields.len();
         assert!(
             n <= MAX_FIELDS,
             "MultiArrayList: too many fields (raise MAX_FIELDS)",
@@ -362,15 +347,14 @@ impl<T> Reflected<T> {
         let struct_align = core::mem::align_of::<T>();
         let mut i = 0;
         while i < n {
-            let f = id.field(0, i);
-            let size = match f.type_id().size() {
-                Some(s) => s,
-                None => panic!("MultiArrayList: field type must be Sized"),
-            };
+            let f = &fields[i];
+            let size = f.ty
+                .size()
+                .expect("MultiArrayList: field type must be Sized");
             let align = align_sort_key(size, struct_align);
             out[i] = FieldMeta {
                 size,
-                offset: f.offset(),
+                offset: f.offset,
                 align,
             };
             i += 1;
@@ -442,18 +426,15 @@ impl<T> Reflected<T> {
     /// Field index for `NAME`; const-panics if no such field.
     #[cfg(test)]
     const fn index_of<const NAME: &'static str>() -> usize {
-        const {
-            let id = type_info::of::<T>();
-            let mut i = 0;
-            while i < Self::COUNT {
-                if const_str_eq(id.field(0, i).name(), NAME) {
-                    break;
-                }
-                i += 1;
+        let fields = fields_of::<T>();
+        let mut i = 0;
+        while i < fields.len() {
+            if const_str_eq(fields[i].name, NAME) {
+                return i;
             }
-            assert!(i < Self::COUNT, "MultiArrayList: no such field");
-            i
+            i += 1;
         }
+        panic!("MultiArrayList: no such field");
     }
 
     /// Const-panics unless field `NAME` exists and has type `F`.
@@ -464,26 +445,23 @@ impl<T> Reflected<T> {
     /// associated type alias (e.g. `EntryPoint::Kind` vs `entry_point::Kind`),
     /// so a size match is accepted when ids differ. Size mismatch is always
     /// rejected.
-    const fn check<const NAME: &'static str, F>() -> usize {
-        const {
-            let id = type_info::of::<T>();
-            let mut i = 0;
-            while i < Self::COUNT {
-                let f = id.field(0, i);
-                if const_str_eq(f.name(), NAME) {
-                    if !(f.type_id() == type_info::of::<F>()) {
-                        assert!(
-                            Self::META[i].size == core::mem::size_of::<F>(),
-                            "MultiArrayList: column type does not match field type",
-                        );
-                    }
-                    break;
+    fn check<const NAME: &'static str, F>() -> usize {
+        let fields = fields_of::<T>();
+        let mut i = 0;
+        while i < fields.len() {
+            if const_str_eq(fields[i].name, NAME) {
+                if fields[i].ty == type_id_of::<F>() {
+                    return i;
                 }
-                i += 1;
+                assert!(
+                    Self::META[i].size == core::mem::size_of::<F>(),
+                    "MultiArrayList: column type does not match field type",
+                );
+                return i;
             }
-            assert!(i < Self::COUNT, "MultiArrayList: no such field");
-            i
+            i += 1;
         }
+        panic!("MultiArrayList: no such field");
     }
 }
 
@@ -651,14 +629,14 @@ impl<T> Slice<T> {
     /// field named `NAME` and that its type is exactly `F`.
     #[inline]
     pub fn items<const NAME: &'static str, F>(&self) -> &[F] {
-        let fi = const { Reflected::<T>::check::<NAME, F>() };
+        let fi = Reflected::<T>::check::<NAME, F>();
         Col::new(self.col_ptr::<F>(fi), self.len).as_slice()
     }
 
     /// Returns the mutable column slice for field `NAME` typed as `&mut [F]`.
     #[inline]
     pub fn items_mut<const NAME: &'static str, F>(&mut self) -> &mut [F] {
-        let fi = const { Reflected::<T>::check::<NAME, F>() };
+        let fi = Reflected::<T>::check::<NAME, F>();
         ColMut::new(self.col_ptr::<F>(fi), self.len).as_mut_slice()
     }
 
@@ -673,7 +651,7 @@ impl<T> Slice<T> {
     /// `&mut` references to the same column when *dereferencing* it.
     #[inline]
     pub fn items_raw<const NAME: &'static str, F>(&self) -> *mut F {
-        let fi = const { Reflected::<T>::check::<NAME, F>() };
+        let fi = Reflected::<T>::check::<NAME, F>();
         self.col_ptr::<F>(fi).as_ptr()
     }
 
@@ -933,14 +911,14 @@ impl<T, A: Allocator> MultiArrayList<T, A> {
     /// `F` is exactly its type.
     #[inline]
     pub fn items<const NAME: &'static str, F>(&self) -> &[F] {
-        let fi = const { Reflected::<T>::check::<NAME, F>() };
+        let fi = Reflected::<T>::check::<NAME, F>();
         Col::new(self.col_ptr::<F>(fi), self.len).as_slice()
     }
 
     /// Get the mutable slice of values for field `NAME`.
     #[inline]
     pub fn items_mut<const NAME: &'static str, F>(&mut self) -> &mut [F] {
-        let fi = const { Reflected::<T>::check::<NAME, F>() };
+        let fi = Reflected::<T>::check::<NAME, F>();
         ColMut::new(self.col_ptr::<F>(fi), self.len).as_mut_slice()
     }
 
@@ -948,7 +926,7 @@ impl<T, A: Allocator> MultiArrayList<T, A> {
     /// always sound; the read/write contract is on the caller's *dereference*.
     #[inline]
     pub fn items_raw<const NAME: &'static str, F>(&self) -> *mut F {
-        let fi = const { Reflected::<T>::check::<NAME, F>() };
+        let fi = Reflected::<T>::check::<NAME, F>();
         self.col_ptr::<F>(fi).as_ptr()
     }
 

@@ -1,6 +1,6 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { readFileSync } from "fs";
-import { bunEnv, bunExe, isASAN, isDebug, isLinux, isWindows, tempDir } from "harness";
+import { bunEnv, bunExe, isASAN, isDebug, isLinux, isOhos, isWindows, tempDir } from "harness";
 import { join } from "path";
 
 // Bun's GarbageCollectionController used to sample `blockBytesAllocated +
@@ -445,7 +445,7 @@ describe.skipIf(isDebug || isASAN)("the last idle collection drops code that can
       expect(same, log).toBe(true);
       expect(exitCode).toBe(0);
     },
-    15_000, // It may be the one that writes the executable, of 100 MB and more.
+    isOhos ? 60_000 : 15_000, // It may be the one that writes the executable, of 100 MB and more.
   );
 
   // The first of two is a collection like any other: it has run, and the code is still there.
@@ -457,7 +457,7 @@ describe.skipIf(isDebug || isASAN)("the last idle collection drops code that can
       expect(idleCollections, log).toBe(1);
       expect(after, log).toBeGreaterThan(before - 40);
     },
-    15_000,
+    isOhos ? 60_000 : 15_000,
   );
 });
 
@@ -558,7 +558,10 @@ test.skipIf(!isLinux || isASAN)("Bun.gc(true) returns what it freed to the OS be
 // One thread at a time hands the allocator's free ranges back, and its own purge thread is often the one: it starts on what
 // was freed once the purge delay has passed, and a few hundred MB keep it busy for tens of milliseconds. Bun.gc(true) in the
 // middle of that found the purge taken, skipped its own, and returned with all of it still resident.
-test.skipIf(!isLinux || isASAN)(
+// OHOS: the background purge thread's release is not visible in RSS within
+// the 1 s `started` window (the released amount itself is ~384 MB, same as
+// Linux), so the `started` gate — not the release — is Linux-calibrated.
+test.skipIf(!isLinux || isASAN || isOhos)(
   "Bun.gc(true) returns what is free to the OS while the purge thread is at work",
   async () => {
     await using proc = Bun.spawn({

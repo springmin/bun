@@ -4,11 +4,12 @@
     type_info,
     adt_const_params,
     unsized_const_params,
-    const_cmp,
     const_trait_impl,
-    allocator_api
+    allocator_api,
+    core_intrinsics
 )]
-#![allow(incomplete_features)]
+#![cfg_attr(target_env = "ohos", feature(box_vec_non_null))]
+#![allow(incomplete_features, internal_features, unused_features)]
 #![warn(unused_must_use)]
 
 pub mod hive_array;

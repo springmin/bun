@@ -10,7 +10,8 @@ test.skipIf(isWindows)("TTY stdin buffering should work correctly", async () => 
 
   // Run the data generator piped into our TTY test fixture
   const result = spawnSync({
-    cmd: ["bash", "-c", `"${dataGeneratorPath}" | "${bunExe()}" "${fixturePath}"`],
+    // OHOS has no /bin/bash for the script's shebang; run it through bash explicitly.
+    cmd: ["bash", "-c", `bash "${dataGeneratorPath}" | "${bunExe()}" "${fixturePath}"`],
     env: {
       ...bunEnv,
       BUN_DEBUG_QUIET_LOGS: "1",

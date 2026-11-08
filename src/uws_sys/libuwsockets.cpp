@@ -114,6 +114,17 @@ extern "C"
     loopData->updateDate();
   }
 
+  // posix_event_loop's epoll-rearm watchdog: registers a per-iteration post
+  // handler used to dispatch PTY-master reads the kernel stopped reporting
+  // through the loop's shared epoll registration (observed on OHOS). `key`
+  // must stay unique and stable for the handler's lifetime; `fn` runs on the
+  // loop thread at the end of every iteration.
+  void uws_loop_add_post_handler(us_loop_t *loop, void *key,
+                                 void (*fn)(void *ctx, us_loop_t *loop), void *ctx) {
+    uWS::Loop *uwsLoop = (uWS::Loop *)loop;
+    uwsLoop->addPostHandler(key, [fn, ctx](uWS::Loop *l) { fn(ctx, (us_loop_t *)l); });
+  }
+
   void uws_loop_flush_pending_writes(us_loop_t *loop) {
     ((uWS::Loop *) loop)->flushPendingWrites();
   }

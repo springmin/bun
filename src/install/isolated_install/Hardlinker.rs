@@ -226,9 +226,41 @@ impl Hardlinker {
                                     };
                                     let _ = Fd::cwd().make_path(dest_parent);
                                 }
+                                sys::E::EPERM | sys::E::EACCES if cfg!(target_env = "ohos") => {
+                                    // OHOS SELinux blocks linkat; fall back to copying.
+                                    let Some(dest_parent) = self.dest.dirname() else {
+                                        break 'body Err(link_err1);
+                                    };
+                                    let _ = Fd::cwd().make_path(dest_parent);
+                                    break 'body crate::copy_file_fallback(
+                                        dir,
+                                        name,
+                                        Fd::cwd(),
+                                        self.dest.slice_z(),
+                                    );
+                                }
                                 _ => break 'body Err(link_err1),
                             }
-                            sys::linkat(dir, name, Fd::cwd(), self.dest.slice_z())
+                            match sys::linkat(dir, name, Fd::cwd(), self.dest.slice_z()) {
+                                Ok(()) => break 'body Ok(()),
+                                Err(link_err) => {
+                                    #[cfg(target_env = "ohos")]
+                                    if matches!(link_err.get_errno(), sys::E::EPERM | sys::E::EACCES) {
+                                        // OHOS: the retry is blocked as well; copy instead.
+                                        let Some(dest_parent) = self.dest.dirname() else {
+                                            break 'body Err(link_err);
+                                        };
+                                        let _ = Fd::cwd().make_path(dest_parent);
+                                        break 'body crate::copy_file_fallback(
+                                            dir,
+                                            name,
+                                            Fd::cwd(),
+                                            self.dest.slice_z(),
+                                        );
+                                    }
+                                    break 'body Err(link_err);
+                                }
+                            }
                         }
                         _ => Ok(()),
                     }

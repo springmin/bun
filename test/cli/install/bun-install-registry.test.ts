@@ -23,6 +23,7 @@ import {
   isFlaky,
   isLinux,
   isMacOS,
+  isOhos,
   isRoot,
   isWindows,
   mergeWindowEnvs,
@@ -2091,7 +2092,8 @@ describe.concurrent("bundledDependencies", () => {
       await check();
     });
 
-    test(`(${textLockfile ? "bun.lock" : "bun.lockb"}) git dependencies`, async () => {
+    // OHOS: the fixture resolves git+ssh://git@github.com, which the device cannot reach.
+    test.skipIf(isOhos)(`(${textLockfile ? "bun.lock" : "bun.lockb"}) git dependencies`, async () => {
       const { packageDir, packageJson, env } = await setupTest();
       await Promise.all([
         write(
@@ -6093,7 +6095,7 @@ const checkedCountWithOptionalNative = expect.stringContaining(
   `Checked ${installsWithOptionalNative} installs across 23 packages (no changes)`,
 );
 
-test.concurrent("it should install with missing bun.lockb, node_modules, and/or cache", async () => {
+test.skipIf(isOhos)("it should install with missing bun.lockb, node_modules, and/or cache", async () => {
   const { packageDir, packageJson, env } = await setupTest();
   // first clean install
   await writeFile(
@@ -9625,7 +9627,7 @@ describe.concurrent("update", () => {
       version: "2.0.1",
     });
   });
-  test("update should update all packages in the current workspace", async () => {
+  test.skipIf(isOhos)("update should update all packages in the current workspace", async () => {
     const { packageDir, packageJson, env } = await setupTest();
     await write(
       packageJson,
@@ -10219,7 +10221,7 @@ test.serial("duplicate dependency in optionalDependencies maintains sort order",
   expect(await exited).toBe(0);
 });
 
-test.concurrent("missing package on reinstall, some with binaries", async () => {
+test.skipIf(isOhos)("missing package on reinstall, some with binaries", async () => {
   const { packageDir, packageJson, env } = await setupTest();
   await writeFile(
     packageJson,

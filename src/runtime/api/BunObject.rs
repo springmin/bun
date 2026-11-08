@@ -138,6 +138,7 @@ pub(crate) mod bun_object {
 
     // --- Lazy property callbacks ---
     export_lazy_prop_callbacks! {
+        BunObject_lazyPropCb_ant => crate::api::ant::create,
         BunObject_lazyPropCb_FFI => crate::ffi::ffi_object_draft::getter,
         BunObject_lazyPropCb_argv => super::get_argv,
         BunObject_lazyPropCb_cron => super::get_cron_object,

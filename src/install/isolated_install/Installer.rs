@@ -1164,6 +1164,20 @@ impl Task {
                         symlinker::Strategy::ExpectMissing
                     };
 
+                    // Real files live in the store; node_modules are symlinks the hoisted scan must not follow — sign the store path here.
+                    #[cfg(target_env = "ohos")]
+                    {
+                        let mut store_path = AutoAbsPath::init_top_level_dir();
+                        installer
+                            .append_real_store_path(
+                                &mut store_path,
+                                self.entry_id,
+                                Which::Staging,
+                            )
+                            .map_err(TaskError::SymlinkDependencies)?;
+                        crate::package_installer::ohos_sign_native_binaries(store_path.slice());
+                    }
+
                     let changed = installer.symlink_dependencies(entry_id, strategy, made_entry)?;
 
                     if relinking {

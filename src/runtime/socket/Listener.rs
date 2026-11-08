@@ -655,6 +655,7 @@ impl Listener {
             native_callback: JsCell::new(crate::socket::NativeCallbacks::None),
             twin: JsCell::new(None),
             verify_error: JsCell::new(None),
+            pending_fatal_send_errno: Cell::new(0),
             latest_session: Cell::new(None),
         });
         let s = this_socket;
@@ -702,6 +703,7 @@ impl Listener {
             native_callback: JsCell::new(crate::socket::NativeCallbacks::None),
             twin: JsCell::new(None),
             verify_error: JsCell::new(None),
+            pending_fatal_send_errno: Cell::new(0),
             latest_session: Cell::new(None),
         });
         let s = this_socket;
@@ -1491,6 +1493,7 @@ fn connect_finish<const IS_SSL: bool>(
             native_callback: JsCell::new(crate::socket::NativeCallbacks::None),
             twin: JsCell::new(None),
             verify_error: JsCell::new(None),
+            pending_fatal_send_errno: Cell::new(0),
             latest_session: Cell::new(None),
         })
     };

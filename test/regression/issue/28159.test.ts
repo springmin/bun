@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { mkdirSync, readdirSync } from "fs";
-import { bunEnv, bunExe, tempDir } from "harness";
+import { bunEnv, bunExe, isOHOS, tempDir } from "harness";
 import { join } from "path";
 
 test("runtime transpiler cache is disabled when BUN_INSPECT is set", async () => {
@@ -41,8 +41,14 @@ test("runtime transpiler cache is disabled when BUN_INSPECT is set", async () =>
     env: {
       ...bunEnv,
       BUN_RUNTIME_TRANSPILER_CACHE_PATH: cacheDir,
+      // OHOS has no writable /tmp; the debugger's unix-socket listener needs a
+      // path under the test's own temp dir.
       BUN_INSPECT:
-        process.platform === "win32" ? "127.0.0.1:0" : "ws+unix:///tmp/bun-inspect-fake-" + Date.now() + ".sock",
+        process.platform === "win32"
+          ? "127.0.0.1:0"
+          : isOHOS
+            ? "ws+unix://" + join(String(dir), "bun-inspect.sock")
+            : "ws+unix:///tmp/bun-inspect-fake-" + Date.now() + ".sock",
     },
     stdout: "pipe",
     stderr: "pipe",

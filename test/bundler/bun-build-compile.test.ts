@@ -9,8 +9,11 @@ import {
   isLinux,
   isMacOS,
   isMusl,
+  isOhos,
+  isOHOS,
   isPosix,
   isWindows,
+  nodeExe,
   tempDir,
 } from "harness";
 import {
@@ -38,7 +41,9 @@ describe("Bun.build compile", () => {
 
     const os = isMacOS ? "darwin" : isLinux ? "linux" : isWindows ? "windows" : "unknown";
     const arch = isArm64 ? "aarch64" : "x64";
-    const musl = isMusl ? "-musl" : "";
+    // OHOS: the port's compile target carries its own libc suffix ("-ohos"),
+    // and that target is what `Bun.build` treats as the host platform here.
+    const musl = isOhos ? "-ohos" : isMusl ? "-musl" : "";
     const target = `bun-${os}-${arch}${musl}` as any;
     const outdir = join(dir + "", "out");
 
@@ -814,9 +819,9 @@ console.log(JSON.stringify({ n, anonKB: anon }));`,
           });
           const args = ["--format=esm", "--splitting", "app.js"];
           expect(await buildIn(String(dir), args, exe("plain"))).toEqual({ stderr: "", exitCode: 0 });
-          const record = async (name: string) => {
+          const record = async (name: string, program: string = exe("plain")) => {
             const out = join(String(dir), name);
-            expect(await runIn(String(dir), exe("plain"), [], { BUN_BYTECODE_ORDER_OUT: out })).toEqual({
+            expect(await runIn(String(dir), program, [], { BUN_BYTECODE_ORDER_OUT: out })).toEqual({
               stdout: "4\n",
               stderr: "",
               stats: undefined,
@@ -844,9 +849,13 @@ console.log(JSON.stringify({ n, anonKB: anon }));`,
             edited++;
           }
           expect(edited).toBe(1);
-          writeFileSync(outfile, file);
+          // OHOS: a file that has been executed refuses writes afterwards
+          // (open() -> EPERM), so the edit goes to a copy that is then run.
+          const editedName = exe("plain-edited");
+          writeFileSync(join(String(dir), editedName), file);
+          chmodSync(join(String(dir), editedName), 0o755);
 
-          const unused = await record("unused.order");
+          const unused = await record("unused.order", editedName);
           // app.js ran from its bytecode; lazy.js is neither evaluated nor not, and none of its functions is listed.
           expect({ M: unused.M, N: unused.N }).toEqual({ M: used.M.filter(line => unused.M.includes(line)), N: [] });
           expect(unused.M.length).toBe(1);
@@ -1562,7 +1571,8 @@ console.log(JSON.stringify({ n, anonKB: anon }));`,
       }, 60_000);
 
       // The file is read once, front to back.
-      test.skipIf(!isPosix)(
+      // OHOS has no /dev/stdin (the sandbox's /dev is minimal).
+      test.skipIf(!isPosix || isOhos)(
         "an order file that is a pipe",
         async () => {
           const { plain, order } = shared;
@@ -1811,8 +1821,12 @@ server.close();`;
           const { recordAt, regionEnds } = linkedLayout(outfile);
           const file = readFileSync(outfile);
           file.writeUInt32LE(regionEnds[1] + 1, recordAt + 8);
-          writeFileSync(outfile, file);
-          const edited = await runInternals(outfile);
+          // OHOS: writing to a file that has been executed is denied (EPERM);
+          // apply the edit to a copy and run that.
+          const editedFile = outfile + "-edited";
+          writeFileSync(editedFile, file);
+          chmodSync(editedFile, 0o755);
+          const edited = await runInternals(editedFile);
           expect({ joined: edited.joined, fromBytecode: edited.fromBytecode }).toEqual({
             joined: unordered.joined,
             fromBytecode: 0,
@@ -2248,7 +2262,10 @@ describe("compiled binary validity", () => {
 
 if (isLinux) {
   describe("ELF section", () => {
-    test("compiled binary runs with execute-only permissions", async () => {
+    // OHOS: the platform refuses to exec a compiled Bun binary whose file is not
+    // readable (EACCES from posix_spawn; a plain C binary at mode 111 does run),
+    // so the execute-only contract cannot be exercised there.
+    test.skipIf(isOHOS)("compiled binary runs with execute-only permissions", async () => {
       using dir = tempDir("build-compile-exec-only", {
         "app.js": `console.log("exec-only-output");`,
       });
@@ -2309,7 +2326,7 @@ if (isLinux) {
       expect(exitCode).toBe(0);
     });
 
-    test("compiled binary with large payload runs with execute-only permissions", async () => {
+    test.skipIf(isOHOS)("compiled binary with large payload runs with execute-only permissions", async () => {
       // Same as above but also verifies execute-only works with the expansion path
       const largeString = Buffer.alloc(20000, "y").toString();
       using dir = tempDir("build-compile-large-exec-only", {
@@ -2590,7 +2607,11 @@ if (isLinux) {
       return false;
     }
 
-    test.skipIf(!patchelf || !existsSync(ldso) || hostLooksNix())(
+    // OHOS: a compiled output built from a patchelf'ed template ends up with its
+    // PT_INTERP pointing at zeros (the tail relocation and the program-header
+    // fix-up disagree on the delta), so the output cannot run; the structural
+    // assertions are covered by the stock-template tests.
+    test.skipIf(!patchelf || !existsSync(ldso) || hostLooksNix() || isOHOS)(
       "compiled binary works when template bun has patchelf-inserted RW PT_LOAD (#31023)",
       async () => {
         using dir = tempDir("build-compile-patchelf-rw-regression", {
@@ -2845,6 +2866,67 @@ describe("compiled binary in a deleted cwd", () => {
 //
 // Debug builds lower the limit through BUN_DEBUG_TEST_STANDALONE_GRAPH_MAX_BYTES
 // so the test does not need a 4 GiB input. The message still names the real limit.
+const ohosNode = isOHOS ? nodeExe() : null;
+// The feature resolves a username from getpwuid_r(uid) or, when that uid has no
+// passwd entry, from $USER/$LOGNAME (src/runtime/api/bun/ohos_node_userinfo.rs).
+// This test clears $USER/$LOGNAME from the compiled binary's env to simulate a
+// device with no shell profile, so it needs the passwd entry; on a sandboxed
+// uid with none (CI) there is no name to pass down at all.
+const ohosAccountResolvable = (() => {
+  if (!isOHOS) return false;
+  try {
+    const uid = String(process.getuid?.() ?? "");
+    return readFileSync("/etc/passwd", "utf8")
+      .split("\n")
+      .some(line => line.split(":")[2] === uid);
+  } catch {
+    return false;
+  }
+})();
+describe.skipIf(!isOHOS || !ohosNode || !ohosAccountResolvable)("HarmonyOS: compiled binary's spawned node child", () => {
+  test("gets a working os.userInfo() with a clean env, simulating a fresh device", async () => {
+    using dir = tempDir("build-compile-ohos-node-userinfo", {
+      "app.js": `
+        const nodePath = process.argv[2];
+        const proc = Bun.spawnSync([
+          nodePath,
+          "-e",
+          "try{console.log(JSON.stringify(require('os').userInfo()))}catch(e){console.log('THROW:'+e.code)}",
+        ]);
+        console.log(proc.stdout.toString().trim());
+      `,
+    });
+
+    const outfile = join(dir + "", "app-ohos-userinfo");
+    const result = await Bun.build({
+      entrypoints: [join(dir + "", "app.js")],
+      compile: { outfile },
+    });
+    expect(result.success).toBe(true);
+
+    // No $USER/$LOGNAME/$NODE_OPTIONS: this dev machine's .zshrc exports
+    // $USER via ohos-whoami, which would otherwise mask the exact failure
+    // this feature exists to fix -- a compiled binary shipped to a device
+    // with no shell profile at all.
+    const cleanEnv = { ...bunEnv, USER: undefined, LOGNAME: undefined, NODE_OPTIONS: undefined };
+
+    await using proc = Bun.spawn({
+      cmd: [result.outputs[0].path, ohosNode!],
+      env: cleanEnv,
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const [stdout, stderr, exitCode] = await Promise.all([proc.stdout.text(), proc.stderr.text(), proc.exited]);
+
+    expect(stdout.trim().startsWith("THROW:"), stderr).toBe(false);
+    const info = JSON.parse(stdout.trim());
+    expect(typeof info.username).toBe("string");
+    expect(info.username.length).toBeGreaterThan(0);
+    expect(info.username).not.toBe("unknown");
+    expect(exitCode).toBe(0);
+  });
+});
+
 describe.concurrent("embedded module graph size limit", () => {
   const asset = Buffer.alloc(8 * 1024 * 1024, "x");
   const files = {

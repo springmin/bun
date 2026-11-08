@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { bunExe, isPosix, tempDir } from "harness";
+import { bunExe, isOhos, isPosix, tempDir } from "harness";
 import path from "path";
 
 describe.if(isPosix)("garbage env", () => {
@@ -16,6 +16,14 @@ describe.if(isPosix)("garbage env", () => {
         console.error(stderrText);
       }
       expect(exitCode).toBe(0);
+    }
+
+    if (isOhos) {
+      // Freshly compiled here via a raw `cc` invocation, so it never goes
+      // through bun's own install/build signing pipeline — exec then fails
+      // with EACCES/Permission denied.
+      const bin = exe;
+      await Bun.$`binary-sign-tool sign -selfSign 1 -inFile ${bin} -outFile ${bin}.signed && cp ${bin}.signed ${bin} && chmod +x ${bin}`;
     }
 
     const { exitCode, stderr } = await Bun.$`${exe}`.env({ BUN_PATH: bunExe() });

@@ -517,7 +517,19 @@ void us_loop_run_bun_tick(struct us_loop_t *loop, const struct timespec* timeout
      * Only on a tick that really parks: there is no time to sweep in a poll that returns at once.
      * With no scavenger to hand off to, fall back to sweeping inline, rate-limited, because doing
      * it between ticks is what we are avoiding. */
+#if defined(__OHOS__)
+    /* OHOS: mi_on_thread_idle_start() posts the scavenger futex on every park (no coalescing), so unblocked ticks would cost a wake + owner spin per tick — hand off only when the tick really waits (same condition as the inline fallback below), rate-limited to 1/ms; now_ns == 0 ticks cannot be rate-limited and always hand off. */
+    static _Thread_local uint64_t last_park_handoff_ns = 0;
+    if (now_ns && now_ns < last_park_handoff_ns) last_park_handoff_ns = 0; /* clock went backwards: re-arm */
+    int handed_off = 0;
+    if (will_idle_inside_event_loop &&
+        (now_ns == 0 || now_ns >= last_park_handoff_ns + 1000000ULL)) {
+        if (now_ns) last_park_handoff_ns = now_ns;
+        handed_off = mi_on_thread_idle_start();
+    }
+#else
     const int handed_off = will_idle_inside_event_loop && mi_on_thread_idle_start();
+#endif
     if (!handed_off && will_idle_inside_event_loop) {
         static const uint64_t idle_sweep_interval_ns = 100 * 1000000ULL;
         static _Thread_local uint64_t last_idle_sweep_ns = 0;

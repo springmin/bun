@@ -1,5 +1,5 @@
 import { expect } from "bun:test";
-import { bunEnv, bunExe, isASAN, isLinux, isMusl, isWindows, tempDir } from "harness";
+import { bunEnv, bunExe, isASAN, isLinux, isMusl, isOhos, isWindows, tempDir } from "harness";
 import { join } from "node:path";
 import { locksEnvironment } from "./hardened";
 import { afterAll } from "./harness/default-timeout";
@@ -12,7 +12,9 @@ import { describe, test } from "./supported";
 // everything but those, as it does without --aot.
 
 // A sanitizer's run time defines sigaction() and signal() itself.
-const skipped = isWindows || isASAN || !compiler;
+// OHOS's signal delivery through a library's handlers differs from the Linux
+// process model this test records.
+const skipped = isWindows || isASAN || !compiler || isOhos;
 if (!isWindows && !compiler)
   console.error("SKIPPED: " + import.meta.path + ": it needs a C compiler ($CC, cc, gcc or clang)");
 

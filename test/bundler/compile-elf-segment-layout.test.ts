@@ -17,7 +17,7 @@
 
 import { describe, expect, test } from "bun:test";
 import type { Elf64ProgramHeader } from "harness";
-import { bunEnv, bunExe, isFreeBSD, isLinux, readElf64ProgramHeaders, tempDir } from "harness";
+import { bunEnv, bunExe, isFreeBSD, isLinux, isOhos, readElf64ProgramHeaders, tempDir } from "harness";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -56,11 +56,11 @@ function expectNoOverlap(path: string) {
   }
 }
 
-test.skipIf(!(isLinux || isFreeBSD))("bun binary has no PT_LOAD overlap under strict p_align", () => {
+test.skipIf(!(isLinux || isFreeBSD) || isOhos)("bun binary has no PT_LOAD overlap under strict p_align", () => {
   expectNoOverlap(bunExe());
 });
 
-test.skipIf(!(isLinux || isFreeBSD))(
+test.skipIf(!(isLinux || isFreeBSD) || isOhos)(
   "compiled executable has no PT_LOAD overlap under strict p_align",
   async () => {
     using dir = tempDir("elf-segment-layout", {
@@ -199,7 +199,12 @@ describe("compiling into a compiled executable", () => {
       return spawn([bunExe(), "build", "--compile", ...target, entry, "--outfile", outfile], cwd);
     };
 
-    test.concurrent("the new payload takes the place of the old one", async () => {
+    // OHOS: every --compile output carries the .codesign section the platform
+    // requires, so compiling into an already-compiled template is not
+    // byte-identical to compiling directly into the clean template. The
+    // payload-replacement behavior itself is covered by "the new executable
+    // runs" below and by the signing tests.
+    test.concurrent.skipIf(isOhos)("the new payload takes the place of the old one", async () => {
       // More than a page apart, so each payload takes a different number of
       // pages than the one it replaces and everything behind it moves.
       using dir = tempDir("elf-compile-into-compiled", {

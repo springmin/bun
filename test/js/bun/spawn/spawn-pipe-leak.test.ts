@@ -5,7 +5,7 @@
  * and then exits. We only await the `process.exited` promise without reading
  * any of the output data to test for potential memory leaks.
  */
-import { bunExe, isASAN, isCI, isWindows, rss } from "harness";
+import { bunExe, isASAN, isCI, isOHOS, isWindows, rss } from "harness";
 
 describe.todoIf(
   /**
@@ -110,13 +110,16 @@ describe.todoIf(
       return peak;
     }
 
-    const batchSize = process.platform === "win32" ? 10 : 50;
+    // OHOS spawns a whole bun per iteration (no vfork fast path) and each child
+    // writes several MB, so the upstream 5+10 batches of 50 do not fit the 30s
+    // budget; fewer, smaller batches keep the leak comparison meaningful.
+    const batchSize = process.platform === "win32" ? 10 : isOHOS ? 5 : 50;
 
     // Warmup
-    const warmupPeak = await testSpawnMemoryLeak(batchSize, 5);
+    const warmupPeak = await testSpawnMemoryLeak(batchSize, isOHOS ? 2 : 5);
 
     // Run the test
-    const mainPeak = await testSpawnMemoryLeak(batchSize, 10);
+    const mainPeak = await testSpawnMemoryLeak(batchSize, isOHOS ? 4 : 10);
 
     log("Memory leak test completed");
     log(`Final memory usage: ${Math.round(rss() / MB)} MB`);

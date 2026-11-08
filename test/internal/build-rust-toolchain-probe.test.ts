@@ -35,8 +35,10 @@ test.skipIf(isWindows)("the configure-time rustc probe pins the rustup proxy to 
       [
         "#!/bin/sh",
         'case "$1" in',
-        `  --print) printf "%s\\n" "${root}/sysroot-for-\${RUSTUP_TOOLCHAIN:-unset}" ;;`,
-        '  -vV) printf "host: host-for-%s\\nLLVM version: 23.1.1\\n" "${RUSTUP_TOOLCHAIN:-unset}" ;;',
+        // echo, not printf: the OHOS /bin/sh has no printf builtin and the probe's
+        // PATH holds only the fixture's bin directory.
+        `  --print) echo "${root}/sysroot-for-\${RUSTUP_TOOLCHAIN:-unset}" ;;`,
+        `  -vV) echo "host: host-for-\${RUSTUP_TOOLCHAIN:-unset}"; echo "LLVM version: 23.1.1" ;;`,
         "esac",
         "",
       ].join("\n"),

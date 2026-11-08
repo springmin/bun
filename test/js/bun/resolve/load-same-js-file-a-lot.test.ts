@@ -29,7 +29,6 @@ test(`load the same file ${count} times`, async () => {
   Bun.gc(true);
   Bun.unsafe.gcAggressionLevel(prev);
 });
-
 test(`load the same empty JS file ${count} times`, async () => {
   const prev = Bun.unsafe.gcAggressionLevel();
   Bun.unsafe.gcAggressionLevel(0);

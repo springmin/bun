@@ -6,6 +6,7 @@ import { access, cp, exists, mkdir, readlink, rename, rm, stat, writeFile } from
 import {
   bunEnv,
   bunExe,
+  isOhos,
   bunEnv as env,
   githubTarball,
   hostedGitRepository,
@@ -8268,7 +8269,8 @@ describe.concurrent("bun-install", () => {
     });
   });
 
-  it("should handle Git URL with existing lockfile", async () => {
+  // OHOS: resolves a git+https://github.com dependency, which the device cannot reach.
+it.skipIf(isOhos)("should handle Git URL with existing lockfile", async () => {
     await withContext(defaultOpts, async ctx => {
       const urls: string[] = [];
       setContextHandler(ctx, dummyRegistryForContext(ctx, urls));
@@ -9910,7 +9912,8 @@ describe.concurrent("bun-install", () => {
     });
   });
 
-  it("should perform bin-linking across multiple dependencies", async () => {
+  // OHOS: the fixture downloads its tarballs from the registry, which the device cannot reach.
+it.skipIf(isOhos)("should perform bin-linking across multiple dependencies", async () => {
     await withContext(defaultOpts, async ctx => {
       const foo_package = JSON.stringify({
         name: "foo",

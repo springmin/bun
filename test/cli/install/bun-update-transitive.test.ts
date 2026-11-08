@@ -257,7 +257,7 @@ async function expectNothingToUpdate(dir: string, line: string, ...args: string[
 const ROOT = { name: "root", workspaces: ["packages/*"] };
 const member = (name: string, dependencies: Json = {}) => ({ name, version: "1.0.0", dependencies });
 
-test.concurrent.each<[string, Layout]>([
+test.each<[string, Layout]>([
   ["text lockfile", { text: true }],
   ["binary lockfile", { text: false }],
 ])("`bun update` moves a transitive dependency within its dependent's range (%s)", async (_, layout) => {
@@ -267,7 +267,7 @@ test.concurrent.each<[string, Layout]>([
 });
 
 // The isolated linker re-links one-range-dep's store entry onto the moved no-deps, and a re-linked entry counts as installed like a fresh one.
-test.concurrent(
+test(
   "`bun update` moves a transitive dependency within its dependent's range (isolated linker)",
   async () => {
     const layout: Layout = { text: true, linker: "isolated" };
@@ -277,14 +277,14 @@ test.concurrent(
   },
 );
 
-test.concurrent("`bun update --latest` still moves transitive dependencies only within their ranges", async () => {
+test("`bun update --latest` still moves transitive dependencies only within their ranges", async () => {
   const fixture = await stale();
   const stdout = await expectTransitiveBump(fixture, {}, "--latest");
   expectSummary(stdout, NO_DEPS_ROW_HINTED, "", installed(1));
 });
 
 // The move is reported the same way whether the name was given or found, and naming it again is the same no-op as a bare rerun.
-test.concurrent.each([
+test.each([
   ["no-deps", ["no-deps"]],
   ["--latest no-deps", ["--latest", "no-deps"]],
 ])("`bun update %s` reaches a package that is only a transitive dependency", async (_, args) => {
@@ -300,7 +300,7 @@ test.concurrent.each([
 });
 
 // one-range-dep is named too but has nothing newer: no row, and it is not counted.
-test.concurrent.each([
+test.each([
   ["a pattern", ["no-*"]],
   ["a bare `*`", ["*"]],
   ["a negated name", ["!one-range-dep"]],
@@ -311,7 +311,7 @@ test.concurrent.each([
   expectSummary(stdout, NO_DEPS_ROW_HINTED, "", installed(1));
 });
 
-test.concurrent(
+test(
   "`bun update <name>` naming a package with nothing newer is the same no-op as a bare rerun",
   async () => {
     const { dir, packageJson } = await stale();
@@ -327,7 +327,7 @@ test.concurrent(
 );
 
 // Both errors name the lockfile that was actually loaded; the remedy is a bare command line, not a note.
-test.concurrent.each<[string, Layout]>([
+test.each<[string, Layout]>([
   ["bun.lock", { text: true }],
   ["bun.lockb", { text: false }],
 ])("`bun update <name>` and a pattern that match nothing in %s name that file", async (lockfile, layout) => {
@@ -357,7 +357,7 @@ async function withoutLockfile(dependencies: Json) {
   return packageDir;
 }
 
-test.concurrent("without a lockfile, `bun update <declared>` resolves and saves", async () => {
+test("without a lockfile, `bun update <declared>` resolves and saves", async () => {
   const dir = await withoutLockfile({ "no-deps": "^1.0.0" });
   const { stderr, exitCode } = await run(dir, "update", "no-deps");
   expect(stderr).not.toContain("error:");
@@ -369,7 +369,7 @@ test.concurrent("without a lockfile, `bun update <declared>` resolves and saves"
   expect(exitCode).toBe(0);
 });
 
-test.concurrent("without a lockfile, `bun update <undeclared>` is rejected and writes no lockfile", async () => {
+test("without a lockfile, `bun update <undeclared>` is rejected and writes no lockfile", async () => {
   const dir = await withoutLockfile({ "no-deps": "^1.0.0" });
   const { stderr, exitCode } = await run(dir, "update", "a-dep");
   expect(stderr).toContain(NOT_IN_LOCKFILE("a-dep"));
@@ -379,7 +379,7 @@ test.concurrent("without a lockfile, `bun update <undeclared>` is rejected and w
   expect(exitCode).toBe(1);
 });
 
-test.concurrent("`bun update --lockfile-only` moves the transitive dependency in bun.lock only", async () => {
+test("`bun update --lockfile-only` moves the transitive dependency in bun.lock only", async () => {
   const { dir, packageJson, noDeps } = await stale();
   const { stdout, stderr, exitCode } = await run(dir, "update", "--lockfile-only");
   expect(movedRows(stdout)).toStrictEqual([NO_DEPS_ROW]);
@@ -395,7 +395,7 @@ test.concurrent("`bun update --lockfile-only` moves the transitive dependency in
   expect(exitCode).toBe(0);
 });
 
-test.concurrent("`bun update --frozen-lockfile` refuses to move the transitive dependency", async () => {
+test("`bun update --frozen-lockfile` refuses to move the transitive dependency", async () => {
   const { dir, noDeps } = await stale();
   const packageJsonBefore = await packageJsonText(dir);
   const lockBefore = await lockText(dir);
@@ -408,7 +408,7 @@ test.concurrent("`bun update --frozen-lockfile` refuses to move the transitive d
 });
 
 // peer-deps-fixed's peer edge is skipped by the plan and only follows the root's moved no-deps; a-dep is inserted ahead of no-deps between the install and the update, so the root's rows no longer line up with the ones bun.lock recorded.
-test.concurrent("a moved direct dependency is still followed after its row index shifted", async () => {
+test("a moved direct dependency is still followed after its row index shifted", async () => {
   const dir = await setup({ "package.json": pkgJson({ "peer-deps-fixed": "1.0.0", "no-deps": "1.0.0" }) });
   expect(await lockedVersions(dir, "no-deps")).toStrictEqual(["1.0.0"]);
   await write(
@@ -429,7 +429,7 @@ test.concurrent("a moved direct dependency is still followed after its row index
 });
 
 // one-fixed-dep pins no-deps exactly, so bumping it moves no-deps with it; forward-peer-deps' `*` edge follows the move, the stale root copy is dropped and the new one hoists to the root instead of nesting (#41048). The peer owner sorts ahead of one-fixed-dep, so without the redirect its stale edge wins the root slot.
-test.concurrent("`bun install` after a version bump re-points loose edges at a moved exact child", async () => {
+test("`bun install` after a version bump re-points loose edges at a moved exact child", async () => {
   const dir = await setup({ "package.json": pkgJson({ "forward-peer-deps": "1.0.0", "one-fixed-dep": "1.0.0" }) });
   expect(await lockedVersions(dir, "no-deps")).toStrictEqual(["1.0.0"]);
   await reinstall(dir, pkgJson({ "forward-peer-deps": "1.0.0", "one-fixed-dep": "2.0.0" }));
@@ -441,7 +441,7 @@ test.concurrent("`bun install` after a version bump re-points loose edges at a m
 });
 
 // peer-deps-fixed's `^1.0.0` rejects 2.0.0, so the old copy stays for it, nested under its one dependent.
-test.concurrent("`bun install` after a version bump keeps the old copy for an edge out of range", async () => {
+test("`bun install` after a version bump keeps the old copy for an edge out of range", async () => {
   const dir = await setup({ "package.json": pkgJson({ "one-fixed-dep": "1.0.0", "peer-deps-fixed": "1.0.0" }) });
   expect(await lockedVersions(dir, "no-deps")).toStrictEqual(["1.0.0"]);
   await reinstall(dir, pkgJson({ "one-fixed-dep": "2.0.0", "peer-deps-fixed": "1.0.0" }));
@@ -452,7 +452,7 @@ test.concurrent("`bun install` after a version bump keeps the old copy for an ed
 });
 
 // The root's own `>=1.0.0` row is the user's pin: bumping the sibling must not drag it along, even though 2.0.0 is in range. The stale-for-the-root copy stays at the root and the bumped pin nests its own.
-test.concurrent("`bun install` after a version bump never moves the root's own locked dependency", async () => {
+test("`bun install` after a version bump never moves the root's own locked dependency", async () => {
   const dir = await setup({ "package.json": pkgJson({ "no-deps": "1.0.0", "one-fixed-dep": "1.0.0" }) });
   await reinstall(dir, pkgJson({ "no-deps": ">=1.0.0", "one-fixed-dep": "1.0.0" }));
   expect(await lockedVersions(dir, "no-deps")).toStrictEqual(["1.0.0"]);
@@ -464,7 +464,7 @@ test.concurrent("`bun install` after a version bump never moves the root's own l
 });
 
 // Two exact-pinned levels move together: parent's bump moves mid, mid's move moves leaf, and holder's peer edge follows the leaf.
-test.concurrent("`bun install` after a version bump follows a moved chain two levels deep", async () => {
+test("`bun install` after a version bump follows a moved chain two levels deep", async () => {
   using server = await serveRegistry({
     holder: { "1.0.0": { peerDependencies: { leaf: "*" } } },
     parent: { "1.0.0": { dependencies: { mid: "1.0.0" } }, "2.0.0": { dependencies: { mid: "2.0.0" } } },
@@ -481,7 +481,7 @@ test.concurrent("`bun install` after a version bump follows a moved chain two le
 });
 
 // The plan is the same block a real run prints, with a "would be updated" count line in place of "installed"; nothing is installed and no lockfile dump follows.
-test.concurrent.each([
+test.each([
   ["bare", []],
   ["--latest", ["--latest"]],
   ["no-deps", ["no-deps"]],
@@ -500,7 +500,7 @@ test.concurrent.each([
 });
 
 // Packages counted: the root, one-range-dep and no-deps.
-test.concurrent.each([
+test.each([
   ["bare", []],
   ["one-range-dep", ["one-range-dep"]],
   ["--prod", ["--prod"]],
@@ -516,7 +516,7 @@ test.concurrent.each([
   expect(exitCode).toBe(0);
 });
 
-test.concurrent(
+test(
   "`bun update --dry-run` lists and counts direct dependencies together with the transitive plan",
   async () => {
     const dir = await setup({
@@ -539,7 +539,7 @@ test.concurrent(
   },
 );
 
-test.concurrent("a direct dependency's declared range is left alone when only its dependency moves", async () => {
+test("a direct dependency's declared range is left alone when only its dependency moves", async () => {
   const { dir, packageJson } = await stale();
   const { stderr, exitCode } = await run(dir, "update");
   expect(stderr).not.toContain("error:");
@@ -549,7 +549,7 @@ test.concurrent("a direct dependency's declared range is left alone when only it
   expect(exitCode).toBe(0);
 });
 
-test.concurrent("a transitive dependency pinned exactly by its dependent stays put", async () => {
+test("a transitive dependency pinned exactly by its dependent stays put", async () => {
   const dir = await setup({ "package.json": pkgJson({ "one-fixed-dep": "1.0.0" }) });
   const before = await lock(dir);
   const { stdout, stderr, exitCode } = await run(dir, "update");
@@ -562,7 +562,7 @@ test.concurrent("a transitive dependency pinned exactly by its dependent stays p
 });
 
 // The root's no-deps@1.0.0 dedupes both dependents onto 1.0.0 before it is dropped; the fixed edge keeps 1.0.0 alive, so the `^1.0.0` edge is held instead of forked into the duplicate `bun dedupe` would remove.
-test.concurrent("a range edge is not forked off an instance a fixed sibling keeps alive", async () => {
+test("a range edge is not forked off an instance a fixed sibling keeps alive", async () => {
   const dependents = { "one-fixed-dep": "1.0.0", "one-range-dep": "1.0.0" };
   const dir = await setup({ "package.json": pkgJson({ "no-deps": "1.0.0", ...dependents }) });
   const packageJson = pkgJson(dependents);
@@ -582,7 +582,7 @@ test.concurrent("a range edge is not forked off an instance a fixed sibling keep
 
 // #38903: `bun update` and `bun dedupe` must reach a fixed point. After dedupe collapses the `^1.0.0`
 // edge onto the exact pin's 1.0.0, a bare update holds that edge instead of re-adding the duplicate.
-test.concurrent("a deduped lockfile is a fixed point of `bun update`", async () => {
+test("a deduped lockfile is a fixed point of `bun update`", async () => {
   const dir = await setup({ "package.json": pkgJson({ "one-range-dep": "1.0.0" }) });
   const packageJson = pkgJson({ "one-range-dep": "1.0.0", "no-deps": "1.0.0" });
   await reinstall(dir, packageJson);
@@ -611,7 +611,7 @@ test.concurrent("a deduped lockfile is a fixed point of `bun update`", async () 
 
 // Holds cascade: the peer's range rejects 2.0.0, holding bounded-dep's edge; that held edge in turn
 // rejects 4.0.0, so wide-dep's edge must be held too instead of forking leaf off the kept 1.0.0.
-test.concurrent("a held edge blocks its sibling from forking the instance", async () => {
+test("a held edge blocks its sibling from forking the instance", async () => {
   using server = await serveRegistry({
     "wide-dep": { "1.0.0": { dependencies: { leaf: ">=1.0.0" } } },
     "bounded-dep": { "1.0.0": { dependencies: { leaf: ">=1.0.0 <3.0.0" } } },
@@ -646,7 +646,7 @@ test.concurrent("a held edge blocks its sibling from forking the instance", asyn
 
 // A direct range that will move is no reason to hold: root leaf `^1.0.0 || ^3.0.0` moves to 3.0.0,
 // so parent's `^1.0.0 || ^2.0.0` edge moves to 2.0.0 instead of being held at the 1.0.0 the root leaves.
-test.concurrent("a direct edge that moves away does not hold its transitive siblings", async () => {
+test("a direct edge that moves away does not hold its transitive siblings", async () => {
   using server = await serveRegistry({
     parent: { "1.0.0": { dependencies: { leaf: "^1.0.0 || ^2.0.0" } } },
     leaf: { "1.0.0": {}, "2.0.0": {}, "3.0.0": {} },
@@ -679,7 +679,7 @@ test.concurrent("a direct edge that moves away does not hold its transitive sibl
 
 // `--latest -r` resolves the targeted rows by the `latest` dist-tag, so the exact pin jumps to 2.0.0
 // and does not keep 1.0.0 alive; parent's `^1.0.0` edge must still move to its in-range best.
-test.concurrent("`bun update --latest -r`: a pin that jumps to latest does not hold its siblings", async () => {
+test("`bun update --latest -r`: a pin that jumps to latest does not hold its siblings", async () => {
   using server = await serveRegistry({
     parent: { "1.0.0": { dependencies: { leaf: "^1.0.0" } } },
     leaf: { "1.0.0": {}, "1.5.0": {}, "2.0.0": {} },
@@ -698,7 +698,7 @@ test.concurrent("`bun update --latest -r`: a pin that jumps to latest does not h
 
 // A workspace member's row is not re-resolved by a bare update from the root, so its parked 1.0.0
 // keeps the instance alive and parent's `*` edge is held: the deduped lockfile stays a fixed point.
-test.concurrent("a member's parked edge holds its transitive siblings under a root update", async () => {
+test("a member's parked edge holds its transitive siblings under a root update", async () => {
   using server = await serveRegistry({
     parent: { "1.0.0": { dependencies: { leaf: "*" } } },
     leaf: { "1.0.0": {}, "1.5.0": {}, "2.0.0": {} },
@@ -732,7 +732,7 @@ test.concurrent("a member's parked edge holds its transitive siblings under a ro
 
 // pkg1's `^1.0.0` sits on leaf@1.0.0 only; it must not hold parent-b's `>=2.0.0` edge on the
 // separate leaf@2.0.0 instance, which is free to move to 3.0.0.
-test.concurrent("a member's parked row does not hold wants on another instance of its package", async () => {
+test("a member's parked row does not hold wants on another instance of its package", async () => {
   using server = await serveRegistry({
     "parent-a": { "1.0.0": { dependencies: { leaf: "^1.0.0" } } },
     "parent-b": { "1.0.0": { dependencies: { leaf: ">=2.0.0" } } },
@@ -769,7 +769,7 @@ test.concurrent("a member's parked row does not hold wants on another instance o
 
 // `--latest -r` bumps the catalog definition itself before resolving, so the catalog row is
 // modeled by its rewritten range (never the `latest` dist-tag) and every edge converges on 2.0.0.
-test.concurrent("`bun update --latest -r` with a catalog pin converges with dedupe", async () => {
+test("`bun update --latest -r` with a catalog pin converges with dedupe", async () => {
   using server = await serveRegistry({
     parent: { "1.0.0": { dependencies: { leaf: "*" } } },
     leaf: { "1.0.0": {}, "2.0.0": {} },
@@ -798,7 +798,7 @@ test.concurrent("`bun update --latest -r` with a catalog pin converges with dedu
 
 // `--latest` never moves a row below bun.lock: with `latest` behind the locked 2.0.0, the exact pin
 // stays, so parent's `>=2.0.0` edge is held instead of re-forking what dedupe removed.
-test.concurrent("`bun update --latest -r`: a pin ahead of `latest` keeps holding its siblings", async () => {
+test("`bun update --latest -r`: a pin ahead of `latest` keeps holding its siblings", async () => {
   using server = await serveRegistry(
     {
       parent: { "1.0.0": { dependencies: { leaf: ">=2.0.0" } } },
@@ -824,7 +824,7 @@ test.concurrent("`bun update --latest -r`: a pin ahead of `latest` keeps holding
 
 // Root rows are re-appended unresolved before the plan runs; the snapshot recovers where they sat,
 // so a root pin still holds a member-scoped update's wants even though root is out of scope.
-test.concurrent("a root pin holds transitive wants when updating from a member", async () => {
+test("a root pin holds transitive wants when updating from a member", async () => {
   using server = await serveRegistry({
     parent: { "1.0.0": { dependencies: { leaf: "*" } } },
     leaf: { "1.0.0": {}, "2.0.0": {} },
@@ -853,7 +853,7 @@ test.concurrent("a root pin holds transitive wants when updating from a member",
 
 // `bun update parent --latest` moves parent 1.0.0 -> 3.0.0; the superseded parent@1.0.0's `~1.0.0`
 // row must not hold the new parent's `^1.0.0` child edge, which moves in-range to 1.5.0.
-test.concurrent("`bun update <name> --latest`: a superseded version's rows do not hold the new children", async () => {
+test("`bun update <name> --latest`: a superseded version's rows do not hold the new children", async () => {
   using server = await serveRegistry({
     parent: {
       "1.0.0": { dependencies: { leaf: "~1.0.0" } },
@@ -874,7 +874,7 @@ test.concurrent("`bun update <name> --latest`: a superseded version's rows do no
 
 // Same through an intermediate package: the superseded parent@1.0.0 -> mid -> leaf `~1.0.0` chain
 // is unreachable once parent moves, so mid's row does not hold the new parent's `^1.0.0` edge.
-test.concurrent("`bun update <name> --latest`: a superseded chain's rows do not hold the new children", async () => {
+test("`bun update <name> --latest`: a superseded chain's rows do not hold the new children", async () => {
   using server = await serveRegistry({
     parent: {
       "1.0.0": { dependencies: { mid: "1.0.0" } },
@@ -896,7 +896,7 @@ test.concurrent("`bun update <name> --latest`: a superseded chain's rows do not 
 
 // Removing a root dependency and updating in one step: the removed subtree's rows are unreachable
 // and do not hold the remaining `^1.0.0` want at the 1.0.0 they used to share.
-test.concurrent("a removed root dependency's rows do not hold the remaining wants", async () => {
+test("a removed root dependency's rows do not hold the remaining wants", async () => {
   using server = await serveRegistry({
     "parent-a": { "1.0.0": { dependencies: { leaf: "~1.0.0" } } },
     "parent-b": { "1.0.0": { dependencies: { leaf: "^1.0.0" } } },
@@ -922,7 +922,7 @@ test.concurrent("a removed root dependency's rows do not hold the remaining want
 
 // The workspace analog: a member dropped from the glob keeps its Workspace tag until the clean,
 // but its rows are unreachable and do not hold the remaining `^1.0.0` want.
-test.concurrent("a removed workspace member's rows do not hold the remaining wants", async () => {
+test("a removed workspace member's rows do not hold the remaining wants", async () => {
   using server = await serveRegistry({
     parent: { "1.0.0": { dependencies: { leaf: "^1.0.0" } } },
     leaf: { "1.0.0": {}, "1.5.0": {} },
@@ -951,7 +951,7 @@ test.concurrent("a removed workspace member's rows do not hold the remaining wan
 
 // An optional dependency the registry cannot resolve is skipped at install and its row stays
 // unresolved in bun.lock; a later `bun update` must tolerate that row.
-test.concurrent("`bun update` tolerates an unresolved optional dependency row", async () => {
+test("`bun update` tolerates an unresolved optional dependency row", async () => {
   using server = await serveRegistry({
     parent: { "1.0.0": { dependencies: { leaf: "^1.0.0" } } },
     leaf: { "1.0.0": {}, "1.5.0": {} },
@@ -973,7 +973,7 @@ test.concurrent("`bun update` tolerates an unresolved optional dependency row", 
 
 // The root's `^1.0.0` row sits on leaf@1.5.0; its lookup (1.5.0) is below leaf@2.0.0 but the row
 // never resolved there, so it must not hold parent's `^2.0.0` want from moving to 2.5.0.
-test.concurrent("a direct row on a lower instance does not hold wants on a higher instance", async () => {
+test("a direct row on a lower instance does not hold wants on a higher instance", async () => {
   const manifests: Manifests = {
     parent: { "1.0.0": { dependencies: { leaf: "^2.0.0" } } },
     leaf: { "1.5.0": {}, "2.0.0": {}, "2.5.0": {} },
@@ -994,7 +994,7 @@ test.concurrent("a direct row on a lower instance does not hold wants on a highe
 
 // The redirect is first-wins per instance: root's row lands on 3.0.0 first, so pkg1's 4.0.0 landing is
 // never offered to peer-host's edge; that edge stays on 1.0.0 and parent's `*` want must be held.
-test.concurrent("only the first moved direct row's landing carries an instance's followers", async () => {
+test("only the first moved direct row's landing carries an instance's followers", async () => {
   const manifests: Manifests = {
     parent: { "1.0.0": { dependencies: { leaf: "*" } } },
     "peer-host": { "1.0.0": { peerDependencies: { leaf: "~1.0.0 || ~4.0.0" } } },
@@ -1030,7 +1030,7 @@ test.concurrent("only the first moved direct row's landing carries an instance's
 
 // pkg1's `1.0.0 || 2.0.0` row binds to the workspace member leaf@2.0.0, never the npm leaf@1.0.0 it
 // name-matches, so it must not hold parent-b's `~1.0.0` want from vacating that instance to 1.0.5.
-test.concurrent("a row a workspace member captures does not hold its package's npm instances", async () => {
+test("a row a workspace member captures does not hold its package's npm instances", async () => {
   const manifests: Manifests = {
     "parent-b": { "1.0.0": { dependencies: { leaf: "~1.0.0" } } },
     leaf: { "1.0.0": {}, "1.0.5": {} },
@@ -1060,7 +1060,7 @@ test.concurrent("a row a workspace member captures does not hold its package's n
 });
 
 // The root's exact 1.0.0 takes the root slot and pushes one-range-dep's 1.1.0 into a nested folder; widening the root keeps 1.0.0 locked, so the update collapses both rows onto 1.1.0.
-test.concurrent("hoisted: a bare update removes the nested copy whose row it collapsed", async () => {
+test("hoisted: a bare update removes the nested copy whose row it collapsed", async () => {
   const dir = await setup({ "package.json": pkgJson({ "one-range-dep": "1.0.0" }) });
   await reinstall(dir, pkgJson({ "one-range-dep": "1.0.0", "no-deps": "1.0.0" }));
   await reinstall(dir, pkgJson({ "one-range-dep": "1.0.0", "no-deps": "^1.0.0" }));
@@ -1080,7 +1080,7 @@ test.concurrent("hoisted: a bare update removes the nested copy whose row it col
   expect(exitCode).toBe(0);
 });
 
-test.concurrent("an override holds a transitive dependency back", async () => {
+test("an override holds a transitive dependency back", async () => {
   const { dir } = await stale();
   const packageJson = pkgJson({ "one-range-dep": "1.0.0" }, { overrides: { "no-deps": "1.0.0" } });
   await reinstall(dir, packageJson);
@@ -1106,7 +1106,7 @@ index 0000000000000000000000000000000000000000..3b18e512dba79e4c8300dd08aeb37f8e
 const PATCHED = { patchedDependencies: { "no-deps@1.0.0": "patches/no-deps@1.0.0.patch" } };
 
 // The `stale()` recipe with the transitive no-deps@1.0.0 patched; the kept row sits in the summary block and names the version the patch is holding back.
-test.concurrent.each<[string, string[], string]>([
+test.each<[string, string[], string]>([
   ["bare", [], noChanges(2, 3)],
   ["no-deps", ["no-deps"], noChanges(2, 3)],
   ["bare --dry-run", ["--dry-run"], nothingToUpdate(3)],
@@ -1132,7 +1132,7 @@ test.concurrent.each<[string, string[], string]>([
   expect(exitCode).toBe(0);
 });
 
-test.concurrent.each<[string, string[], string]>([
+test.each<[string, string[], string]>([
   ["bare", [], noChanges(1, 2)],
   ["no-deps", ["no-deps"], noChanges(1, 2)],
   ["bare --dry-run", ["--dry-run"], nothingToUpdate(2)],
@@ -1160,7 +1160,7 @@ test.concurrent.each<[string, string[], string]>([
 });
 
 // --latest moves past the patch on purpose; the orphaned patchedDependencies entry is pointed out on stderr.
-test.concurrent(
+test(
   "`bun update <name> --latest` moves a patched dependency and warns that its patch no longer applies",
   async () => {
     const dir = await setup({
@@ -1182,7 +1182,7 @@ test.concurrent(
 );
 
 // A version bump that leaves a patchedDependencies key behind is pointed out by every install, not only by `bun update`.
-test.concurrent("every install warns about a patchedDependencies key that matches no installed version", async () => {
+test("every install warns about a patchedDependencies key that matches no installed version", async () => {
   const dir = await setup({
     "package.json": pkgJson({ "no-deps": "1.0.0" }, PATCHED),
     "patches/no-deps@1.0.0.patch": NO_DEPS_PATCH,
@@ -1208,7 +1208,7 @@ test.concurrent("every install warns about a patchedDependencies key that matche
   expect(removed.exitCode).toBe(0);
 });
 
-test.concurrent.each<[string, (version: string) => string]>([
+test.each<[string, (version: string) => string]>([
   ["a tarball file", version => `file:./no-deps-${version}.tgz`],
   ["a tarball URL", version => `${registry.registryUrl()}no-deps/-/no-deps-${version}.tgz`],
 ])("every install warns about the patch of %s that the dependency no longer names", async (_, spec) => {
@@ -1232,7 +1232,7 @@ test.concurrent.each<[string, (version: string) => string]>([
   expect(warningLines(await frozen(dir))).toEqual(moved);
 });
 
-test.concurrent("a patchedDependencies key without a version is pointed out where it is in package.json", async () => {
+test("a patchedDependencies key without a version is pointed out where it is in package.json", async () => {
   const dir = await setup({
     "package.json": pkgJson({ "no-deps": "1.0.0" }, { patchedDependencies: { "no-deps": "patches/no-deps.patch" } }),
     "patches/no-deps.patch": NO_DEPS_PATCH,
@@ -1254,7 +1254,7 @@ async function overriddenThenEdited(overrides?: Json) {
   return { dir, packageJson };
 }
 
-test.concurrent.each<[string, Json | undefined, string]>([
+test.each<[string, Json | undefined, string]>([
   ["removed", undefined, "1.1.0"],
   ["widened", { "no-deps": "~1.0.0" }, "1.0.1"],
 ])(
@@ -1274,7 +1274,7 @@ test.concurrent.each<[string, Json | undefined, string]>([
   },
 );
 
-test.concurrent(
+test(
   "the summary reports the target an override added since bun.lock was written actually allows",
   async () => {
     const { dir } = await stale();
@@ -1292,7 +1292,7 @@ test.concurrent(
   },
 );
 
-test.concurrent("a lockfile that already resolves the newest allowed versions is left alone", async () => {
+test("a lockfile that already resolves the newest allowed versions is left alone", async () => {
   const dir = await setup({ "package.json": pkgJson({ "one-range-dep": "1.0.0" }) });
   const before = await lock(dir);
   expect(await lockedVersions(dir, "no-deps")).toStrictEqual(["1.1.0"]);
@@ -1304,7 +1304,7 @@ test.concurrent("a lockfile that already resolves the newest allowed versions is
   expect(exitCode).toBe(0);
 });
 
-test.concurrent("`bun update --latest` run twice is a no-op that does not claim to have saved bun.lock", async () => {
+test("`bun update --latest` run twice is a no-op that does not claim to have saved bun.lock", async () => {
   const { dir } = await stale();
   const first = await run(dir, "update", "--latest");
   expectSummary(first.stdout, NO_DEPS_ROW_HINTED, "", installed(1));
@@ -1319,7 +1319,7 @@ test.concurrent("`bun update --latest` run twice is a no-op that does not claim 
   expect(second.exitCode).toBe(0);
 });
 
-test.concurrent("without a lockfile `bun update` resolves everything fresh", async () => {
+test("without a lockfile `bun update` resolves everything fresh", async () => {
   const { packageDir } = await registry.createTestDir({
     bunfigOpts: { saveTextLockfile: true, linker: "hoisted" },
     files: { "package.json": stringify(pkgJson({ "one-range-dep": "1.0.0" })) },
@@ -1348,7 +1348,7 @@ async function staleMemberTransitive(pkg2Range?: string) {
   return { dir, pkg1 };
 }
 
-test.concurrent("in a workspace, `bun update` from the root moves a member's transitive dependency", async () => {
+test("in a workspace, `bun update` from the root moves a member's transitive dependency", async () => {
   const { dir, pkg1 } = await staleMemberTransitive();
   const { stdout, stderr, exitCode } = await run(dir, "update");
   expectMoved(stdout, "no-deps", "1.0.0", "1.1.0");
@@ -1362,7 +1362,7 @@ test.concurrent("in a workspace, `bun update` from the root moves a member's tra
   expect(exitCode).toBe(0);
 });
 
-test.concurrent.each([
+test.each([
   ["the root", ""],
   ["the member", "packages/pkg1"],
 ])("`bun update <name>` run from %s still moves a member's transitive dependency", async (_, cwd) => {
@@ -1405,7 +1405,7 @@ async function noDepsEdges(dir: string, ...dependents: string[]) {
 const distinctEdges = () => staleMemberEdges({ "one-range-dep": "1.0.0" }, { "one-range-dep-too": "1.0.0" });
 
 // Only pkg1 is planned from pkg1, but once its no-deps moves, pkg2's compatible edge is re-pointed too so bun.lock keeps one copy.
-test.concurrent.each([
+test.each([
   ["from packages/pkg1", "packages/pkg1", []],
   ["with --filter pkg1", "", ["--filter", "pkg1"]],
   ["from the root", "", []],
@@ -1434,7 +1434,7 @@ const disjointEdges = () =>
 
 const PKG1_A_DEP_MOVED = stringify(member("pkg1", { "a-dep": "^1.0.10" }));
 
-test.concurrent.each([
+test.each([
   ["from packages/pkg1", "packages/pkg1", []],
   ["with --filter pkg1", "", ["--filter", "pkg1"]],
 ])(
@@ -1454,7 +1454,7 @@ test.concurrent.each([
 );
 
 // Every workspace's transitive rows are planned from the root; a member's own entries only move with -r, and then they get rows like everything else.
-test.concurrent.each<[string, string[], boolean]>([
+test.each<[string, string[], boolean]>([
   ["from the root", [], false],
   ["with -r", ["-r"], true],
 ])(
@@ -1477,7 +1477,7 @@ test.concurrent.each<[string, string[], boolean]>([
   },
 );
 
-test.concurrent.each<[string, string, string[], string]>([
+test.each<[string, string, string[], string]>([
   ["from packages/pkg1", "packages/pkg1", [], NOT_A_DEPENDENCY_HERE("no-deps", "pkg2")],
   ["with --filter pkg1", "", ["--filter", "pkg1"], NOT_A_DEPENDENCY_OF_SELECTION("no-deps", "pkg2")],
 ])(
@@ -1494,7 +1494,7 @@ test.concurrent.each<[string, string, string[], string]>([
 );
 
 // -r plans pkg1's own a-dep entry too and lists it once; --filter pkg1 plans nothing but that entry.
-test.concurrent.each<[string, string[], string[]]>([
+test.each<[string, string[], string[]]>([
   ["-r", ["-r"], [A_DEP_ROW, NO_DEPS_ROW_HINTED]],
   ["--filter pkg1", ["--filter", "pkg1"], [A_DEP_ROW]],
   ["-r --latest", ["-r", "--latest"], [A_DEP_ROW, NO_DEPS_ROW_HINTED]],
@@ -1509,7 +1509,7 @@ test.concurrent.each<[string, string[], string[]]>([
   expect(exitCode).toBe(0);
 });
 
-test.concurrent.each([
+test.each([
   ["bare", []],
   ["named", ["no-deps"]],
 ])("in a workspace, `bun update --filter` matching no workspace is an error (%s)", async (_, args) => {
@@ -1524,7 +1524,7 @@ test.concurrent.each([
   expect(exitCode).toBe(1);
 });
 
-test.concurrent.each([
+test.each([
   ["from packages/pkg2", "packages/pkg2", []],
   ["with --filter pkg2", "", ["--filter", "pkg2"]],
 ])(
@@ -1542,7 +1542,7 @@ test.concurrent.each([
 );
 
 // dep-with-tags has 3.0.1 published above its `latest` (3.0.0); prereleases-1 has 1.0.0-future.7 above 1.0.0-future.4.
-test.concurrent.each([
+test.each([
   ["dep-with-tags", "3.0.1"],
   ["prereleases-1", "1.0.0-future.7"],
 ])("`bun update --latest` does not downgrade %s from %s, which is ahead of `latest`", async (name, version) => {
@@ -1561,7 +1561,7 @@ test.concurrent.each([
 });
 
 // The `pre-3` tag points to 3.0.1. A dist-tag is rewritten to a range, same as in `dependencies`.
-test.concurrent.each([
+test.each([
   ["a pin", "3.0.1", "3.0.1"],
   ["a range", "^3.0.1", "^3.0.1"],
   ["a dist-tag", "pre-3", "^3.0.1"],
@@ -1592,7 +1592,7 @@ test.concurrent.each([
   },
 );
 
-test.concurrent(
+test(
   "`bun update --latest` holds back only the entry it rewrote; a member's own dist-tag entry still follows its tag",
   async () => {
     const dir = await setup({
@@ -1616,7 +1616,7 @@ test.concurrent(
   },
 );
 
-test.concurrent("`bun up --help` prints the update help", async () => {
+test("`bun up --help` prints the update help", async () => {
   const { packageDir } = await registry.createTestDir();
   const { stdout, exitCode } = await run(packageDir, "up", "--help");
   expect(stdout).toContain("bun update");
@@ -1633,7 +1633,7 @@ test.concurrent("`bun up --help` prints the update help", async () => {
   expect(exitCode).toBe(0);
 });
 
-test.concurrent("`bun up` is `bun update`", async () => {
+test("`bun up` is `bun update`", async () => {
   const { dir, packageJson } = await stale();
   const { stdout, stderr, exitCode } = await run(dir, "up");
   expectMoved(stdout, "no-deps", "1.0.0", "1.1.0");
@@ -1643,7 +1643,7 @@ test.concurrent("`bun up` is `bun update`", async () => {
   expect(exitCode).toBe(0);
 });
 
-test.concurrent("`-L` is `--latest`", async () => {
+test("`-L` is `--latest`", async () => {
   const dir = await setup({ "package.json": pkgJson({ "no-deps": "~1.0.0" }) });
   const { stderr, exitCode } = await run(dir, "update", "-L");
   expect(stderr).not.toContain("error:");
@@ -1653,7 +1653,7 @@ test.concurrent("`-L` is `--latest`", async () => {
   expect(exitCode).toBe(0);
 });
 
-test.concurrent("`bun update --silent` prints nothing at all but still moves the transitive dependency", async () => {
+test("`bun update --silent` prints nothing at all but still moves the transitive dependency", async () => {
   const { dir, packageJson, noDeps } = await stale();
   const { stdout, stderr, exitCode } = await run(dir, "update", "--silent");
   expect(stdout).toBe("");
@@ -1665,7 +1665,7 @@ test.concurrent("`bun update --silent` prints nothing at all but still moves the
   expect(exitCode).toBe(0);
 });
 
-test.concurrent("`bun update --silent --dry-run` prints nothing and writes nothing", async () => {
+test("`bun update --silent --dry-run` prints nothing and writes nothing", async () => {
   const { dir, noDeps } = await stale();
   const before = await lockText(dir);
   const { stdout, stderr, exitCode } = await run(dir, "update", "--silent", "--dry-run");
@@ -1676,7 +1676,7 @@ test.concurrent("`bun update --silent --dry-run` prints nothing and writes nothi
   expect(exitCode).toBe(0);
 });
 
-test.concurrent.each<[string, Layout]>([
+test.each<[string, Layout]>([
   ["hoisted", {}],
   ["isolated", { linker: "isolated" }],
 ])("`bun update --no-save` moves the transitive dependency in node_modules only (%s)", async (_, layout) => {
@@ -1718,7 +1718,7 @@ async function staleShared() {
 }
 
 // Every row moves within its own range, then the versions the update added collapse onto the fewest that satisfy them: 1.0.2 covers `*`, `^1.0.1` and `>=1.0.1`, so 2.0.2 is not kept.
-test.concurrent.each([
+test.each([
   ["bare", []],
   ["named", ["hoist-lockfile-shared"]],
   ["named with an ignored @version", ["hoist-lockfile-shared@1.0.1"]],
@@ -1733,7 +1733,7 @@ test.concurrent.each([
   expect(exitCode).toBe(0);
 });
 
-test.concurrent("the plan counts packages, not the edges that move onto them", async () => {
+test("the plan counts packages, not the edges that move onto them", async () => {
   const { dir } = await staleShared();
   const before = await lockText(dir);
   const { stdout, stderr, exitCode } = await run(dir, "update", "--dry-run");
@@ -1754,7 +1754,7 @@ async function sharedWithRoot(dependent: string, rootRange = "1.0.1") {
 }
 
 // hoist-lockfile-1's `*` row follows the root's own hoist-lockfile-shared entry instead of forking off to 2.0.2.
-test.concurrent.each([
+test.each([
   ["bare", []],
   ["named", ["hoist-lockfile-shared"]],
 ])(
@@ -1775,7 +1775,7 @@ test.concurrent.each([
   },
 );
 
-test.concurrent.each([
+test.each([
   ["bare", []],
   ["named", ["hoist-lockfile-shared"]],
   ["the dependent with --latest", ["hoist-lockfile-1", "--latest"]],
@@ -1787,7 +1787,7 @@ test.concurrent.each([
 });
 
 // hoist-lockfile-2's `^1.0.1` rejects the 2.0.2 the root's `>=1.0.1` moves to, so that row is planned on its own.
-test.concurrent("a row whose range rejects where the root's copy is going moves within its own range", async () => {
+test("a row whose range rejects where the root's copy is going moves within its own range", async () => {
   const { dir, packageJson } = await sharedWithRoot("hoist-lockfile-2", ">=1.0.1");
   const { stdout, stderr, exitCode } = await run(dir, "update");
   expectMoved(stdout, "hoist-lockfile-shared", "1.0.1", "2.0.2");
@@ -1802,7 +1802,7 @@ test.concurrent("a row whose range rejects where the root's copy is going moves 
 });
 
 // The root's entry is edited and `bun update` runs right away, so the update sees the old entry in bun.lock and the new one in package.json.
-test.concurrent(
+test(
   "a row is planned on its own when the root's entry is edited out of its range before the update",
   async () => {
     const { dir } = await sharedWithRoot("hoist-lockfile-2");
@@ -1825,7 +1825,7 @@ test.concurrent(
   },
 );
 
-test.concurrent.each([
+test.each([
   ["bare", []],
   ["--dry-run", ["--dry-run"]],
 ])("a row is planned on its own when the root's entry is removed before the update (%s)", async (_, args) => {
@@ -1850,7 +1850,7 @@ test.concurrent.each([
 
 // pkg2's no-deps entry, which one-range-dep's `^1.0.0` row shares, is edited to `^2.0.0` right before the update; pkg2's
 // new package.json is only read while the update resolves, so the row can only be planned once pkg2 has moved.
-test.concurrent(
+test(
   "a row is planned on its own when a member's entry is edited out of its range before the update",
   async () => {
     const { dir, pkg1 } = await staleMemberTransitive("~1.0.0");
@@ -1871,7 +1871,7 @@ test.concurrent(
 );
 
 // peer-deps-fixed@1.0.0 declares peer `no-deps: ^1.0.0`; the root's exact no-deps@1.0.0 is its only provider.
-test.concurrent.each([
+test.each([
   ["bare", []],
   ["--latest peer-deps-fixed", ["--latest", "peer-deps-fixed"]],
   ["no-deps", ["no-deps"]],
@@ -1893,7 +1893,7 @@ async function staleAutoInstalledPeer() {
   return { dir, packageJson };
 }
 
-test.concurrent.each<[string, string[], boolean]>([
+test.each<[string, string[], boolean]>([
   ["bare", [], true],
   ["--latest peer-deps-fixed", ["--latest", "peer-deps-fixed"], true],
   ["no-deps", ["no-deps"], false],
@@ -1911,7 +1911,7 @@ test.concurrent.each<[string, string[], boolean]>([
 });
 
 // peer-deps@1.0.0 has nothing but a `no-deps: *` peer, which the install auto-installs at latest.
-test.concurrent("a package with only peer dependencies is a clean no-op", async () => {
+test("a package with only peer dependencies is a clean no-op", async () => {
   const dir = await setup({ "package.json": pkgJson({ "peer-deps": "1.0.0" }) });
   expect(await lockedVersions(dir, "no-deps")).toStrictEqual(["2.0.0"]);
   await expectNoop(dir);
@@ -1919,7 +1919,7 @@ test.concurrent("a package with only peer dependencies is a clean no-op", async 
 });
 
 // dep-loop-entry@1.0.0 and dep-loop-exit@1.0.0 pin each other; bundled-1@1.0.0 ships its own no-deps@1.0.0.
-test.concurrent.each([
+test.each([
   ["bare", []],
   ["no-deps", ["no-deps"]],
   ["dep-loop-exit", ["dep-loop-exit"]],
@@ -1932,7 +1932,7 @@ test.concurrent.each([
   expect(await lockedVersions(dir, "dep-loop-exit")).toStrictEqual(["1.0.0"]);
 });
 
-test.concurrent.each([
+test.each([
   ["bare", []],
   ["no-deps", ["no-deps"]],
 ])("a bundled edge is not re-resolved even when its range would allow it (%s)", async (_, args) => {
@@ -1966,7 +1966,7 @@ async function staleMembers(pkg1Range: string, pkg2Range: string) {
   return { dir, pkg2Text: await packageJsonText(dir, "packages/pkg2") };
 }
 
-test.concurrent("in a workspace, `bun update` from one member also re-points a sibling's identical range", async () => {
+test("in a workspace, `bun update` from one member also re-points a sibling's identical range", async () => {
   const { dir } = await staleMembers("~1.0.0", "~1.0.0");
   const { stderr, exitCode } = await runIn(dir, "packages/pkg1", "update");
   expect(stderr).not.toContain("error:");
@@ -2061,7 +2061,7 @@ async function installServed(server: Bun.Server<undefined>, prefix: string, pack
 const freshInstallLock = async (server: Bun.Server<undefined>, prefix: string, packageJson: Json, ...args: string[]) =>
   lock(await installServed(server, prefix, packageJson, ...args));
 
-test.concurrent("`bun update <name>` leaves the named package's own dependencies where they are", async () => {
+test("`bun update <name>` leaves the named package's own dependencies where they are", async () => {
   using server = await serveRegistry({
     parent: { "1.0.0": { dependencies: { leaf: "^1.0.0" } }, "1.1.0": { dependencies: { leaf: "^1.0.0" } } },
     leaf: { "1.0.0": {}, "1.1.0": {} },
@@ -2097,7 +2097,7 @@ test.concurrent("`bun update <name>` leaves the named package's own dependencies
 });
 
 // plug@2 has a different peer range than the plug@1 in bun.lock, and `host` is only installed as plug's peer.
-test.concurrent.each([[["--latest"]], [["--latest", "plug"]]])(
+test.each([[["--latest"]], [["--latest", "plug"]]])(
   "one `bun update %j` also moves the peer of a dependency that it moves to a new major",
   async args => {
     using server = await serveRegistry({
@@ -2123,7 +2123,7 @@ test.concurrent.each([[["--latest"]], [["--latest", "plug"]]])(
 
 // `old` has a peer dependency on the catalog's alpha and tests against alpha@1. Its peer is bound to its own alpha@1,
 // which isn't an update, so lib's `*` must not follow it down from alpha@2.
-test.concurrent(
+test(
   "a second `bun update --latest` changes nothing next to a catalog: peer with an older copy",
   async () => {
     using server = await serveRegistry({ alpha: { "1.0.0": {}, "1.2.0": {}, "2.1.0": {} } });
@@ -2254,7 +2254,7 @@ const NAMED_PEER_CASES: Record<string, NamedPeerCase> = {
   },
 };
 
-test.concurrent.each(Object.entries(NAMED_PEER_CASES))(
+test.each(Object.entries(NAMED_PEER_CASES))(
   "`bun update` resolves every entry when an auto-installed peer is named %s",
   async (_, { manifests = PEER_ONLY, pinned, stale, edited, files = {}, args, packageJson, versions, rows }) => {
     using server = await serveRegistry(manifests);
@@ -2276,7 +2276,7 @@ test.concurrent.each(Object.entries(NAMED_PEER_CASES))(
   },
 );
 
-test.concurrent(
+test(
   "`bun update <names>` from a workspace member resolves its entry next to an auto-installed peer",
   async () => {
     using server = await serveRegistry(PEER_ONLY);
@@ -2305,7 +2305,7 @@ test.concurrent(
 );
 
 // With the peer's manifest on disk, --prefer-offline fetches nothing for it; the only request of the update is for util's manifest.
-test.concurrent(
+test(
   "`bun update --prefer-offline <names>` resolves an entry whose manifest is not cached next to an auto-installed peer",
   async () => {
     using server = await serveRegistry(PEER_ONLY);
@@ -2331,7 +2331,7 @@ test.concurrent(
 
 const UTIL_PATCHED = { patchedDependencies: { "util@1.0.0": "patches/util@1.0.0.patch" } };
 
-test.concurrent(
+test(
   "`bun update <names>` holds a patched dependency and moves the auto-installed peer named next to it",
   async () => {
     using server = await serveRegistry(PEER_ONLY);
@@ -2361,7 +2361,7 @@ test.concurrent(
 );
 
 // `extra` is resolved while the peer's manifest is fetched, and its tarball fails there.
-test.concurrent(
+test(
   "a failed download for an entry that resolves next to a named auto-installed peer fails the update and writes nothing",
   async () => {
     const knobs: RegistryKnobs = { status: {} };
@@ -2381,7 +2381,7 @@ test.concurrent(
 );
 
 // `extra` fails in the wave that resolves parent. The pass that then moves parent's own dependencies prints the log, and the error has to outlive that.
-test.concurrent(
+test(
   "a failed download next to `bun update --latest <name>` fails the update and writes nothing",
   async () => {
     const knobs: RegistryKnobs = { status: {} };
@@ -2434,7 +2434,7 @@ async function staleChildren(server: Bun.Server<undefined>) {
   return { dir, packageJson };
 }
 
-test.concurrent("`bun update <name>` whose package does not move keeps its dependencies locked", async () => {
+test("`bun update <name>` whose package does not move keeps its dependencies locked", async () => {
   using server = await serveRegistry(STALE_CHILDREN);
   const { dir, packageJson } = await staleChildren(server);
   const before = await lockText(dir);
@@ -2448,7 +2448,7 @@ test.concurrent("`bun update <name>` whose package does not move keeps its depen
   expect(exitCode).toBe(0);
 });
 
-test.concurrent(
+test(
   "`bun update <name> --latest` re-resolves only the named package's own dependencies, in range",
   async () => {
     using server = await serveRegistry(STALE_CHILDREN);
@@ -2489,7 +2489,7 @@ async function withLeafScanner(server: Bun.Server<undefined>, dir: string) {
   return lockText(dir);
 }
 
-test.concurrent(
+test(
   "`bun update <name>` for a transitive-only name runs the security scanner on what it re-resolved",
   async () => {
     using server = await serveRegistry(TAGGED_FREE);
@@ -2514,7 +2514,7 @@ test.concurrent(
 );
 
 // parent's `^1.0.0` is satisfied by the root's exact leaf@1.0.0, so it shares that copy and the request has nothing to move.
-test.concurrent("`bun update <name>` keeps a dependent's row on the root's exact pin", async () => {
+test("`bun update <name>` keeps a dependent's row on the root's exact pin", async () => {
   using server = await serveRegistry(TAGGED_FREE);
   const dir = await installServed(server, "update-named-shared-pin-", pkgJson({ parent: "^1.0.0", leaf: "1.0.0" }));
   expect(await lockedVersions(dir, "leaf")).toStrictEqual(["1.0.0"]);
@@ -2531,7 +2531,7 @@ test.concurrent("`bun update <name>` keeps a dependent's row on the root's exact
 
 // The request binds to the root's exact leaf@1.0.0, which stays put; parent's `^1.0.1` rejects that copy, so its own
 // one (left on 1.0.1 when the root moved from 1.0.1 down to 1.0.0) is the copy that moves.
-test.concurrent(
+test(
   "`bun update <name>` also scans the nested copy it re-resolved when the root's own row stays put",
   async () => {
     using server = await serveRegistry({
@@ -2559,7 +2559,7 @@ test.concurrent(
   },
 );
 
-test.concurrent("`bun update <name>` for a transitive-only name that the scanner accepts installs it", async () => {
+test("`bun update <name>` for a transitive-only name that the scanner accepts installs it", async () => {
   using server = await serveRegistry({ ...TAGGED_FREE, leaf: { "1.0.0": {}, "1.0.1": {} } });
   const packageJson = pkgJson({ parent: "^1.0.0" });
   const dir = await setupServed(
@@ -2598,7 +2598,7 @@ async function movedTag(server: Bun.Server<undefined>, tags: Tags, from: string,
   return { dir, packageJson };
 }
 
-test.concurrent.each([
+test.each([
   ["bare", "1.0.0", "1.1.0", []],
   ["--latest", "1.0.0", "1.1.0", ["--latest"]],
   ["bare, tag moved backwards", "1.1.0", "1.0.0", []],
@@ -2632,7 +2632,7 @@ const AGED_TIMES = {
   tagged: { "1.0.0": daysAgo(30), "1.1.0": daysAgo(20), "1.2.0": daysAgo(1) },
 };
 
-test.concurrent(
+test(
   "`bun update --minimum-release-age` stops range and dist-tag edges at the newest old enough release",
   async () => {
     const tags: Tags = { tagged: { stable: "1.0.0" } };
@@ -2673,7 +2673,7 @@ const ABOVE_LATEST: Manifests = {
 };
 const ABOVE_LATEST_TAGS: Tags = { leaf: { latest: "3.0.0" } };
 
-test.concurrent(
+test(
   "a bare `bun update` moves a transitive range edge to `latest`, as a fresh `bun install` would",
   async () => {
     using server = await serveRegistry(ABOVE_LATEST, ABOVE_LATEST_TAGS);
@@ -2699,7 +2699,7 @@ test.concurrent(
   },
 );
 
-test.concurrent(
+test(
   "a transitive range edge already on `latest` is a no-op even though a newer release exists",
   async () => {
     using server = await serveRegistry(ABOVE_LATEST, ABOVE_LATEST_TAGS);
@@ -2712,7 +2712,7 @@ test.concurrent(
   },
 );
 
-test.concurrent("a transitive range edge locked ahead of `latest` is not downgraded", async () => {
+test("a transitive range edge locked ahead of `latest` is not downgraded", async () => {
   using server = await serveRegistry(ABOVE_LATEST, ABOVE_LATEST_TAGS);
   const packageJson = pkgJson({ parent: "^1.0.0" });
   const dir = await setupServed(
@@ -2731,7 +2731,7 @@ test.concurrent("a transitive range edge locked ahead of `latest` is not downgra
 });
 
 // `pre` is parked on `from` by a dropped root pin; parent's range on it is `range`.
-test.concurrent.each<[string, string, string[], string, string]>([
+test.each<[string, string, string[], string, string]>([
   [
     "the newest prerelease it allows",
     "^1.0.0-future.4",
@@ -2792,7 +2792,7 @@ function expectWarnings(stderr: string, ...warnings: string[]) {
 }
 
 // Only leaf is stale; its manifest stops being served between the install and the update.
-test.concurrent.each([404, 500])(
+test.each([404, 500])(
   "a %d for a transitive dependency's manifest during a bare `bun update` changes nothing",
   async status => {
     const knobs: RegistryKnobs = { status: {} };
@@ -2818,7 +2818,7 @@ test.concurrent.each([404, 500])(
   },
 );
 
-test.concurrent("a manifest that could not be fetched is warned about while the rest still moves", async () => {
+test("a manifest that could not be fetched is warned about while the rest still moves", async () => {
   const knobs: RegistryKnobs = { status: {} };
   using server = await serveRegistry(STALE_CHILDREN, {}, knobs);
   const { dir, packageJson } = await staleChildren(server);
@@ -2833,7 +2833,7 @@ test.concurrent("a manifest that could not be fetched is warned about while the 
   expect(exitCode).toBe(0);
 });
 
-test.concurrent("several unfetchable manifests are warned about once each, sorted", async () => {
+test("several unfetchable manifests are warned about once each, sorted", async () => {
   const knobs: RegistryKnobs = { status: {} };
   using server = await serveRegistry(STALE_CHILDREN, {}, knobs);
   const { dir, packageJson } = await staleChildren(server);
@@ -2853,7 +2853,7 @@ test.concurrent("several unfetchable manifests are warned about once each, sorte
   expect(exitCode).toBe(0);
 });
 
-test.concurrent("`bun update --dry-run` warns about the manifests it could not fetch and prints the plan", async () => {
+test("`bun update --dry-run` warns about the manifests it could not fetch and prints the plan", async () => {
   const knobs: RegistryKnobs = { status: {} };
   using server = await serveRegistry(STALE_CHILDREN, {}, knobs);
   const { dir, packageJson } = await staleChildren(server);
@@ -2869,7 +2869,7 @@ test.concurrent("`bun update --dry-run` warns about the manifests it could not f
   expect(exitCode).toBe(0);
 });
 
-test.concurrent("`bun update --silent` swallows the unfetchable-manifest warning too", async () => {
+test("`bun update --silent` swallows the unfetchable-manifest warning too", async () => {
   const knobs: RegistryKnobs = { status: {} };
   using server = await serveRegistry(STALE_CHILDREN, {}, knobs);
   const { dir } = await staleChildren(server);
@@ -2897,7 +2897,7 @@ async function staleDirectLeaf(server: Bun.Server<undefined>, groups: Groups = {
 const expectHeaderOnly = (stdout: string, command: string) =>
   expect(stdout).toMatch(new RegExp(`^bun ${command} v[^\\n]*\\n$`));
 
-test.concurrent.each<[number, string[]]>([
+test.each<[number, string[]]>([
   [502, []],
   [404, []],
   [502, ["-r"]],
@@ -2918,7 +2918,7 @@ test.concurrent.each<[number, string[]]>([
   expect(exitCode).toBe(1);
 });
 
-test.concurrent("a registry that does not answer at all fails `bun outdated`", async () => {
+test("a registry that does not answer at all fails `bun outdated`", async () => {
   using server = await serveRegistry(TAGGED_FREE);
   const dir = await staleDirectLeaf(server);
   server.stop(true);
@@ -2928,7 +2928,7 @@ test.concurrent("a registry that does not answer at all fails `bun outdated`", a
   expect(exitCode).toBe(1);
 });
 
-test.concurrent(
+test(
   "an optional dependency whose manifest cannot be fetched is only warned about by `bun outdated`",
   async () => {
     const knobs: RegistryKnobs = { status: {} };
@@ -2942,7 +2942,7 @@ test.concurrent(
   },
 );
 
-test.concurrent(
+test(
   "a 502 for a direct dependency's manifest fails `bun update -i` instead of offering nothing",
   async () => {
     const knobs: RegistryKnobs = { status: {} };
@@ -3020,7 +3020,7 @@ const OPTIONAL_LEAF_ENTRIES: [string, string, (range: string) => Json, string[]]
   ],
 ];
 
-test.concurrent.each(
+test.each(
   Object.keys(OUTAGES).flatMap(outage => OPTIONAL_LEAF_ENTRIES.map(entry => [outage, ...entry] as const)),
 )("%s fails `bun update <name>` for %s and writes nothing", async (outage, _, key, fields, args) => {
   const knobs: RegistryKnobs = { status: {} };
@@ -3043,7 +3043,7 @@ test.concurrent.each(
 });
 
 // An npm tarball is downloaded once for every entry that resolves to it, on behalf of the first one.
-test.concurrent("a 404 for the tarball fails the request for a second alias of the same package", async () => {
+test("a 404 for the tarball fails the request for a second alias of the same package", async () => {
   const knobs: RegistryKnobs = { status: { "leaf-1.1.0.tgz": 404 } };
   using server = await serveRegistry(LEAF_ONLY, {}, knobs);
   const packageJson = stringify({
@@ -3062,7 +3062,7 @@ test.concurrent("a 404 for the tarball fails the request for a second alias of t
 });
 
 // The failed download is the only message: a warning for an optional dependency, an error otherwise. A request that is not failed goes on to a second error, "<spec> failed to resolve".
-test.concurrent.each([
+test.each([
   ["warn", ["--optional", "leaf"]],
   ["warn", ["--optional", "aliased@npm:leaf@^1.0.0"]],
   ["error", ["leaf"]],
@@ -3082,7 +3082,7 @@ test.concurrent.each([
 });
 
 // A version that bun.lock already holds gets no download while it resolves. The install phase downloads it, after the package.json entry was rewritten in memory.
-test.concurrent.each([
+test.each([
   ["a plain entry", "leaf", ""],
   ["an npm: alias", "aliased", "npm:leaf@"],
 ])("a 404 for a tarball that the install phase downloads fails `bun update <name>` for %s", async (_, key, target) => {
@@ -3104,7 +3104,7 @@ test.concurrent.each([
 });
 
 // pkg2's optional `leaf` is an alias of a package the registry does not have. It has the key of the request, but the request is for pkg1's entry. The alias range must not admit pkg1's range, or bun resolves pkg1's `leaf` through the alias too.
-test.concurrent("a failed download for the same key in another workspace does not fail the request", async () => {
+test("a failed download for the same key in another workspace does not fail the request", async () => {
   using server = await serveRegistry(LEAF_ONLY);
   const pkg2 = { name: "pkg2", version: "1.0.0", optionalDependencies: { leaf: "npm:missing@^9.0.0" } };
   const dir = String(
@@ -3126,7 +3126,7 @@ test.concurrent("a failed download for the same key in another workspace does no
   expect(exitCode).toBe(0);
 });
 
-test.concurrent("`bun update <name>` from a member leaves a sibling's own entry alone but lets it follow", async () => {
+test("`bun update <name>` from a member leaves a sibling's own entry alone but lets it follow", async () => {
   const { dir, pkg2Text } = await staleMembers("~1.0.0", "^1.0.0");
   const { stderr, exitCode } = await runIn(dir, "packages/pkg1", "update", "no-deps");
   expect(stderr).not.toContain("error:");
@@ -3138,7 +3138,7 @@ test.concurrent("`bun update <name>` from a member leaves a sibling's own entry 
   expect(exitCode).toBe(0);
 });
 
-test.concurrent(
+test(
   "`bun update <name>` from a member: a sibling whose range rejects the picked version stays put",
   async () => {
     const { dir, pkg2Text } = await staleMembers("^1.0.0", "~1.0.0");
@@ -3153,7 +3153,7 @@ test.concurrent(
 );
 
 // one-range-dep's `^1.0.0` row shares the no-deps@1.0.0 that pkg2's own `~1.0.0` entry holds; neither request re-resolves pkg2's entry, so the row stays with it rather than forking off to 1.1.0.
-test.concurrent.each([
+test.each([
   ["bare", []],
   ["named", ["no-deps"]],
 ])("from a member, a row sharing a sibling's copy stays with that copy (%s)", async (_, args) => {
@@ -3170,7 +3170,7 @@ test.concurrent.each([
 });
 
 // With pkg2's entry in the request's scope, it moves within `~1.0.0` and one-range-dep's row follows it.
-test.concurrent("`bun update <name> -r` moves a sibling's entry and the rows sharing its copy follow", async () => {
+test("`bun update <name> -r` moves a sibling's entry and the rows sharing its copy follow", async () => {
   const { dir, pkg1 } = await staleMemberTransitive("~1.0.0");
   const { stderr, exitCode } = await runIn(dir, "packages/pkg1", "update", "-r", "no-deps");
   expect(stderr).not.toContain("error:");
@@ -3181,7 +3181,7 @@ test.concurrent("`bun update <name> -r` moves a sibling's entry and the rows sha
   expect(exitCode).toBe(0);
 });
 
-test.concurrent("`bun update <name>` from the root does not re-resolve a member's own entry", async () => {
+test("`bun update <name>` from the root does not re-resolve a member's own entry", async () => {
   const root = { ...ROOT, dependencies: { "no-deps": "^2.0.0" } };
   const dir = await setup({
     "package.json": root,
@@ -3208,7 +3208,7 @@ test.concurrent("`bun update <name>` from the root does not re-resolve a member'
   expect(fromMember.exitCode).toBe(0);
 });
 
-test.concurrent("`bun update <name>` for a name only other workspaces depend on is an error", async () => {
+test("`bun update <name>` for a name only other workspaces depend on is an error", async () => {
   const dir = await setup({
     "package.json": { ...ROOT, dependencies: { "no-deps": "1.0.0" } },
     "packages/pkg1/package.json": member("pkg1"),
@@ -3227,7 +3227,7 @@ test.concurrent("`bun update <name>` for a name only other workspaces depend on 
 
 // An optional or peer dependency that no version satisfies stays unresolved without an error, so the request reaches the package.json write-back with nothing resolved.
 const OPTIONAL = "optionalDependencies";
-test.concurrent.each<[string, string, Json, string, Json]>([
+test.each<[string, string, Json, string, Json]>([
   ["an optional entry", OPTIONAL, { leaf: "^9.0.0" }, "leaf", { leaf: "^9.0.0" }],
   ["an optional npm: alias", OPTIONAL, { aliased: "npm:leaf@^9.0.0" }, "aliased", { aliased: "npm:leaf@^9.0.0" }],
   [
@@ -3250,7 +3250,7 @@ test.concurrent.each<[string, string, Json, string, Json]>([
 });
 
 // -r binds the request once per workspace; pkg2's entry must not be written from what pkg1's entry resolved to.
-test.concurrent("`bun update <name> -r` keeps a member's optional entry that no version satisfies", async () => {
+test("`bun update <name> -r` keeps a member's optional entry that no version satisfies", async () => {
   using server = await serveRegistry(TAGGED_FREE);
   const unsatisfied = { name: "pkg2", version: "1.0.0", optionalDependencies: { leaf: "^9.0.0" } };
   const dir = String(
@@ -3281,7 +3281,7 @@ describe.each([
   const packageJson = { name: "foo", optionalDependencies: entries("^1.0.0") };
   const age = ["--minimum-release-age", THREE_DAYS_SECONDS];
 
-  test.concurrent("keeps the range of an entry that never resolved", async () => {
+  test("keeps the range of an entry that never resolved", async () => {
     using server = await serveRegistry(TAGGED_FREE, {}, { times: today });
     const dir = await installServed(server, "update-latest-unresolved-", packageJson, ...age);
 
@@ -3297,7 +3297,7 @@ describe.each([
   });
 
   // The age is for new resolutions, as in `bun update <name>`.
-  test.concurrent("stays at the version that bun.lock pins", async () => {
+  test("stays at the version that bun.lock pins", async () => {
     using server = await serveRegistry(TAGGED_FREE, {}, { times: today });
     const dir = await installServed(server, "update-latest-pinned-", packageJson);
 
@@ -3314,7 +3314,7 @@ describe.each([
 });
 
 // `bun add npm:<name>` has no key to find its row by after the write-back renames the row, so the request keeps the package the first binding gave it.
-test.concurrent("`bun add npm:<name>` hands the added package to the security scanner", async () => {
+test("`bun add npm:<name>` hands the added package to the security scanner", async () => {
   using server = await serveRegistry(TAGGED_FREE);
   const dir = String(
     tempDir("add-nameless-scan-", {
@@ -3331,7 +3331,7 @@ test.concurrent("`bun add npm:<name>` hands the added package to the security sc
 });
 
 // Printed again, this file would come out with other line ends, escapes and inline objects.
-test.concurrent.each([[["update", "leaf"]], [["update"]], [["add", "leaf@1.0.0"]]])(
+test.each([[["update", "leaf"]], [["update"]], [["add", "leaf@1.0.0"]]])(
   "`bun %p` that changes no entry does not write package.json",
   async args => {
     using server = await serveRegistry(TAGGED_FREE);
@@ -3358,7 +3358,7 @@ async function staleScoped() {
   return dir;
 }
 
-test.concurrent("a scoped glob selects only the matching names", async () => {
+test("a scoped glob selects only the matching names", async () => {
   const dir = await staleScoped();
   const { stdout, stderr, exitCode } = await run(dir, "update", "--latest", "@types/*");
   expectSummary(stdout, movedRow("@types/no-deps", "1.0.0", "2.0.0"), "", installed(1));
@@ -3370,7 +3370,7 @@ test.concurrent("a scoped glob selects only the matching names", async () => {
   expect(exitCode).toBe(0);
 });
 
-test.concurrent("a bare `*` names everything, scoped names included", async () => {
+test("a bare `*` names everything, scoped names included", async () => {
   const dir = await staleScoped();
   const { stdout, stderr, exitCode } = await run(dir, "update", "--latest", "*");
   expectRowsAnd(
@@ -3385,20 +3385,20 @@ test.concurrent("a bare `*` names everything, scoped names included", async () =
   expect(exitCode).toBe(0);
 });
 
-test.concurrent.each([
+test.each([
   ["a negated pattern updates everything else", "!no-deps"],
   ["an unscoped glob", "a-*"],
 ])("%s", async (_, pattern) => {
   await expectOnlyADepMoved(await staleSiblings(), pattern);
 });
 
-test.concurrent("a version cannot be combined with a pattern", async () => {
+test("a version cannot be combined with a pattern", async () => {
   const dir = await staleScoped();
   await expectRejected(dir, "a version cannot be combined with a pattern: @types/*@2", "@types/*@2");
 });
 
 // The one dependency row was checked; the no-op says which patterns left nothing selected.
-test.concurrent.each([
+test.each([
   ["a negated name", ["!no-deps"], 'match "!no-deps"'],
   ["every match negated", ["*", "!*"], 'match "*" "!*"'],
 ])("excluding every package is a no-op that shows its work (%s)", async (_, args, by) => {
@@ -3406,7 +3406,7 @@ test.concurrent.each([
   await expectNothingToUpdate(dir, noneSelected(1, by), ...args);
 });
 
-test.concurrent.each([
+test.each([
   ["a pattern", ["no-*"], '"no-*"'],
   ["a group selector", ["--dev"], "--dev"],
 ])(
@@ -3422,7 +3422,7 @@ test.concurrent.each([
 );
 
 // one-range-dep's `^1.0.0` row shares the copy the aliased entry holds, so it moves with that entry to 1.0.1 rather than to 1.1.0 on its own.
-test.concurrent("several names in one command are matched independently, aliases through their real name", async () => {
+test("several names in one command are matched independently, aliases through their real name", async () => {
   const dir = await setup({
     "package.json": pkgJson({ "a-dep": "1.0.1", aliased: "npm:no-deps@1.0.0", "one-range-dep": "1.0.0" }),
   });
@@ -3445,14 +3445,14 @@ test.concurrent("several names in one command are matched independently, aliases
 
 const DEV_A_DEP: Groups = { "a-dep": "devDependencies" };
 
-test.concurrent.each(["--dev", "-D", "-d", "--development"])(
+test.each(["--dev", "-D", "-d", "--development"])(
   "`bun update %s` only touches devDependencies",
   async flag => {
     await expectOnlyADepMoved(await staleSiblings(DEV_A_DEP), flag);
   },
 );
 
-test.concurrent.each(["--prod", "-P", "--production", "-p"])(
+test.each(["--prod", "-P", "--production", "-p"])(
   "`bun update %s` only touches dependencies and still installs devDependencies",
   async flag => {
     const { dir } = await staleSiblings(DEV_A_DEP);
@@ -3468,7 +3468,7 @@ test.concurrent.each(["--prod", "-P", "--production", "-p"])(
   },
 );
 
-test.concurrent("`bun update --prod` includes optionalDependencies", async () => {
+test("`bun update --prod` includes optionalDependencies", async () => {
   const groups: Groups = { "a-dep": "optionalDependencies" };
   const { dir } = await staleSiblings(groups);
   const { stdout, stderr, exitCode } = await run(dir, "update", "--prod");
@@ -3481,7 +3481,7 @@ test.concurrent("`bun update --prod` includes optionalDependencies", async () =>
   expect(exitCode).toBe(0);
 });
 
-test.concurrent("`bun update --no-optional` leaves optionalDependencies alone", async () => {
+test("`bun update --no-optional` leaves optionalDependencies alone", async () => {
   const groups: Groups = { "a-dep": "optionalDependencies" };
   const { dir } = await staleSiblings(groups);
   const { stdout, stderr, exitCode } = await run(dir, "update", "--no-optional");
@@ -3494,16 +3494,16 @@ test.concurrent("`bun update --no-optional` leaves optionalDependencies alone", 
   expect(exitCode).toBe(0);
 });
 
-test.concurrent("a selector with a name outside the selected groups is an error", async () => {
+test("a selector with a name outside the selected groups is an error", async () => {
   const { dir } = await staleSiblings(DEV_A_DEP);
   await expectRejected(dir, 'no dependencies in the selected groups match "no-deps"', "--dev", "no-deps");
 });
 
-test.concurrent("a selector combined with `--latest` only rewrites the selected groups", async () => {
+test("a selector combined with `--latest` only rewrites the selected groups", async () => {
   await expectOnlyADepMoved(await staleSiblings(DEV_A_DEP), "--dev", "--latest");
 });
 
-test.concurrent.each([
+test.each([
   ["--dev", ["--dev"], "selected by --dev"],
   ["--dev --no-optional", ["--dev", "--no-optional"], "selected by --dev --no-optional"],
 ])("a selector matching nothing (%s) is a no-op that shows its work", async (_, args, by) => {
@@ -3511,7 +3511,7 @@ test.concurrent.each([
   await expectNothingToUpdate(dir, noneSelected(1, by), ...args);
 });
 
-test.concurrent("a version cannot be combined with a selector", async () => {
+test("a version cannot be combined with a selector", async () => {
   const { dir } = await staleSiblings(DEV_A_DEP);
   await expectRejected(
     dir,
@@ -3521,7 +3521,7 @@ test.concurrent("a version cannot be combined with a selector", async () => {
   );
 });
 
-test.concurrent.each([
+test.each([
   ["a name", "a-dep"],
   ["a pattern", "a-*"],
 ])("`bun update -D` with %s that hits moves only that entry", async (_, arg) => {
@@ -3541,7 +3541,7 @@ async function staleDirectAndTransitive() {
 }
 
 // A bare `bun update` on the same fixture moves no-deps too (see `stale()` above); --depth 0 leaves that row alone.
-test.concurrent.each([
+test.each([
   ["--depth 0", ["--depth", "0"]],
   ["--depth=0", ["--depth=0"]],
 ])("`bun update %s` moves direct entries and keeps transitive rows locked", async (_, args) => {
@@ -3557,7 +3557,7 @@ test.concurrent.each([
   expect(exitCode).toBe(0);
 });
 
-test.concurrent("`bun update --depth 0 <name>` matches the name against direct entries only", async () => {
+test("`bun update --depth 0 <name>` matches the name against direct entries only", async () => {
   const { dir } = await staleDirectAndTransitive();
   await expectRejected(dir, 'error: no direct dependencies match "no-deps"', "--depth", "0", "no-deps");
   const { stdout, stderr, exitCode } = await run(dir, "update", "--depth", "0", "a-dep");
@@ -3568,7 +3568,7 @@ test.concurrent("`bun update --depth 0 <name>` matches the name against direct e
 });
 
 // one-range-dep is pinned and no-deps is only transitive: nothing to move, and the stale transitive row is not counted as a change.
-test.concurrent(
+test(
   "`bun update --depth 0` with a stale transitive row only is the same no-op as naming the parent",
   async () => {
     const { dir } = await stale();
@@ -3578,7 +3578,7 @@ test.concurrent(
 );
 
 // The root's only rows are its two workspace links, which are not dependencies to check.
-test.concurrent(
+test(
   "`bun update --depth 0` from a workspace root without -r selects no entries and reports that",
   async () => {
     const { dir, texts, textsBefore } = await staleMemberGroups();
@@ -3587,13 +3587,13 @@ test.concurrent(
   },
 );
 
-test.concurrent.each(["1", "x", ""])("`bun update --depth=%s` is rejected", async depth => {
+test.each(["1", "x", ""])("`bun update --depth=%s` is rejected", async depth => {
   const { dir } = await staleDirectAndTransitive();
   const { stdout } = await expectRejected(dir, "bun update --depth only accepts 0", `--depth=${depth}`);
   expect(stdout).not.toContain("^ ");
 });
 
-test.concurrent("a version cannot be combined with `--depth 0`", async () => {
+test("a version cannot be combined with `--depth 0`", async () => {
   const { dir } = await staleDirectAndTransitive();
   await expectRejected(
     dir,
@@ -3610,7 +3610,7 @@ const LATEST_PARENT_SAME_RANGE: Manifests = {
   leaf: { "1.0.0": {}, "1.1.0": {} },
 };
 
-test.concurrent("`bun update --depth 0 --latest` moves the direct entry and keeps its child locked", async () => {
+test("`bun update --depth 0 --latest` moves the direct entry and keeps its child locked", async () => {
   using server = await serveRegistry(LATEST_PARENT_SAME_RANGE);
   const dir = await setupServed(
     server,
@@ -3637,7 +3637,7 @@ const PARENT_NARROWS_RANGE: Manifests = {
   leaf: { "1.0.0": {}, "1.1.0": {} },
 };
 
-test.concurrent(
+test(
   "`bun update --depth 0` re-resolves a child the moved parent's new range no longer admits",
   async () => {
     using server = await serveRegistry(PARENT_NARROWS_RANGE);
@@ -3667,7 +3667,7 @@ const SHARED_NAME: Manifests = {
   leaf: { "1.0.0": {}, "1.1.0": {}, "2.0.0": {}, "2.1.0": {} },
 };
 
-test.concurrent(
+test(
   "`bun update --depth 0` leaves a transitive row alone even when it shares a name with a direct entry",
   async () => {
     using server = await serveRegistry(SHARED_NAME);
@@ -3695,7 +3695,7 @@ const SHARED_NAME_PARENT_MOVES: Manifests = {
   leaf: { "1.0.0": {}, "1.1.0": {}, "2.0.0": {}, "2.1.0": {} },
 };
 
-test.concurrent(
+test(
   "`bun update --depth 0` keeps a moved parent's child locked even when the child shares a name with a direct entry",
   async () => {
     using server = await serveRegistry(SHARED_NAME_PARENT_MOVES);
@@ -3725,7 +3725,7 @@ const SHARED_PACKAGE: Manifests = {
   leaf: { "1.0.0": {}, "1.1.0": {} },
 };
 
-test.concurrent(
+test(
   "`bun update --depth 0` leaves a transitive edge on the package a moved direct entry was deduped to",
   async () => {
     using server = await serveRegistry(SHARED_PACKAGE);
@@ -3766,7 +3766,7 @@ async function staleMemberDirectAndTransitive() {
   return { dir, pkg1 };
 }
 
-test.concurrent("`bun update --depth 0 -r` moves every workspace's direct entries and nothing else", async () => {
+test("`bun update --depth 0 -r` moves every workspace's direct entries and nothing else", async () => {
   const { dir, pkg1 } = await staleMemberDirectAndTransitive();
   const rootBefore = await packageJsonText(dir);
   const { stdout, stderr, exitCode } = await run(dir, "update", "--depth", "0", "-r");
@@ -3783,7 +3783,7 @@ test.concurrent("`bun update --depth 0 -r` moves every workspace's direct entrie
 });
 
 // The contrast: a bare `bun update -r` on the same fixture moves the transitive row too.
-test.concurrent("`bun update -r` on the same fixture also moves the transitive row", async () => {
+test("`bun update -r` on the same fixture also moves the transitive row", async () => {
   const { dir } = await staleMemberDirectAndTransitive();
   const { stdout, stderr, exitCode } = await run(dir, "update", "-r");
   expect(movedRows(stdout).sort()).toStrictEqual([A_DEP_ROW, movedRow("dep-with-tags", "1.0.0", "1.0.1"), NO_DEPS_ROW]);
@@ -3800,7 +3800,7 @@ async function staleAlias() {
   return dir;
 }
 
-test.concurrent("a pattern matches an aliased entry through its alias", async () => {
+test("a pattern matches an aliased entry through its alias", async () => {
   const dir = await staleAlias();
   const { stderr, exitCode } = await run(dir, "update", "alias*");
   expect(stderr).not.toContain("error:");
@@ -3811,7 +3811,7 @@ test.concurrent("a pattern matches an aliased entry through its alias", async ()
   expect(exitCode).toBe(0);
 });
 
-test.concurrent("a negated pattern excludes an aliased entry through its alias", async () => {
+test("a negated pattern excludes an aliased entry through its alias", async () => {
   const dir = await staleAlias();
   const { stderr, exitCode } = await run(dir, "update", "!aliased");
   expect(stderr).not.toContain("error:");
@@ -3822,7 +3822,7 @@ test.concurrent("a negated pattern excludes an aliased entry through its alias",
   expect(exitCode).toBe(0);
 });
 
-test.concurrent("a pattern with an unparsable lockfile is an error", async () => {
+test("a pattern with an unparsable lockfile is an error", async () => {
   const dir = await setup({ "package.json": pkgJson({ "no-deps": "^1.0.0" }) });
   await write(join(dir, "bun.lock"), "this is not a lockfile\n");
   const packageJsonBefore = await packageJsonText(dir);
@@ -3848,7 +3848,7 @@ async function stalePeerEntry() {
 }
 
 // A root peerDependencies entry whose locked version still satisfies it is never re-resolved by `bun update`; a pattern still counts it as a match, a group selector does not.
-test.concurrent("a pattern matches a peerDependencies entry", async () => {
+test("a pattern matches a peerDependencies entry", async () => {
   const dir = await stalePeerEntry();
   const packageJsonBefore = await packageJsonText(dir);
   const { stderr, exitCode } = await run(dir, "update", "no-*");
@@ -3860,12 +3860,12 @@ test.concurrent("a pattern matches a peerDependencies entry", async () => {
   expect(exitCode).toBe(0);
 });
 
-test.concurrent("`bun update --prod` does not match a peerDependencies entry", async () => {
+test("`bun update --prod` does not match a peerDependencies entry", async () => {
   const dir = await stalePeerEntry();
   await expectRejected(dir, 'error: no dependencies in the selected groups match "no-*"', "--prod", "no-*");
 });
 
-test.concurrent("`bun update --prod` leaves a stale peerDependencies entry alone", async () => {
+test("`bun update --prod` leaves a stale peerDependencies entry alone", async () => {
   const dir = await stalePeerEntry();
   const { stderr, exitCode } = await run(dir, "update", "--prod");
   expect(stderr).not.toContain("error:");
@@ -3876,7 +3876,7 @@ test.concurrent("`bun update --prod` leaves a stale peerDependencies entry alone
   expect(exitCode).toBe(0);
 });
 
-test.concurrent("`bun update --dev` with only a stale peerDependencies entry has nothing to update", async () => {
+test("`bun update --dev` with only a stale peerDependencies entry has nothing to update", async () => {
   const dir = await stalePeerEntry();
   const packageJsonBefore = await packageJsonText(dir);
   await expectNothingToUpdate(dir, noneSelected(2, "selected by --dev"), "--dev");
@@ -3886,7 +3886,7 @@ test.concurrent("`bun update --dev` with only a stale peerDependencies entry has
 // Once its range stops accepting the locked version, a peer entry nothing else depends on resolves afresh. The locked
 // package used to be bound anyway (it has the entry's name) with an "incorrect peer dependency" warning, and the named
 // path then wrote the range back down to it.
-test.concurrent("`bun update <name>@<version>` moves a peerDependencies entry nothing else depends on", async () => {
+test("`bun update <name>@<version>` moves a peerDependencies entry nothing else depends on", async () => {
   const dir = await stalePeerEntry();
   const { stdout, stderr, exitCode } = await run(dir, "update", "no-deps@2.0.0");
   expectMoved(stdout, "no-deps", "1.0.0", "2.0.0");
@@ -3900,7 +3900,7 @@ test.concurrent("`bun update <name>@<version>` moves a peerDependencies entry no
   expect(exitCode).toBe(0);
 });
 
-test.concurrent(
+test(
   "`bun install` moves a peerDependencies entry nothing else depends on once its range is edited",
   async () => {
     const dir = await stalePeerEntry();
@@ -3914,7 +3914,7 @@ test.concurrent(
 );
 
 // devDependencies provides no-deps@1.1.0, so the peer entry keeps pointing at it and the warning is the right answer.
-test.concurrent("a peerDependencies entry another group provides keeps following that group", async () => {
+test("a peerDependencies entry another group provides keeps following that group", async () => {
   const provided = (peerRange: string) => ({
     name: "foo",
     devDependencies: { "no-deps": "^1.0.0" },
@@ -3934,7 +3934,7 @@ const peerOnly = (range: string) => ({ name: "foo", peerDependencies: { "no-deps
 
 // no-deps@1.5.0 was never published (a `bun init` project hits this with `bun add typescript@5.0.0`): with nothing to install
 // instead, the entry keeps the copy it has and warns as it always did, instead of spinning on or dropping the unresolvable row.
-test.concurrent(
+test(
   "`bun add <name>@<unpublished version>` on a peerDependencies entry keeps the installed copy",
   async () => {
     const dir = await setup({ "package.json": peerOnly("^1.0.0") });
@@ -3951,7 +3951,7 @@ test.concurrent(
 );
 
 // Same when the only release the new range accepts is still inside --minimum-release-age.
-test.concurrent(
+test(
   "a peerDependencies entry whose new range only matches a too recent release keeps the installed copy",
   async () => {
     using server = await serveRegistry(
@@ -3989,7 +3989,7 @@ async function twoCopies() {
 
 // Rewritten past both copies, the entry takes neither: the one that would be bound, the highest, is the one it installed
 // itself, and the provided 1.0.0 is a binding loading bun.lock (which binds the highest copy too) would not reproduce.
-test.concurrent(
+test(
   "a rewritten peerDependencies entry replaces the copy it installed rather than binding a lower one",
   async () => {
     const dir = await twoCopies();
@@ -4005,7 +4005,7 @@ test.concurrent(
 
 // strict-peer-dep@1.0.0's own peer `no-deps: ^2.0.0` accepts neither copy either, but a package's peer rows take whatever
 // copy the tree has (a copy resolved for them alone would never be placed), so it binds the highest one and warns as before.
-test.concurrent("a package's own peer entry still binds to the highest copy in bun.lock and warns", async () => {
+test("a package's own peer entry still binds to the highest copy in bun.lock and warns", async () => {
   const dir = await twoCopies();
   await write(
     join(dir, "package.json"),
@@ -4036,7 +4036,7 @@ async function sharedPeer(root: Json, ...members: [string, string][]) {
 
 // The tree dedupes every other peer onto the root's copy whatever their range says, so a member's copy of its own would
 // never be installed; the member's entry keeps the root's copy and the warning.
-test.concurrent("a member's rewritten entry keeps binding to the copy the root's own entry holds", async () => {
+test("a member's rewritten entry keeps binding to the copy the root's own entry holds", async () => {
   const dir = await sharedPeer(peerRoot("^1.0.0"), ["pkg1", "^1.0.0"]);
   await write(join(dir, "packages/pkg1/package.json"), stringify(peerMember("pkg1", "^2.0.0")));
   const stderr = await install(dir, "--verbose");
@@ -4046,7 +4046,7 @@ test.concurrent("a member's rewritten entry keeps binding to the copy the root's
   await frozen(dir);
 });
 
-test.concurrent("rewriting the root's and a member's entries together moves both onto the new copy", async () => {
+test("rewriting the root's and a member's entries together moves both onto the new copy", async () => {
   const dir = await sharedPeer(peerRoot("^1.0.0"), ["pkg1", "^1.0.0"]);
   await write(join(dir, "package.json"), stringify(peerRoot("^2.0.0")));
   await write(join(dir, "packages/pkg1/package.json"), stringify(peerMember("pkg1", "^2.0.0")));
@@ -4059,7 +4059,7 @@ test.concurrent("rewriting the root's and a member's entries together moves both
 
 // Rewriting only the root's entry installs what it asks for; the member's unchanged `^1.0.0` is deduped onto the root's copy,
 // the same as when a root dependency moves past it (the tree warns about neither yet, so stderr is not asserted).
-test.concurrent("rewriting only the root's entry installs its copy for the unchanged member too", async () => {
+test("rewriting only the root's entry installs its copy for the unchanged member too", async () => {
   const dir = await sharedPeer(peerRoot("^1.0.0"), ["pkg1", "^1.0.0"]);
   await write(join(dir, "package.json"), stringify(peerRoot("^2.0.0")));
   const stderr = await install(dir);
@@ -4071,7 +4071,7 @@ test.concurrent("rewriting only the root's entry installs its copy for the uncha
 });
 
 // With no root entry, pkg2's copy is not forced on pkg1: each member ends up with the copy its own entry asks for.
-test.concurrent(
+test(
   "a member's rewritten entry gets its own copy next to a sibling's when the root declares nothing",
   async () => {
     const dir = await sharedPeer(peerRoot(), ["pkg1", "^1.0.0"], ["pkg2", "^1.0.0"]);
@@ -4088,7 +4088,7 @@ test.concurrent(
 
 // peer-deps-fixed has a peer dependency on no-deps@^1.0.0, and strict-peer-dep on no-deps@^2.0.0. No version satisfies
 // both, so they share the version that's installed for the first one, and the install warns about the other.
-test.concurrent("on a fresh install, two peer dependencies that nothing provides still share one no-deps", async () => {
+test("on a fresh install, two peer dependencies that nothing provides still share one no-deps", async () => {
   const { packageDir: dir } = await registry.createTestDir({
     bunfigOpts: { saveTextLockfile: true, linker: "hoisted" },
     files: { "package.json": stringify(pkgJson({ "peer-deps-fixed": "1.0.0", "strict-peer-dep": "1.0.0" })) },
@@ -4138,7 +4138,7 @@ async function staleMemberGroups() {
   return { dir, locked, stale, texts, textsBefore: await texts() };
 }
 
-test.concurrent("`bun update --dev -r` rewrites every workspace's devDependencies and nothing else", async () => {
+test("`bun update --dev -r` rewrites every workspace's devDependencies and nothing else", async () => {
   const { dir, locked, stale, texts, textsBefore } = await staleMemberGroups();
   const [rootBefore, , pkg2Before] = textsBefore;
   const { stdout, stderr, exitCode } = await run(dir, "update", "--dev", "-r");
@@ -4150,7 +4150,7 @@ test.concurrent("`bun update --dev -r` rewrites every workspace's devDependencie
   expect(exitCode).toBe(0);
 });
 
-test.concurrent("`bun update --prod --filter pkg1` rewrites only pkg1's dependencies", async () => {
+test("`bun update --prod --filter pkg1` rewrites only pkg1's dependencies", async () => {
   const { dir, locked, stale, texts, textsBefore } = await staleMemberGroups();
   const [rootBefore, , pkg2Before] = textsBefore;
   const { stdout, stderr, exitCode } = await run(dir, "update", "--prod", "--filter", "pkg1");
@@ -4162,7 +4162,7 @@ test.concurrent("`bun update --prod --filter pkg1` rewrites only pkg1's dependen
   expect(exitCode).toBe(0);
 });
 
-test.concurrent("`bun update '@types/*' --filter pkg1 --latest` rewrites only pkg1's matching entry", async () => {
+test("`bun update '@types/*' --filter pkg1 --latest` rewrites only pkg1's matching entry", async () => {
   const { dir, locked, stale, texts, textsBefore } = await staleMemberGroups();
   const [rootBefore, , pkg2Before] = textsBefore;
   const { stdout, stderr, exitCode } = await run(dir, "update", "@types/*", "--filter", "pkg1", "--latest");
@@ -4177,7 +4177,7 @@ test.concurrent("`bun update '@types/*' --filter pkg1 --latest` rewrites only pk
 });
 
 // The root's only rows are its two workspace links, which are not dependencies to check; pkg2 has two.
-test.concurrent.each<[string, string[], number]>([
+test.each<[string, string[], number]>([
   ["from the root without -r", ["--dev"], 0],
   ["with --filter pkg2", ["--dev", "--filter", "pkg2"], 2],
 ])("`bun update --dev` %s selects no entries and says what it checked", async (_, args, checked) => {
@@ -4198,7 +4198,7 @@ async function widenedPkg1() {
   return { dir, rootText: await packageJsonText(dir), pkg2Text: await packageJsonText(dir, "packages/pkg2") };
 }
 
-test.concurrent.each([
+test.each([
   ["from the member", "packages/pkg1", []],
   ["with -r from the root", "", ["-r"]],
 ])("`bun update <name>` %s re-resolves a range widened since the last install", async (_, cwd, args) => {
@@ -4221,7 +4221,7 @@ test.concurrent.each([
   expect(exitCode).toBe(0);
 });
 
-test.concurrent("`bun update <name> --filter <other>` records a widened range without re-resolving it", async () => {
+test("`bun update <name> --filter <other>` records a widened range without re-resolving it", async () => {
   const { dir, rootText, pkg2Text } = await widenedPkg1();
   const { stderr, exitCode } = await run(dir, "update", "--filter", "pkg2", "no-deps");
   expect(stderr).not.toContain("error:");
@@ -4235,7 +4235,7 @@ test.concurrent("`bun update <name> --filter <other>` records a widened range wi
   expect(exitCode).toBe(0);
 });
 
-test.concurrent(
+test(
   "`bun update <name>` from the root still rejects a name only members declare after one was widened",
   async () => {
     const { dir, rootText, pkg2Text } = await widenedPkg1();
@@ -4267,7 +4267,7 @@ async function runInteractive(dir: string, keys: string, ...args: string[]) {
   return { stdout, stderr, exitCode };
 }
 
-test.concurrent("`bun update -i --dev` only offers and updates devDependencies", async () => {
+test("`bun update -i --dev` only offers and updates devDependencies", async () => {
   const { dir } = await staleSiblings(DEV_A_DEP);
   const { stderr, exitCode } = await runInteractive(dir, "a\r", "--dev");
   expect(stderr).not.toContain("error:");
@@ -4286,7 +4286,7 @@ function expectInteractiveDryRun(stdout: string, ...rows: string[]) {
 }
 
 // A merge-damaged or hand-trimmed bun.lock. With a dependency listed for the root there is no entry to resolve it to, which is the usual parse error.
-test.concurrent.each<[string, "lists no dependency" | "lists a-dep", number]>([
+test.each<[string, "lists no dependency" | "lists a-dep", number]>([
   ["outdated", "lists no dependency", 0],
   ["outdated", "lists a-dep", 1],
   ["update", "lists no dependency", 0],
@@ -4324,7 +4324,7 @@ test.concurrent.each<[string, "lists no dependency" | "lists a-dep", number]>([
   },
 );
 
-test.concurrent("`bun update -i --prod --dry-run` lists only dependencies", async () => {
+test("`bun update -i --prod --dry-run` lists only dependencies", async () => {
   const { dir } = await staleSiblings(DEV_A_DEP);
   const before = await lockText(dir);
   const { stdout, exitCode } = await runInteractive(dir, "a\r", "--prod", "--dry-run");
@@ -4334,7 +4334,7 @@ test.concurrent("`bun update -i --prod --dry-run` lists only dependencies", asyn
   expect(exitCode).toBe(0);
 });
 
-test.concurrent("`bun update -i --no-optional --dry-run` skips optionalDependencies", async () => {
+test("`bun update -i --no-optional --dry-run` skips optionalDependencies", async () => {
   const { dir } = await staleSiblings({ "a-dep": "optionalDependencies" });
   const { stdout, exitCode } = await runInteractive(dir, "a\r", "--no-optional", "--dry-run");
   expectInteractiveDryRun(stdout, NO_DEPS_ROW);
@@ -4342,7 +4342,7 @@ test.concurrent("`bun update -i --no-optional --dry-run` skips optionalDependenc
   expect(exitCode).toBe(0);
 });
 
-test.concurrent(
+test(
   "`bun update -i` with a selector that matches nothing prints the same no-op line as `bun update`",
   async () => {
     const dir = await setup({ "package.json": pkgJson({ "no-deps": "^1.0.0" }) });
@@ -4356,7 +4356,7 @@ test.concurrent(
   },
 );
 
-test.concurrent("`bun update -i` without a selector still offers every group", async () => {
+test("`bun update -i` without a selector still offers every group", async () => {
   const { dir } = await staleSiblings(DEV_A_DEP);
   const { stdout, exitCode } = await runInteractive(dir, "a\r", "--dry-run");
   expectInteractiveDryRun(stdout, A_DEP_ROW, NO_DEPS_ROW);
@@ -4374,7 +4374,7 @@ async function staleSiblingsWithTransitive() {
   return dir;
 }
 
-test.concurrent("`bun update -i` installs only the selected entries, as `bun update <selected>`", async () => {
+test("`bun update -i` installs only the selected entries, as `bun update <selected>`", async () => {
   const dir = await staleSiblingsWithTransitive();
   const { stderr, exitCode } = await runInteractive(dir, " \r");
   expect(stderr).not.toContain("error:");
@@ -4389,7 +4389,7 @@ test.concurrent("`bun update -i` installs only the selected entries, as `bun upd
 });
 
 // Offered sorted by name: dep-with-tags (in range 1.0.1, latest 3.0.0), then no-deps (in range 1.1.0, latest 2.0.0).
-test.concurrent("`bun update -i --latest` honours an entry toggled back to its in-range target", async () => {
+test("`bun update -i --latest` honours an entry toggled back to its in-range target", async () => {
   const dir = await setup({ "package.json": pkgJson({ "dep-with-tags": "1.0.0", "no-deps": "1.0.0" }) });
   await reinstall(dir, pkgJson({ "dep-with-tags": "^1.0.0", "no-deps": "^1.0.0" }));
   expect(await lockedVersions(dir, "dep-with-tags")).toStrictEqual(["1.0.0"]);
@@ -4406,7 +4406,7 @@ test.concurrent("`bun update -i --latest` honours an entry toggled back to its i
 });
 
 // Offered as `a-dep` (dependencies), then the `no-deps` peer row showing Current 1.0.0, Target 1.1.0, Latest 2.0.0.
-test.concurrent("`bun update -i` installs the Target version a peerDependencies row shows", async () => {
+test("`bun update -i` installs the Target version a peerDependencies row shows", async () => {
   const dir = await stalePeerEntry();
   const { stderr, exitCode } = await runInteractive(dir, "j \r");
   expect(stderr).not.toContain("error:");
@@ -4420,7 +4420,7 @@ test.concurrent("`bun update -i` installs the Target version a peerDependencies 
 });
 
 // With 1.1.0 locked, the row's Target equals Current, so selecting it takes the Latest column.
-test.concurrent("`bun update -i` installs the Latest version a peerDependencies row shows", async () => {
+test("`bun update -i` installs the Latest version a peerDependencies row shows", async () => {
   const dir = await setup({ "package.json": peerOnly("^1.0.0") });
   expect(await lockedVersions(dir, "no-deps")).toStrictEqual(["1.1.0"]);
   const { stderr, exitCode } = await runInteractive(dir, " \r");
@@ -4434,7 +4434,7 @@ test.concurrent("`bun update -i` installs the Latest version a peerDependencies 
   expect(exitCode).toBe(0);
 });
 
-test.concurrent("`bun update -i -r` installs the version a workspace member's peerDependencies row shows", async () => {
+test("`bun update -i -r` installs the version a workspace member's peerDependencies row shows", async () => {
   const pkg1 = (range: string) => ({ name: "pkg1", version: "1.0.0", peerDependencies: { "no-deps": range } });
   const dir = await setup({ "package.json": ROOT, "packages/pkg1/package.json": pkg1("^1.0.0") });
   expect(await lockedVersions(dir, "no-deps")).toStrictEqual(["1.1.0"]);
@@ -4450,7 +4450,7 @@ test.concurrent("`bun update -i -r` installs the version a workspace member's pe
 
 // No install can succeed while a workspace's package.json doesn't parse. The picker used to be shown anyway, the other
 // package.json files were rewritten, and then the install failed, leaving bun.lock out of date.
-test.concurrent(
+test(
   "`bun update -i -r` fails like `bun update -r`, before it offers or writes anything, when a member's package.json cannot be parsed",
   async () => {
     const { dir } = await staleMembers("~1.0.0", "~1.0.0");

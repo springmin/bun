@@ -6,7 +6,7 @@
 // extractor would produce.
 
 import { describe, expect, setDefaultTimeout, test } from "bun:test";
-import { bunEnv, bunExe, isMacOS, isWindows, readdirSorted, runCommandMaxRSS, tempDir } from "harness";
+import { bunEnv, bunExe, isLinux, isMacOS, isOhos, isWindows, readdirSorted, runCommandMaxRSS, tempDir } from "harness";
 import { createHash, randomBytes } from "node:crypto";
 import {
   createWriteStream,
@@ -1446,7 +1446,9 @@ describe.concurrent("sparse tar members", () => {
 // whose first bytes were those of the refused block, and that package
 // stayed in the cache for every later install.
 // -------------------------------------------------------------------
-test.skipIf(isWindows)("streaming extract fails the install when the file system refuses a write", async () => {
+// OHOS: `ulimit -f` in the shell does not reach the kernel, so the limit this
+// test builds on never fires.
+test.skipIf(isWindows || isOhos)("streaming extract fails the install when the file system refuses a write", async () => {
   // 6,000,000 bytes where no file can grow past 4 MiB. Random bytes keep the
   // tarball above the size from which a registry tarball is streamed.
   const big = randomBytes(6_000_000);

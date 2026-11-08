@@ -1,0 +1,97 @@
+diff --git a/src/bun_core/env.rs b/src/bun_core/env.rs
+index d8c7beace7..d40a9d5050 100644
+--- a/src/bun_core/env.rs
++++ b/src/bun_core/env.rs
+@@ -41,9 +41,12 @@ pub const IS_LINUX: bool = cfg!(any(target_os = "linux", target_os = "android"))
+ const IS_FREEBSD: bool = cfg!(target_os = "freebsd");
+ /// kqueue-based event loop (macOS + FreeBSD share most of this path).
+ pub const IS_KQUEUE: bool = IS_MAC || IS_FREEBSD;
+-const IS_AARCH64: bool = cfg!(target_arch = "aarch64");
+-const IS_X64: bool = cfg!(target_arch = "x86_64");
+-pub const IS_MUSL: bool = cfg!(target_env = "musl");
++pub(crate) const IS_AARCH64: bool = cfg!(target_arch = "aarch64");
++pub(crate) const IS_X64: bool = cfg!(target_arch = "x86_64");
++pub const IS_MUSL: bool = cfg!(any(target_env = "musl", target_env = "ohos"));
++/// OpenHarmony's libc is musl, but it is not Alpine: addon compatibility checks
++/// and release-artifact naming that key off `IS_MUSL` must branch separately.
++pub const IS_OHOS: bool = cfg!(target_env = "ohos");
+ pub const IS_ANDROID: bool = cfg!(target_os = "android");
+ pub const ALLOW_ASSERT: bool = IS_DEBUG || IS_TEST || build_options::RELEASE_SAFE;
+ pub const CI_ASSERT: bool =
+diff --git a/src/crash_handler/lib.rs b/src/crash_handler/lib.rs
+index c0b62a6b25..4d2b1aac29 100644
+--- a/src/crash_handler/lib.rs
++++ b/src/crash_handler/lib.rs
+@@ -1714,6 +1714,30 @@ mod draft {
+         );
+     }
+ 
++    #[cfg(target_env = "ohos")]
++    extern "C" fn handle_sigsys_posix(_sig: c_int, _info: *mut libc::siginfo_t, ctx: *mut c_void) {
++        // OHOS seccomp blocked a syscall. Return -ENOSYS so the caller sees a
++        // recoverable error instead of being killed with SIGSYS. This mirrors
++        // what Android's bionic libc does internally.
++        //
++        // On-device verified (HongMeng Kernel 1.13.0, aarch64): only the
++        // return register must be modified; the PC must be left at the
++        // faulting SVC. Advancing the PC makes the kernel force the return
++        // value to 0 — worse than a crash for syscalls like close_range, which
++        // would "succeed" without doing anything. With an unchanged PC the
++        // syscall returns the value written to the return register; on
++        // standard Linux seccomp TRAP an unchanged PC makes the kernel return
++        // -ENOSYS itself, so this is portable across kernels.
++        const ENOSYS: i64 = 38;
++        let uc = ctx as *mut libc::ucontext_t;
++        unsafe {
++            // Set x0 (return register) to -ENOSYS so callers see ENOSYS
++            // and can fall back to alternative implementations.
++            let regs = &raw mut (*uc).uc_mcontext.regs;
++            (*regs)[0] = (-ENOSYS) as libc::c_ulong;
++        }
++    }
++
+     #[cfg(unix)]
+     static DID_REGISTER_SIGALTSTACK: AtomicBool = AtomicBool::new(false);
+     /// 512K alternate signal stack. The kernel writes here during signal delivery;
+@@ -1768,6 +1792,21 @@ mod draft {
+                 libc::sigaction(signal, act_ptr, core::ptr::null_mut());
+             }
+         }
++        #[cfg(target_env = "ohos")]
++        {
++            // OHOS seccomp blocks unimplemented syscalls with uncatchable
++            // SIGSYS; the handler skips the SVC and returns -ENOSYS (see
++            // handle_sigsys_posix). Not in CRASH_HANDLER_SIGNALS — that list
++            // is the crash-report set, and SIGSYS here is a recoverable trap.
++            let mut sigsys: libc::sigaction = bun_core::ffi::zeroed();
++            sigsys.sa_sigaction = handle_sigsys_posix as *const () as usize;
++            sigsys.sa_flags = libc::SA_SIGINFO;
++            // SAFETY: null oldact is permitted; single-threaded at setup.
++            unsafe {
++                let _ = libc::sigemptyset(&raw mut sigsys.sa_mask);
++                libc::sigaction(libc::SIGSYS, &raw const sigsys, core::ptr::null_mut());
++            }
++        }
+         Ok(())
+     }
+ 
+@@ -2413,14 +2452,16 @@ mod draft {
+                         .map_err(fmt_err)?;
+                     }
+                 }
+-                #[cfg(all(target_os = "linux", target_env = "musl"))]
++                #[cfg(all(target_os = "linux", any(target_env = "musl", target_env = "ohos")))]
+                 {
+                     let kernel_version =
+                         bun_analytics::GenerateHeader::generate_platform::kernel_version();
++                    let libc = if cfg!(target_env = "ohos") { "ohos (musl)" } else { "musl" };
+                     write!(
+                         writer,
+-                        "Linux Kernel v{}.{}.{} | musl\n",
+-                        kernel_version.major, kernel_version.minor, kernel_version.patch
++                        "Linux Kernel v{}.{}.{} | {}\n",
++                        kernel_version.major, kernel_version.minor, kernel_version.patch,
++                        libc,
+                     )
+                     .map_err(fmt_err)?;
+                 }

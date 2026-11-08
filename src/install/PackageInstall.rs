@@ -476,6 +476,18 @@ pub(crate) fn make_open_real_dir(base: &Dir, sub_path: &ZStr) -> sys::Maybe<Dir>
     open()
 }
 
+/// OHOS: link(2) is denied, so a copy cannot share an inode with what it stands for.
+/// Size and mtime are what a copy keeps (see `linkat_copy_fallback`).
+#[cfg(target_env = "ohos")]
+fn ohos_copy_key(st: &sys::Stat) -> u64 {
+    (st.st_size as u64)
+        .wrapping_mul(1000003)
+        .wrapping_add(st.st_mtime as u64)
+        .wrapping_mul(1000003)
+        .wrapping_add(st.st_mtime_nsec as u64)
+        | 1
+}
+
 /// Returns true if `dest` is still a hardlinked copy of `src`, which means both have the same entry
 /// names and inodes. `rel` is the path of `src` inside the `file:` folder.
 fn is_hardlinked_copy(root: &mut FolderRoot<'_>, rel: &mut Vec<u8>, src: &Dir, dest: &Dir) -> bool {
@@ -495,6 +507,13 @@ fn is_hardlinked_copy(root: &mut FolderRoot<'_>, rel: &mut Vec<u8>, src: &Dir, d
                     sys::fstatat(dir, &bun_core::ZBox::from_bytes(name))
                         .ok()?
                         .st_ino
+                }
+                // OHOS: link(2) is denied, so a copied folder cannot share inodes
+                // with its source. The copy keeps each file's size and mtime (see
+                // `copy_file_fallback`): compare those instead.
+                EntryKind::File if cfg!(target_env = "ohos") => {
+                    let st = sys::fstatat(dir, &bun_core::ZBox::from_bytes(name)).ok()?;
+                    ohos_copy_key(&st)
                 }
                 EntryKind::File => entry.ino,
                 EntryKind::Directory if name == b"node_modules" => continue,
@@ -519,6 +538,9 @@ fn is_hardlinked_copy(root: &mut FolderRoot<'_>, rel: &mut Vec<u8>, src: &Dir, d
                             let link = [name, &b"/"[..], &text[..], &[0xff; INO_LEN][..]].concat();
                             entries.push(link.into_boxed_slice());
                             continue;
+                        }
+                        FolderLink::File(_, target) if cfg!(target_env = "ohos") => {
+                            ohos_copy_key(&target)
                         }
                         FolderLink::File(_, target) => target.st_ino,
                         FolderLink::LeftOut(_) => continue,
@@ -571,6 +593,9 @@ pub(crate) fn is_linked_folder(src: &Dir, dest: &Dir) -> bool {
     dest_stat.st_dev == src_stat.st_dev
         && dest_stat.st_ino != src_stat.st_ino
         && is_hardlinked_copy(&mut FolderRoot(src, None), &mut Vec::new(), src, dest)
+        // A hard link shows the source's `package.json`, so a copy must too. Two folders
+        // can share every size and time (fixtures do), and only the bytes tell them apart.
+        && package_json_matches(src, dest)
 }
 
 /// Real paths to compare a symlink's resolved target against. `top_level_dir` cannot be used for
@@ -777,6 +802,36 @@ fn lay_link(
                 .map_err(|_| "failed to copy target")
         }
         FolderLink::LeftOut(why) => Err(why),
+    }
+}
+
+/// Whether both directories have the same `package.json` (or neither can be read).
+fn package_json_matches(src: &Dir, dest: &Dir) -> bool {
+    fn read(dir: &Dir) -> Option<Vec<u8>> {
+        let name = bun_core::zstr!("package.json");
+        let fd = sys::openat(dir.fd(), name, sys::O::RDONLY | sys::O::CLOEXEC, 0).ok()?;
+        let file = sys::File::from_fd(fd);
+        let stat = sys::fstat(file.handle()).ok()?;
+        let len = usize::try_from(stat.st_size).ok()?;
+        if len > 1 << 20 {
+            // Larger than any manifest: the other checks stand.
+            return None;
+        }
+        let mut buf = vec![0u8; len];
+        let mut off = 0usize;
+        while off < len {
+            match sys::pread(file.handle(), &mut buf[off..], off as i64) {
+                Ok(0) => break,
+                Ok(n) => off += n,
+                Err(_) => return None,
+            }
+        }
+        buf.truncate(off);
+        Some(buf)
+    }
+    match (read(src), read(dest)) {
+        (Some(a), Some(b)) => a == b,
+        _ => true,
     }
 }
 
@@ -1786,6 +1841,20 @@ impl PackageFiles<'_> {
 
                 bun_sys::copy_file::copy_file_with_state(in_file, outfile, &mut copy_file_state)
                     .map_err(|err| copy_failed(err.into(), entry.path.as_bytes(), failed_file))?;
+
+                // The folder compare reads each file's size and mtime: a copy whose
+                // mtime is its own creation time would read as changed.
+                let _ = sys::futimens(
+                    outfile,
+                    sys::TimeLike {
+                        sec: stat.st_atime as i64,
+                        nsec: stat.st_atime_nsec as i64,
+                    },
+                    sys::TimeLike {
+                        sec: stat.st_mtime as i64,
+                        nsec: stat.st_mtime_nsec as i64,
+                    },
+                );
             }
 
             Ok(())
@@ -2630,8 +2699,7 @@ impl PackageFiles<'_> {
 
         let result = match method {
             #[cfg(target_os = "macos")]
-            Method::Clonefile => self.install_with_clonefile(destination_dir),
-            #[cfg(target_os = "macos")]
+            Method::Clonefile => self.install_with_clonefile(destination_dir),            #[cfg(target_os = "macos")]
             Method::ClonefileEachDir => {
                 self.install_with_clonefile_each_dir(destination_dir, skip_dirs)
             }

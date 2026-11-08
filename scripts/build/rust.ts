@@ -67,6 +67,7 @@ export function rustTriple(os: OS, arch: Arch, abi: Abi | undefined): string {
   if (os === "darwin") return `${rustArch}-apple-darwin`;
   if (os === "windows") return `${rustArch}-pc-windows-msvc`;
   if (os === "freebsd") return `${rustArch}-unknown-freebsd`;
+  if (os === "ohos") return `${rustArch}-unknown-linux-ohos`;
   // linux
   assert(abi !== undefined, "linux build missing abi");
   if (abi === "android") return `${rustArch}-linux-android`;
@@ -649,13 +650,21 @@ export function cargoBuildInvocation(cfg: Config): CargoInvocation {
   // `clang-cl` is a *compiler driver*, not a linker — it reads `/N…` args as input filenames — so use the
   // discovered MSVC `link.exe` (matches what `dep_cargo` sets for vendored crates, source.ts), falling back to
   // `lld-link.exe` (`cfg.ld`); both speak the `/X` dialect rustc emits.
-  const linker = cfg.windows ? (cfg.msvcLinker ?? cfg.ld) : cfg.cxx;
+  // OHOS: rustc links host build scripts and proc-macro dylibs through the
+  // signing wrapper (the kernel refuses to exec or dlopen an unsigned ELF);
+  // the wrapper drives the real compiler through OHOS_REAL_CXX.
+  const linker = cfg.windows
+    ? (cfg.msvcLinker ?? cfg.ld)
+    : cfg.ohos
+      ? resolve(cfg.cwd, "scripts/ohos/sign-linker.sh")
+      : cfg.cxx;
 
   // What configures cargo itself, on top of the children's environment.
   const env: Record<string, string> = {
     ...unitEnv,
     CARGO_TERM_COLOR: "always",
     [`CARGO_TARGET_${envify(triple)}_LINKER`]: linker,
+    ...(cfg.ohos ? { OHOS_REAL_CXX: cfg.cxx } : {}),
   };
   if (cfg.asan) {
     // ASan links machine code (no LTO), so `codegen-units = 1` only serializes each crate's LLVM pass over IR the

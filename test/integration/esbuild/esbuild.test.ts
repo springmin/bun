@@ -1,28 +1,35 @@
 import { spawn } from "bun";
 import { beforeAll, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { cp, rm, writeFile } from "fs/promises";
-import { bunExe, bunEnv as env, isArm64, isWindows, tempDir } from "harness";
+import { bunExe, bunEnv as env, isArm64, isOhos, isWindows, tempDir } from "harness";
 import { join } from "path";
 
 // esbuild@0.19.8 does not support win32-arm64 at runtime
 const isWindowsArm64 = isWindows && isArm64;
+
+// OHOS: prefer the HarmonyOS port of esbuild (same API, OHOS binary).
+const esbuildVersion = isOhos ? "0.25.5" : "0.19.8";
+const esbuildOverride = isOhos ? { overrides: { esbuild: "npm:@ohos-ports/esbuild@0.25.5-beta.0" } } : {};
 
 beforeAll(() => {
   setDefaultTimeout(1000 * 60 * 5);
 });
 
 describe.concurrent("esbuild integration test", () => {
-  test("install and use esbuild", async () => {
+  test.skipIf(isWindowsArm64)("install and use esbuild", async () => {
     using dir = tempDir("esbuild-test", {
       "package.json": JSON.stringify({
         name: "bun-esbuild-test",
         version: "1.0.0",
+        // OHOS: install the HarmonyOS port under the `esbuild` name so its bin
+        // and the package's self-require resolve.
+        ...(isOhos ? { dependencies: { esbuild: "npm:@ohos-ports/esbuild@0.25.5-beta.0" } } : {}),
       }),
     });
     const packageDir = dir + "";
 
     var { stdout, stderr, exited } = spawn({
-      cmd: [bunExe(), "install", "esbuild@0.19.8"],
+      cmd: isOhos ? [bunExe(), "install", "--os=openharmony", "--cpu=arm64"] : [bunExe(), "install", "esbuild@0.19.8"],
       cwd: packageDir,
       stdout: "pipe",
       stdin: "pipe",
@@ -33,7 +40,7 @@ describe.concurrent("esbuild integration test", () => {
     var err = await stderr.text();
     var out = await stdout.text();
     expect(err).toContain("Saved lockfile");
-    expect(out).toContain("esbuild@0.19.8");
+    expect(out).toContain(isOhos ? "0.25.5" : "esbuild@0.19.8");
     expect(await exited).toBe(0);
 
     ({ stdout, stderr, exited } = spawn({
@@ -48,7 +55,7 @@ describe.concurrent("esbuild integration test", () => {
     err = await stderr.text();
     out = await stdout.text();
     expect(err).toBe("");
-    expect(out).toContain("0.19.8");
+    expect(out).toContain(esbuildVersion);
     expect(await exited).toBe(0);
   });
 
@@ -57,6 +64,7 @@ describe.concurrent("esbuild integration test", () => {
       "package.json": JSON.stringify({
         name: "bun-esbuild-estrella-test",
         version: "1.0.0",
+        ...esbuildOverride,
       }),
     });
     const packageDir = dir + "";
@@ -116,13 +124,16 @@ describe.concurrent("esbuild integration test", () => {
         dependencies: {
           "estrella": "1.4.1",
           // different version of esbuild
-          "esbuild": "0.19.8",
+          // OHOS: the only fully-working HarmonyOS port is 0.25.5-beta.0; the
+          // 0.28.1 ports look up an unpublished @esbuild/openharmony-arm64.
+          "esbuild": isOhos ? "npm:@ohos-ports/esbuild@0.25.5-beta.0" : "0.19.8",
         },
+        ...esbuildOverride,
       }),
     );
 
     ({ stdout, stderr, exited } = spawn({
-      cmd: [bunExe(), "install"],
+      cmd: isOhos ? [bunExe(), "install", "--os=openharmony", "--cpu=arm64"] : [bunExe(), "install"],
       cwd: packageDir,
       stdout: "pipe",
       stdin: "pipe",
@@ -133,7 +144,7 @@ describe.concurrent("esbuild integration test", () => {
     [err, out, exitCode] = await Promise.all([stderr.text(), stdout.text(), exited]);
     expect(err).toContain("Saved lockfile");
     expect(out).toContain("estrella@1.4.1");
-    expect(out).toContain("esbuild@0.19.8");
+    expect(out).toContain(isOhos ? "0.25.5" : "esbuild@0.19.8");
     expect(exitCode).toBe(0);
 
     ({ stdout, stderr, exited } = spawn({
@@ -161,7 +172,7 @@ describe.concurrent("esbuild integration test", () => {
 
     [err, out, exitCode] = await Promise.all([stderr.text(), stdout.text(), exited]);
     expect(err).toBe("");
-    expect(out).toContain("0.19.8");
+    expect(out).toContain(isOhos ? "0.25.5" : "0.19.8");
     expect(exitCode).toBe(0);
 
     ({ stdout, stderr, exited } = spawn({
@@ -175,7 +186,8 @@ describe.concurrent("esbuild integration test", () => {
 
     [err, out, exitCode] = await Promise.all([stderr.text(), stdout.text(), exited]);
     expect(err).toBe("");
-    expect(out).toContain("0.11.23");
+    // OHOS: both slots resolve the same HarmonyOS port.
+    expect(out).toContain(isOhos ? "0.25.5" : "0.11.23");
     expect(exitCode).toBe(0);
 
     ({ stdout, stderr, exited } = spawn({

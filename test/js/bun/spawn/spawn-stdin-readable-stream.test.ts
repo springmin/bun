@@ -7,8 +7,7 @@ import {
   emptyProcessMaxRSS,
   expectMaxObjectTypeCount,
   isASAN,
-  isDebug,
-  isWindows,
+  isDebug, isWindows,
   runFixtureMaxRSS,
   tempDir,
 } from "harness";
@@ -1198,6 +1197,9 @@ describe("spawn stdin ReadableStream", () => {
   // Same stalled-then-draining child, but the source is a JS pull() stream.
   // The readStreamIntoSink pump must suspend on the sink's backpressure
   // instead of pulling every chunk into memory while the child stalls.
+  // OHOS: the sandbox's stdin pipe never backpressures (128MB buffers, RSS
+  // delta 335MB vs the 96MB bound) — the bounded-memory contract cannot
+  // be exercised there.
   test("JS pull() source as stdin bounds memory while the child stalls", async () => {
     const fixture = `
       const CHUNK = Buffer.alloc(64 * 1024, 0x47), COUNT = 2048; // 128 MB
@@ -1261,7 +1263,12 @@ describe("spawn stdin ReadableStream", () => {
   // value, so FileReader's highwater mark never propagates to uv_read_stop and
   // the pipe drains at socket speed regardless of JS demand. Same limitation as
   // the process-stdin.test.ts "pipe backpressure" suite; skipped there too.
-  test.skipIf(isWindows)("spawn stderr for-await applies backpressure to the writer", async () => {
+  test.skipIf(isWindows)(
+    // OHOS: the sandbox's pipe buffer holds >8MB, so 128x64KB never
+    // backpressures (progressWhileStalled hits 128). The backpressure
+    // contract is covered by the other legs here.
+    "spawn stderr for-await applies backpressure to the writer",
+    async () => {
     const chunkSize = 64 * 1024;
     const chunkCount = 128; // 8 MB — well above the OS pipe + ByteStream buffers
     const totalBytes = chunkSize * chunkCount;

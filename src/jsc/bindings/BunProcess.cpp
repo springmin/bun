@@ -477,6 +477,7 @@ static char* toFileURI(std::span<const char> span)
 
 extern "C" size_t Bun__process_dlopen_count;
 
+extern "C" bool ohos_ensure_elf_signed(const char* path);
 extern "C" void* CrashHandler__beginDlOpenAction(const char* path);
 extern "C" void CrashHandler__endDlOpenAction(void* guard);
 extern "C" bool Bun__VM__allowAddons(void* vm);
@@ -635,13 +636,23 @@ JSC_DEFINE_HOST_FUNCTION_WITH_ATTRIBUTES(Process_functionDlopen, __attribute__((
             msg.append(filename);
             msg.append(" is linked against glibc (DT_NEEDED "_s);
             msg.append(WTF::StringView::fromLatin1(soname));
+#if defined(__OHOS__)
+            msg.append("), but this Bun build targets OpenHarmony (musl libc). glibc-targeted native addons cannot be loaded; build the addon against the OpenHarmony SDK instead."_s);
+#else
             msg.append("), but this Bun build uses musl. glibc-targeted native addons cannot be loaded on Alpine/musl even with gcompat. Use a glibc-based image (e.g. oven/bun:debian) or install a musl build of this addon."_s);
+#endif
             return throwError(globalObject, scope, ErrorCode::ERR_DLOPEN_FAILED, msg.toString());
         }
     }
 #endif
     // Keep the addon's name in crash reports until this call returns, because its init functions run after dlopen().
     auto endDlOpenAction = WTF::makeScopeExit([guard = CrashHandler__beginDlOpenAction(utf8.legacyCStringPointer())] { CrashHandler__endDlOpenAction(guard); });
+#if defined(__OHOS__)
+    // OHOS requires ELF files to have a .codesign section before dlopen.
+    // Auto-sign .node addons compiled by node-gyp during lifecycle scripts
+    // and any other unsigned native addon.
+    ohos_ensure_elf_signed(utf8.legacyCStringPointer());
+#endif
     void* handle = dlopen(utf8.legacyCStringPointer(), RTLD_LAZY);
 #endif
 
@@ -2379,7 +2390,9 @@ JSC_DEFINE_HOST_FUNCTION_WITH_ATTRIBUTES(Process_functionExecve, __attribute__((
     // undone if execve(2) fails: FD_CLOEXEC only takes effect at the next
     // exec, so the still-running image is unaffected.
 #if OS(LINUX) || OS(FREEBSD)
+#if !defined(__OHOS__)
     if (bun_close_range(3, ~0U, /* CLOSE_RANGE_CLOEXEC */ (1U << 2)) != 0)
+#endif
 #endif
     {
         int maxfd = static_cast<int>(sysconf(_SC_OPEN_MAX));
@@ -2935,10 +2948,60 @@ __attribute__((minsize)) static JSValue constructReportObjectComplete(VM& vm, Zi
     };
 
     auto constructSharedObjects = [&]() -> JSC::JSValue {
-        JSC::JSObject* sharedObjects = JSC::constructEmptyArray(globalObject, nullptr);
+        JSC::JSArray* sharedObjects = JSC::constructEmptyArray(globalObject, nullptr);
         RETURN_IF_EXCEPTION(scope, {});
 
-        // TODO:
+#if defined(__OHOS__)
+        // Packages that pick between the glibc and musl builds of their native
+        // binary (rollup, rolldown, @napi-rs/canvas, ...) probe this list for a
+        // `ld-musl-*` entry. An empty list makes them load the glibc prebuilt,
+        // which cannot run on OHOS.
+        if (int fd = open("/proc/self/maps", O_RDONLY | O_CLOEXEC); fd >= 0) {
+            constexpr size_t capacity = 1 << 20;
+            size_t length = 0;
+            char* contents = static_cast<char*>(malloc(capacity));
+            if (contents) {
+                ssize_t n;
+                while (length < capacity && (n = read(fd, contents + length, capacity - length)) > 0) {
+                    length += static_cast<size_t>(n);
+                }
+            }
+            close(fd);
+
+            if (contents) {
+                WTF::HashSet<WTF::String> seen;
+                for (size_t start = 0; start < length;) {
+                    size_t end = start;
+                    while (end < length && contents[end] != '\n') {
+                        end++;
+                    }
+                    // Each line ends in the mapped file's pathname, padded by
+                    // spaces up to a column.
+                    size_t pathEnd = end;
+                    while (pathEnd > start && contents[pathEnd - 1] == ' ') {
+                        pathEnd--;
+                    }
+                    size_t pathStart = pathEnd;
+                    while (pathStart > start && contents[pathStart - 1] != ' ') {
+                        pathStart--;
+                    }
+                    if (pathStart < pathEnd) {
+                        WTF::String path = WTF::String::fromUTF8(std::span { contents + pathStart, pathEnd - pathStart });
+                        if (path.contains(".so"_s)) {
+                            seen.add(path);
+                        }
+                    }
+                    start = end + 1;
+                }
+                free(contents);
+
+                for (auto& path : seen) {
+                    sharedObjects->push(globalObject, JSC::jsString(vm, path));
+                    RETURN_IF_EXCEPTION(scope, {});
+                }
+            }
+        }
+#endif
 
         return sharedObjects;
     };
@@ -4440,15 +4503,35 @@ JSC_DEFINE_HOST_FUNCTION(Process_functiongetgroups, (JSGlobalObject * globalObje
         throwSystemError(throwScope, globalObject, "getgroups"_s, errno);
         return {};
     }
-    Vector<gid_t> groupVector(ngroups);
+    Vector<gid_t> groupVector;
+    groupVector.resize(ngroups);
     ngroups = getgroups(ngroups, groupVector.begin());
     if (ngroups == -1) {
         throwSystemError(throwScope, globalObject, "getgroups"_s, errno);
         return {};
     }
-    JSArray* groups = constructEmptyArray(globalObject, nullptr, ngroups);
+    groupVector.resize(ngroups);
+
+    // Node's documented behavior: "POSIX leaves it unspecified if the
+    // effective group ID is included, but Node.js ensures it is." A raw
+    // getgroups(2) returns only supplementary groups, and on platforms
+    // where the effective gid is not also in the supplementary list
+    // (observed on OHOS: egid 20020101 not in the list, while `id -G`
+    // reports it) this array disagrees with both Node and `id -G`.
+    const gid_t egid = getegid();
+    bool hasEgid = false;
+    for (unsigned i = 0; i < groupVector.size(); i++) {
+        if (groupVector[i] == egid) {
+            hasEgid = true;
+            break;
+        }
+    }
+    if (!hasEgid)
+        groupVector.append(egid);
+
+    JSArray* groups = constructEmptyArray(globalObject, nullptr, groupVector.size());
     RETURN_IF_EXCEPTION(throwScope, {});
-    for (int i = 0; i < ngroups; i++) {
+    for (unsigned i = 0; i < groupVector.size(); i++) {
         groups->putDirectIndex(globalObject, i, jsNumber(groupVector[i]));
         RETURN_IF_EXCEPTION(throwScope, {});
     }
@@ -5926,16 +6009,14 @@ JSValue getCachedCwd(JSC::JSGlobalObject* globalObject)
     auto& vm = JSC::getVM(globalObject);
     auto scope = DECLARE_THROW_SCOPE(vm);
 
-    // https://github.com/nodejs/node/blob/2eff28fb7a93d3f672f80b582f664a7c701569fb/lib/internal/bootstrap/switches/does_own_process_state.js#L142-L146
-    auto* processObject = defaultGlobalObject(globalObject)->processObject();
-    if (auto* cached = processObject->cachedCwd()) {
-        return cached;
-    }
-
+    // Do NOT cache the result: process.cwd() must re-query the syscall each
+    // call (like Node's uv_cwd()), so a cwd deleted via rmdir after chdir
+    // surfaces ENOENT. The Rust side (bun_sys::process_cwd) already probes
+    // /proc/self/cwd on OHOS to detect the deleted-cwd case; caching here
+    // would hide it.
     auto cwd = Bun__Process__getCwd(globalObject);
     RETURN_IF_EXCEPTION(scope, {});
     JSString* cwdStr = uncheckedDowncast<JSString>(JSValue::decode(cwd));
-    processObject->setCachedCwd(vm, cwdStr);
     RELEASE_AND_RETURN(scope, cwdStr);
 }
 

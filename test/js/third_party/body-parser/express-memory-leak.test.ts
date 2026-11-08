@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { ChildProcess, spawn } from "child_process";
-import { bunEnv, bunExe, isASAN, isBroken, isMacOS } from "harness";
+import { bunEnv, bunExe, isASAN, isBroken, isMacOS, isOhos } from "harness";
 import { join } from "path";
 
 const REQUESTS_COUNT = isASAN ? 5_000 : 50_000;
@@ -148,7 +148,7 @@ test(
   async () => {
     await runMemoryTest("/empty");
   },
-  1000 * 20,
+  isOhos ? 1000 * 60 : 1000 * 20,
 );
 
 test(
@@ -161,7 +161,7 @@ test(
       headers: { "Content-Type": "application/json" },
     });
   },
-  1000 * 20,
+  isOhos ? 1000 * 60 : 1000 * 20,
 );
 
 test(
@@ -169,7 +169,7 @@ test(
   async () => {
     await runMemoryTest("/response-body");
   },
-  1000 * 20,
+  isOhos ? 1000 * 60 : 1000 * 20,
 );
 
 async function createAbortedRequestBatch(serverInfo: ServerInfo): Promise<void> {

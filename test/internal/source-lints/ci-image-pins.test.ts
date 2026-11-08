@@ -14,7 +14,10 @@ test("rust-toolchain.toml is the toolchain the CI images install", () => {
   };
   expect(toolchain.channel).toBe(pins.rust.channel);
   expect(toolchain.components.toSorted()).toEqual([...pins.rust.components].sort());
-  expect(toolchain.targets.toSorted()).toEqual([...pins.rust.targets].sort());
+  // OHOS: the port lists aarch64-unknown-linux-ohos in rust-toolchain.toml
+  // (its nightly is used through RUST_HOME; see
+  // scripts/ohos/build-bun-ohos-native.sh), which the CI images don't install.
+  expect(toolchain.targets.toSorted()).toEqual([...pins.rust.targets, "aarch64-unknown-linux-ohos"].sort());
 });
 
 test("the workflows install the Bun the CI images install", () => {
@@ -61,5 +64,7 @@ test("the Node-API tests build against the headers of the Node.js the CI images 
   const harness = readFileSync(join(root, "test/napi/node-napi-tests/harness.ts"), "utf8");
   expect(harness).toContain(`const NODE_HEADERS_VERSION = "${pins.nodejs.version}";`);
   const major = pins.llvm.version.split(".")[0];
-  expect(harness).toContain(`? "${locations.llvm}/bin/clang" : "/usr/lib/llvm${major}/bin/clang";`);
+  expect(harness).toContain(`? "${locations.llvm}/bin/clang"`);
+  // OHOS resolves the musl fallback through PATH: the /usr/lib paths do not exist there.
+  expect(harness).toContain(`(which("clang") ?? "/usr/lib/llvm${major}/bin/clang");`);
 });

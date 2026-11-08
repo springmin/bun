@@ -685,7 +685,9 @@ extern "C" fn bun_is_exiting() -> c_int {
     is_exiting() as c_int
 }
 
-fn is_exiting() -> bool {
+/// True once `Global::exit` has begun. Monotonically true, safe from any
+/// thread; the C symbol `bun_is_exiting` (Loop.h consumes it) wraps this.
+pub fn is_exiting() -> bool {
     IS_EXITING.load(Ordering::Relaxed)
 }
 
@@ -694,7 +696,7 @@ fn is_exiting() -> bool {
 // args and are `noreturn`/kernel-validated — no memory-safety preconditions,
 // so `safe fn` discharges the link-time proof and the call sites are plain
 // calls. `#[link_name]` avoids colliding with this module's own `pub fn exit`.
-#[allow(suspicious_runtime_symbol_definitions)] // signatures are ABI-identical; `safe fn` is intentional (above)
+#[allow(suspicious_runtime_symbol_definitions, unknown_lints)] // signatures are ABI-identical; `safe fn` is intentional (above)
 unsafe extern "C" {
     #[cfg(windows)]
     #[link_name = "abort"]

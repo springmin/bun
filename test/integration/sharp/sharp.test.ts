@@ -1,6 +1,31 @@
 import { describe, expect, it } from "bun:test";
+import { bunEnv, bunExe, isOhos, tempDir } from "harness";
 import path from "path";
-import sharp from "sharp";
+
+// OHOS: sharp's Linux prebuilds cannot resolve libvips on musl, so install the
+// HarmonyOS port and present the platform the HarmonyOS packages expect.
+let sharp: typeof import("sharp").default;
+if (isOhos) {
+  Object.defineProperty(process, "platform", { value: "openharmony", configurable: true });
+  const dir = tempDir("sharp-ohos", {
+    "package.json": JSON.stringify({
+      name: "sharp-ohos",
+      dependencies: { sharp: "npm:@ohos-ports/sharp@0.34.5-beta.12" },
+    }),
+  });
+  await using install = Bun.spawn({
+    cmd: [bunExe(), "install", "--os=openharmony", "--cpu=arm64"],
+    cwd: String(dir),
+    env: bunEnv,
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const [stderr, exitCode] = await Promise.all([install.stderr.text(), install.exited]);
+  if (exitCode !== 0) throw new Error(`sharp HarmonyOS port install failed:\n${stderr}`);
+  sharp = (await import(Bun.resolveSync("sharp", String(dir)))).default;
+} else {
+  sharp = (await import("sharp")).default;
+}
 
 describe("sharp integration tests", () => {
   it("should resize an image", async () => {

@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { bunEnv, bunExe, isDebug, isLinux, isWindows, tempDir } from "harness";
-import { readdirSync, readFileSync } from "node:fs";
+import { bunEnv, bunExe, isDebug, isLinux, isOHOS, isWindows, tempDir } from "harness";
+import { readdirSync, readFileSync, readlinkSync } from "node:fs";
 import { join } from "node:path";
 
 // On Windows, when the initial uv_read_start on a subprocess stdout/stderr
@@ -122,6 +122,7 @@ const SHIM_C = /* c */ `
 
 static long (*real_syscall)(long, ...);
 static int writer_mods;
+static int writer_arms;
 static int pidfd_adds;
 
 static int is_pidfd(int fd) {
@@ -150,6 +151,13 @@ static int should_fail(long op, int fd, struct epoll_event *event) {
     if (op != EPOLL_CTL_MOD || !(event->events & EPOLLOUT) || ioctl(fd, TIOCGPTN, &pty_number) != 0) return 0;
     const char *skip = getenv("FAIL_EPOLL_CTL_SKIP");
     return writer_mods++ >= (skip ? atoi(skip) : 0);
+  }
+  // OHOS: an initially-empty writer is unregistered at init (Terminal.rs), so
+  // write()'s first re-arm is an ADD and later ones MODs; count both kinds.
+  if (strcmp(mode, "pty-writer-any") == 0) {
+    if ((op != EPOLL_CTL_ADD && op != EPOLL_CTL_MOD) || !(event->events & EPOLLOUT) || ioctl(fd, TIOCGPTN, &pty_number) != 0) return 0;
+    const char *skip = getenv("FAIL_EPOLL_CTL_SKIP");
+    return writer_arms++ >= (skip ? atoi(skip) : 0);
   }
   long failing_op = strcmp(mode, "pty-reader-add") == 0 ? EPOLL_CTL_ADD : EPOLL_CTL_MOD;
   return op == failing_op && (event->events & EPOLLIN) && ioctl(fd, TIOCGPTN, &pty_number) == 0;
@@ -361,6 +369,21 @@ beforeAll(async () => {
 });
 
 afterAll(() => {
+  if (dir) {
+    // A fixture that hangs keeps running after bun test reports its timeout:
+    // the test promise never settles, so `await using` never unwinds and
+    // nothing kills the child (the failure these tests hunt — a writer stuck
+    // behind a failed re-arm — leaves the loop idling, so it never exits by
+    // itself). Each fixture's cwd is this file's temp dir; kill whatever is
+    // still rooted there, however the test ended.
+    const root = String(dir);
+    for (const pid of readdirSync("/proc")) {
+      if (!/^\d+$/.test(pid)) continue;
+      try {
+        if (readlinkSync(`/proc/${pid}/cwd`) === root) process.kill(Number(pid), "SIGKILL");
+      } catch {}
+    }
+  }
   dir?.[Symbol.dispose]();
 });
 
@@ -468,7 +491,10 @@ describe.skipIf(!isLinux || !cc)(
 // A child whose exit cannot be registered for was reported as exited with that error while it was still running, and
 // nothing reaped it afterwards. Bun.spawnSync blocked in wait4() instead, where nothing serves the child's stdio and
 // no timeout applies: a child that reads its stdin or fills a pipe never exits. Either way the child is ended now.
-describe.skipIf(!isLinux || !cc)(
+// OHOS: child exits are watched by a waiter thread (SHOULD_USE_WAITER_THREAD is
+// default-on there) and no pidfd is registered with the loop, so this failure
+// cannot be injected and there is no "unwatchable" child.
+describe.skipIf(!isLinux || !cc || isOHOS)(
   "a child whose pidfd fails to register with the event loop is ended and reaped",
   () => {
     test.concurrent.each([
@@ -520,10 +546,14 @@ test.skipIf(!isLinux || !cc)(
 // The shell did not finish a command whose exit came with an error, and left one it gave up on starting to its SIGTERM
 // and unreaped.
 describe.skipIf(!isLinux || !cc)("a shell command is ended, reaped and finished", () => {
-  test.concurrent.each([
-    ["whose pidfd fails to register", "shell-unwatchable", { FAIL_EPOLL_CTL: "pidfd-add", FAIL_EPOLL_CTL_SKIP: "1" }],
-    ["whose stdin writer fails to register", "shell-stdin-buffer-running", { BUN_FEATURE_FLAG_DISABLE_MEMFD: "1" }],
-  ])("%s", async (_, kind, env) => {
+  test.concurrent.each(
+    [
+      ["whose pidfd fails to register", "shell-unwatchable", { FAIL_EPOLL_CTL: "pidfd-add", FAIL_EPOLL_CTL_SKIP: "1" }],
+      ["whose stdin writer fails to register", "shell-stdin-buffer-running", { BUN_FEATURE_FLAG_DISABLE_MEMFD: "1" }],
+      // OHOS: no pidfd is registered for a child (waiter thread), so the
+      // pidfd-add failure cannot be injected there; the writer case still runs.
+    ].filter(([name]) => !(isOHOS && name === "whose pidfd fails to register")),
+  )("%s", async (_, kind, env) => {
     expect(await runFixture(kind, env)).toEqual({
       report: { error: null, sync: { children: 0, next: 0 }, shell: 1, leakedFds: 0, leakedWrappers: 0 },
       stderr: "",
@@ -533,7 +563,8 @@ describe.skipIf(!isLinux || !cc)("a shell command is ended, reaped and finished"
 });
 
 // The same goes for what the CLI runs: it reported the script as failed and exited, and the script ran on.
-describe.skipIf(!isLinux || !cc)("a script whose pidfd fails to register with the event loop is ended", () => {
+// OHOS: the pidfd-add failure cannot be injected there (waiter thread; see above).
+describe.skipIf(!isLinux || !cc || isOHOS)("a script whose pidfd fails to register with the event loop is ended", () => {
   test.concurrent.each(["run --parallel forever", "run --filter=* forever", "install"])("bun %s", async args => {
     using project = tempDir("unwatchable-script", { "watched": "" });
     // By then its parent is somebody else, so it is told by its command line.
@@ -573,10 +604,14 @@ describe.skipIf(!isLinux || !cc)("a script whose pidfd fails to register with th
 // would be waited for until it exits by itself, with the thread blocked or no deadline to end the wait: it is left.
 describe.skipIf(!isLinux || !cc)("a child that has to be ended and cannot be signalled is not waited for", () => {
   const unwatchable = { FAIL_EPOLL_CTL: "pidfd-add", FAIL_EPOLL_CTL_SKIP: "1" };
-  test.concurrent.each([
-    ["Bun.spawnSync of a child whose pidfd fails to register", "sync-unwatchable-timeout", unwatchable, 0],
-    ["Bun.spawnSync whose stdin writer fails to register", "sync-stdin-buffer", {}, "next\n"],
-  ])("%s", async (_, kind, env, next) => {
+  test.concurrent.each(
+    [
+      ["Bun.spawnSync of a child whose pidfd fails to register", "sync-unwatchable-timeout", unwatchable, 0],
+      ["Bun.spawnSync whose stdin writer fails to register", "sync-stdin-buffer", {}, "next\n"],
+      // OHOS: the pidfd failure cannot be injected (waiter thread); the writer
+      // case still runs.
+    ].filter(([name]) => !(isOHOS && name === "Bun.spawnSync of a child whose pidfd fails to register")),
+  )("%s", async (_, kind, env, next) => {
     expect(await runFixture(kind, { ...env, FAIL_SIGKILL: "1", BUN_FEATURE_FLAG_DISABLE_MEMFD: "1" })).toEqual({
       report: {
         error: { code: "ENOSPC", message: "ENOSPC: no space left on device, epoll_ctl" },
@@ -602,9 +637,17 @@ describe.skipIf(!isLinux || !cc)("a Bun.Terminal whose reader fails to register 
     test.concurrent.each([
       ["new Bun.Terminal()", "terminal"],
       ["Bun.spawn() with terminal options", "spawn-terminal"],
-    ])("%s throws and releases the pty", async (_, kind) => {
+    ])("%s reports the failure and releases the pty", async (_, kind) => {
       expect(await runFixture(kind, { FAIL_EPOLL_CTL: mode })).toEqual({
-        report: { error: { message: "Failed to start terminal reader" }, leakedFds: 0, leakedWrappers: 0 },
+        report: {
+          // OHOS: the kernel's epoll defect makes a failed pty-reader registration
+          // a normal event there (see EPOLL_REARM_WATCH in Terminal.rs), so start()
+          // does not throw -- the reader's exit is replayed instead. The pty must
+          // still be released, which the leak counters below pin down.
+          error: isOHOS ? null : { message: "Failed to start terminal reader" },
+          leakedFds: 0,
+          leakedWrappers: 0,
+        },
         stderr: "",
         exitCode: 0,
       });
@@ -624,7 +667,15 @@ describe.skipIf(!isLinux || !cc)("a Bun.Terminal whose writer fails to re-arm it
     // owed when the second one fails.
     ["a write behind queued bytes", "terminal-write-twice", "1"],
   ])("%s releases the terminal", async (_, kind, skip) => {
-    expect(await runFixture(kind, { FAIL_EPOLL_CTL: "pty-writer-mod", FAIL_EPOLL_CTL_SKIP: skip })).toEqual({
+    expect(
+      await runFixture(kind, {
+        FAIL_EPOLL_CTL: isOHOS ? "pty-writer-any" : "pty-writer-mod",
+        // OHOS: the writer is unregistered after start() (see Terminal.rs), so
+        // write()'s first re-arm is an ADD and the start() registration is
+        // counted before it, hence the skip shifts by one.
+        FAIL_EPOLL_CTL_SKIP: isOHOS ? String(Number(skip) + 1) : skip,
+      }),
+    ).toEqual({
       report: { error: null, write: { closed: true, drains: 0 }, leakedFds: 0, leakedWrappers: 0 },
       stderr: "",
       exitCode: 0,
