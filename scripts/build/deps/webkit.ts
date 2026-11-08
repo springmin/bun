@@ -850,8 +850,10 @@ function webkitLocalIncludes(cfg: Config): string[] {
 
 const androidIcuRoot = (): string => process.env.BUN_ANDROID_ICU_ROOT ?? "/tmp/icu-android";
 const windowsIcuDir = (wk: WebKitBuild): string => join(wk.B, "icu");
-export const linuxIcuRoot = (cfg: Config): string | undefined =>
-  cfg.linux && cfg.abi !== "android" ? process.env.BUN_ICU_ROOT || undefined : undefined;
+export const linuxIcuRoot = (cfg: Config): string | undefined => {
+  if (cfg.ohos) return process.env.BUN_ICU_ROOT || cfg.ohosIcuDir;
+  return cfg.linux && cfg.abi !== "android" ? process.env.BUN_ICU_ROOT || undefined : undefined;
+};
 const staticIcuLibs = (root: string): string[] =>
   ["libicui18n.a", "libicuuc.a", "libicudata.a"].map(lib => join(root, "lib", lib));
 
