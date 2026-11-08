@@ -1,5 +1,5 @@
-import { afterAll, expect } from "bun:test";
-import { bunEnv, bunExe, isASAN, isOhos, isWindows, tempDir } from "harness";
+import { expect } from "bun:test";
+import { bunEnv, bunExe, isASAN, isWindows, tempDir, isOhos} from "harness";
 import {
   chmodSync,
   chownSync,
@@ -16,6 +16,7 @@ import {
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { slot } from "./harness/commands";
+import { afterAll } from "./harness/default-timeout";
 import { run as runCommand } from "./harness/run";
 import { test as oneAtATime, unsupported } from "./supported";
 

@@ -1679,10 +1679,57 @@ unsafe fn resolve_entry_point_specifier<'s>(
         }
     }
 
-    // SAFETY: per fn contract — `parent` is this thread's VM, and only its own
-    // thread mutates its `transpiler`.
-    let resolved_entry_point = unsafe { (*parent).transpiler.resolve_entry_point(str, dot_slash) }
-        .map_err(|_| Unresolved::Logged)?;
+    // SAFETY: per fn contract; `global` is a read-only field, and the resolver
+    // (`transpiler`) is mutated only on `parent`'s owning thread — both call
+    // sites (`create()` on the parent thread, `spin()` on the worker thread)
+    // satisfy that.
+    let global = unsafe { (*parent).global };
+    let said_before = (log.msgs.len(), log.errors);
+    // SAFETY: same as above — `parent`'s `transpiler` is mutated only on its
+    // owning thread (the caller's thread per fn contract).
+    let resolved_entry_point = match unsafe {
+        (*parent).transpiler.resolve_entry_point(str, dot_slash)
+    } {
+        Ok(r) => r,
+        Err(error) => {
+            // SAFETY: per fn contract; the field is only read.
+            let graph = unsafe { (*parent).standalone_module_graph };
+            let below_root = graph
+                .filter(|_| crate::compiled_program::program_of_executable().is_some())
+                .and_then(|graph| str.strip_prefix(graph.base_public_path_with_default_suffix()));
+            if let Some(below_root) = below_root {
+                log.msgs.truncate(said_before.0);
+                log.errors = said_before.1;
+                log.add_error_fmt(
+                    None,
+                    bun_ast::Loc::EMPTY,
+                    format_args!(
+                        "{} resolving \"{}\" (entry point). It isn't in this executable, which only runs code that was compiled into it. If it is a file of your project, pass ./{} to bun compile as another entry point.",
+                        error,
+                        bstr::BStr::new(str),
+                        bstr::BStr::new(below_root),
+                    ),
+                );
+            }
+            // `global` valid for VM lifetime; safe ZST-handle deref (panics on null).
+            let global = JSGlobalObject::opaque_ref(global);
+            let out: jsc::JsResult<BunString> = (|| {
+                let out = log.to_js(global, format_args!("Error resolving Worker entry point"))?;
+                out.to_bun_string(global)
+            })();
+            match out {
+                Ok(out) => {
+                    *error_message = out;
+                    return None;
+                }
+                Err(JsError::OutOfMemory) => bun_core::out_of_memory(),
+                Err(JsError::Thrown | JsError::Terminated) => {
+                    *error_message = BunString::static_("unexpected exception");
+                    return None;
+                }
+            }
+        }
+    };
 
     if let Some(entry) = resolved_entry_point
         .path_const()

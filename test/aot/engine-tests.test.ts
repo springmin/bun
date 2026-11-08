@@ -6,8 +6,8 @@
 // says which tool.
 //   $TESTAOT run <aot/tests>/passes/sink-allocations --jobs=1     one folder, serially, each path printed before it runs
 //   $TESTAOT native <filter> --part=2/4                           every fourth of the native tests whose name holds the filter, from the second on
-import { expect, test } from "bun:test";
-import { isASAN, isCI, isOhos, isWindows, tempDir } from "harness";
+import { expect } from "bun:test";
+import { isASAN, isCI, isWindows, tempDir, isOhos} from "harness";
 import { join } from "path";
 import {
   run,
@@ -17,6 +17,7 @@ import {
   whyShellSkipped,
   whySkipped,
 } from "./engine-test-commands";
+import { test } from "./harness/default-timeout";
 import { freshSeed } from "./harness/shares";
 import { engineTests, jsc, scriptSkipReason } from "./shell/tools";
 
