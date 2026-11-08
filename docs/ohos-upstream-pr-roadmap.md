@@ -131,3 +131,25 @@ deliberately downstream: the OHOS SDK and signing policy are not Bun runtime con
 2. Who sponsors the series and the CI lane (Buildkite cross-build first, device later)?
 3. Are the two WebKit patches acceptable in `oven-sh/WebKit`, or should Bun pin a fork?
 4. Should signing/release tooling stay downstream (current assumption)?
+
+## AOT compiler rewrite (upstream #47942)
+
+The fork is rebased on `oven-sh/bun` main `2596ac5d391` ("AOT: the Bun side of
+the rewritten ahead-of-time compiler", #47942), with the OHOS adaptation
+reapplied on top:
+
+- WebKit pin: `5a61071f79134bf41844e7ea31a8449147d85dd4`.
+- `aot-anonymous-code.patch`: the OHOS anonymous-code fallback is adapted to
+  the new `mapCodeOfImage()` file branch.
+- `suspend-resume.patch`: unchanged.
+- `ohos-icu-utf16.patch`: the rewritten WTF headers need explicit
+  `<unicode/utf16.h>`/`<unicode/uchar.h>` includes.
+- `scripts/build/deps/webkit.ts`: OHOS takes ICU from `ohosIcuDir` (or
+  `BUN_ICU_ROOT`), as Linux does.
+- `scripts/ohos/build-bun-ohos-native.sh`: accepts a WebKit worktree whose
+  `.git` is a file.
+
+The 70 files matching `test/aot/*mock*.test.ts` run 0 fail on the merged
+build, including `mock-builtin-live` and the layered jest/vitest cases.
+`package.json` is `1.4.4`, matching the latest upstream release tag
+`bun-v1.4.4`.
