@@ -1120,6 +1120,7 @@ Full documentation is available at <magenta>https://bun.com/docs/cli/run<r>
             entry_points.extend(ctx.preloads.iter().cloned());
             crate::cli::run_compiled::start(ctx, entry_points, 0);
         }
+        crate::cli::run_compiled::read_no_environment_file_again(ctx);
 
         // `bun_jsc::initialize`
         // is real (calls `JSCInitialize` over `bun_sys::environ()`); the
@@ -1341,7 +1342,7 @@ Full documentation is available at <magenta>https://bun.com/docs/cli/run<r>
                 bun_core::zstr!("bunfig.toml"),
                 ctx,
             )?;
-            crate::cli::startup_options::reject_unusable_bunfig_settings(ctx);
+            crate::cli::startup_options::reject_unusable_bunfig_settings(ctx, None);
         }
 
         let vm_ptr = VirtualMachine::init_with_module_graph(bun_jsc::virtual_machine::Options {
@@ -2486,6 +2487,7 @@ impl RunCommand {
 
     /// Dispatch `bun run <target>`: classify as file path vs. package.json
     pub(crate) fn exec_with_cfg(ctx: &mut ContextData, cfg: ExecCfg) -> crate::Result<bool> {
+        crate::cli::run_compiled::read_no_environment_file_again(ctx);
         let bin_dirs_only = cfg.bin_dirs_only;
         let log_errors = cfg.log_errors;
 
