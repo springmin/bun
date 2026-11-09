@@ -1,6 +1,6 @@
 // A compiled program keeps 256 KB of the stack of every thread for the code of the run time, three times that with a sanitizer: docs/compiler/compatibility.mdx, "Smaller differences".
 import { expect } from "bun:test";
-import { bunEnv, bunExe, isASAN, isLinux, tempDir } from "harness";
+import { bunEnv, bunExe, isASAN, isLinux, isOhos, tempDir } from "harness";
 import { join } from "node:path";
 import { run } from "./harness/run";
 import { test } from "./supported";
@@ -10,7 +10,8 @@ const enough = isASAN ? 1280 : 512;
 const enoughForPlainBunAlone = isASAN ? 768 : 256;
 const withStack = (size: number, ...cmd: string[]) => ["sh", "-c", `ulimit -s ${size} && exec "$@"`, "sh", ...cmd];
 
-test.skipIf(!isLinux)(
+// OHOS does not report or apply `ulimit -s`: every limit starts the same executable.
+test.skipIf(!isLinux || isOhos)(
   "an executable starts with the stack that the page names, and says so where it has less",
   async () => {
     using directory = tempDir("aot-stack", { "hello.js": `console.log("hello");\n` });

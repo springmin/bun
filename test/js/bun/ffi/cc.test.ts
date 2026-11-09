@@ -10,16 +10,13 @@ import {
   symlinkSync,
   writeFileSync,
 } from "fs";
-import { bunEnv, bunExe, isASAN, isOhos, isWindows, normalizeBunSnapshot, tempDir, tempDirWithFiles } from "harness";
+import { bunEnv, bunExe, isASAN, isWindows, normalizeBunSnapshot, tempDir, tempDirWithFiles } from "harness";
 import path from "path";
 
 // TODO: we need to install build-essential and Apple SDK in CI.
 // It can't find includes. It can on machines with that enabled.
 // TinyCC's setjmp/longjmp error handling conflicts with ASan.
-it.skipIf(isWindows || isASAN || isOhos)(
-  // OHOS: TinyCC cannot parse the SDK's stdio.h (__attribute__
-  // ((__availability__(ohos, introduced=...))) — "invalid number"), so a
-  // fixture pulling the napi headers cannot compile.
+it.skipIf(isWindows || isASAN)(
   "can run a .c file",
   () => {
   const result = Bun.spawnSync({

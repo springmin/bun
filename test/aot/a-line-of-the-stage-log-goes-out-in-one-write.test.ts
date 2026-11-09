@@ -1,6 +1,6 @@
 // Bun and the engine write to one descriptor under no common lock: a line that goes out in pieces can have another line in its middle.
 import { expect } from "bun:test";
-import { bunEnv, bunExe, isLinux, shellExe, tempDir } from "harness";
+import { bunEnv, bunExe, isLinux, isOhos, shellExe, tempDir } from "harness";
 import { createSocket } from "node:dgram";
 import { once } from "node:events";
 import { buildEnvironment, withThreads } from "./harness/flags";
@@ -21,7 +21,8 @@ const { glibcVersionRuntime } = (process.report.getReport() as { header: { glibc
 const [major = 0, minor = 0] = glibcVersionRuntime?.split(".").map(Number) ?? [];
 const isNotMetYet = major > 2 || (major === 2 && minor >= 37);
 
-const one = !shellOpensDatagramSockets ? test.skip : isNotMetYet ? test.todo : test;
+// OHOS has no glibc: the write atomicity this row measures is glibc's.
+const one = isOhos ? test.skip : !shellOpensDatagramSockets ? test.skip : isNotMetYet ? test.todo : test;
 one("the lines that tools read are one write each", async () => {
   using dir = tempDir("aot-a-line-is-one-write", {
     "program.js": `function double(value) { return value * 2; }\nconsole.log(double(21));\n`,

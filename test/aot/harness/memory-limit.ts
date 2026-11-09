@@ -32,20 +32,23 @@ export function residentMemory(pid: number, field = "VmRSS") {
 /** What the kernel says of the memory of a process, on one line. Nothing where it does not say. */
 export function describeMemory(pid: number) {
   const pick = (file: string, fields: string[]) => {
-    const text = readFileSync(file, "utf8");
-    return fields.flatMap(
-      field => new RegExp(`^${field}:\\s*\\d+( kB)?`, "m").exec(text)?.[0].replace(/\s+/g, " ") ?? [],
-    );
+    try {
+      const text = readFileSync(file, "utf8");
+      return fields.flatMap(
+        field => new RegExp(`^${field}:\\s*\\d+( kB)?`, "m").exec(text)?.[0].replace(/\s+/g, " ") ?? [],
+      );
+    } catch {
+      return [];
+    }
   };
+  const said = [
+    ...pick(`/proc/${pid}/status`, ["VmRSS", "RssAnon", "RssFile", "RssShmem", "VmData", "VmStk", "Threads"]),
+    ...pick(`/proc/${pid}/smaps_rollup`, ["AnonHugePages"]),
+  ];
   try {
-    return [
-      ...pick(`/proc/${pid}/status`, ["VmRSS", "RssAnon", "RssFile", "RssShmem", "VmData", "VmStk", "Threads"]),
-      ...pick(`/proc/${pid}/smaps_rollup`, ["AnonHugePages"]),
-      `transparent huge pages: ${readFileSync("/sys/kernel/mm/transparent_hugepage/enabled", "utf8").trim()}`,
-    ].join(", ");
-  } catch {
-    return "";
-  }
+    said.push(`transparent huge pages: ${readFileSync("/sys/kernel/mm/transparent_hugepage/enabled", "utf8").trim()}`);
+  } catch {}
+  return said.join(", ");
 }
 
 /** What the thread that watches is told. */
