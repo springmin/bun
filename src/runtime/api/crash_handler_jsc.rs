@@ -190,7 +190,11 @@ pub(crate) fn operator_new(nothrow: bool) -> Option<bool> {
         return Some(refused);
     }
     crash_handler::suppress_core_dumps_if_necessary();
-    let _ = mi_new(usize::MAX / 2);
+    // mimalloc's C++ wrappers abort on OOM, but the OHOS build returns null
+    // instead; the hook must still report what the process ran out of.
+    if mi_new(usize::MAX / 2).is_null() {
+        out_of_memory();
+    }
     None
 }
 

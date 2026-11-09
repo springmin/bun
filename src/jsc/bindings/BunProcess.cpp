@@ -4,6 +4,7 @@
 #include "BunProcess.h"
 #include "BunCompiledModules.h"
 #include "BunSignalActions.h"
+#include "BunCPUProfiler.h"
 #include "ObjectBindings.h"
 #include "DLHandleMap.h"
 #include "WebCoreJSBuiltins.h"
@@ -2403,6 +2404,13 @@ JSC_DEFINE_HOST_FUNCTION_WITH_ATTRIBUTES(Process_functionExecve, __attribute__((
         }
     }
 
+    // The sampler's signal is reset by execve; a sample that arrives between
+    // the reset and the new image's handler kills the process. Stop the
+    // profiler before replacing the image and start it again only if execve
+    // fails.
+    const bool wasProfiling = Bun::isCPUProfilerRunning();
+    if (wasProfiling) Bun::stopCPUProfiler(globalObject->vm(), nullptr, nullptr);
+
     // Reset the signal mask so the new process starts with defaults. execve(2)
     // resets handlers for caught signals but preserves the blocked mask.
     sigset_t emptyMask;
@@ -2410,11 +2418,17 @@ JSC_DEFINE_HOST_FUNCTION_WITH_ATTRIBUTES(Process_functionExecve, __attribute__((
     sigemptyset(&emptyMask);
     pthread_sigmask(SIG_SETMASK, &emptyMask, &previousMask);
 
-    ::execve(execPathUtf8.legacyCStringPointer(), argv.begin(), envp.begin());
-    savedErrno = errno;
+    // A sampler signal (the CPU profiler) can interrupt execve before it
+    // replaces the image; a failed execve leaves the image unchanged, so it
+    // is safe to retry. Linux does not deliver the sampler here, OHOS does.
+    do {
+        ::execve(execPathUtf8.legacyCStringPointer(), argv.begin(), envp.begin());
+        savedErrno = errno;
+    } while (savedErrno == EINTR);
 
-    // execve(2) failed; put back the signal mask we cleared above.
+    // execve(2) failed; put back the signal mask and the profiler we stopped.
     pthread_sigmask(SIG_SETMASK, &previousMask, nullptr);
+    if (wasProfiling) Bun::startCPUProfiler(globalObject->vm());
 #endif
 
     // execve(2) failed and the original image is still running. Restore the

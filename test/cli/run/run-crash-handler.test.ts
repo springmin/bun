@@ -8,7 +8,6 @@ import {
   isDebug,
   isGlibc,
   isLinux,
-  isOhos,
   isPosix,
   isWindows,
   mergeWindowEnvs,
@@ -152,7 +151,7 @@ describe.if(isPosix)("terminal signal reflects the crash cause", () => {
 // mimalloc provides `operator new` only on Linux without ASAN.
 describe.if(isLinux && !isASAN)("operator new that fails to allocate", () => {
   // OHOS: `mi_new` returns null instead of invoking the out-of-memory crash handler.
-  test.concurrent.skipIf(isOhos)("reports out of memory", async () => {
+  test.concurrent("reports out of memory", async () => {
     await using proc = Bun.spawn({
       cmd: [
         bunExe(),
