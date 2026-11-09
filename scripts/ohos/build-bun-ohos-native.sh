@@ -51,8 +51,17 @@ OHOS_SDK="$HOMEBREW_PREFIX/opt/ohos-sdk"
 # Use the stable `opt/` symlink, not a versioned Cellar path: upgrading
 # ohos-sdk re-points opt/ and removes the old version dir, which broke every
 # baked path when 26.0.0.18_1 -> _2 happened mid-build. An explicit
-# OHOS_SYSROOT still wins, but a stale value that no longer exists falls back
-# to the symlink instead of failing the configure.
+# OHOS_SYSROOT still wins, but a shell exported before an upgrade keeps the
+# old Cellar path, which still exists and would silently build against the
+# old NDK. Prefer the SDK that opt/ohos-sdk names now.
+if [ -n "${OHOS_SYSROOT:-}" ]; then
+  current_sysroot="$(cd "$HOMEBREW_PREFIX/opt/ohos-sdk/native/sysroot" && pwd -P)"
+  given_sysroot="$(cd "$OHOS_SYSROOT" && pwd -P 2>/dev/null || true)"
+  if [ "$given_sysroot" != "$current_sysroot" ]; then
+    warn "OHOS_SYSROOT=$OHOS_SYSROOT is not the current SDK ($current_sysroot); using the current SDK"
+    OHOS_SYSROOT="$current_sysroot"
+  fi
+fi
 SYSROOT="${OHOS_SYSROOT:-$HOMEBREW_PREFIX/opt/ohos-sdk/native/sysroot}"
 [ -d "$SYSROOT/usr/include" ] || SYSROOT="$HOMEBREW_PREFIX/opt/ohos-sdk/native/sysroot"
 

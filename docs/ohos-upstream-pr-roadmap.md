@@ -188,3 +188,13 @@ Re-checked every `isOhos` skip in `test/` against the built runtime.
 - Kept as source candidates, not hidden: TLS/WebSocket send-path
   backpressure on OHOS, trim-report interpreter retention, and
   carrier/payload layout.
+
+## NDK 26.0.0.38
+
+- The installed SDK moved from `26.0.0.18_2` to `26.0.0.38`. The SDK's
+  clang/lld are still 15.0.4 and the libc symbol set is unchanged.
+- A shell exported before the upgrade kept `OHOS_SYSROOT` on the old
+  Cellar path; because that directory still exists, the first post-upgrade
+  build silently linked against the old NDK. `build-bun-ohos-native.sh`
+  now compares `OHOS_SYSROOT` with the current `opt/ohos-sdk` sysroot and
+  uses the current SDK with a warning.
