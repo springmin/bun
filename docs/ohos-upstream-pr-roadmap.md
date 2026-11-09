@@ -198,3 +198,10 @@ Re-checked every `isOhos` skip in `test/` against the built runtime.
   build silently linked against the old NDK. `build-bun-ohos-native.sh`
   now compares `OHOS_SYSROOT` with the current `opt/ohos-sdk` sysroot and
   uses the current SDK with a warning.
+
+- carrier tail: the plain `--compile` path also overwrites an appended
+  tail; it is the signed ELF's `.codesign`/section-table overlay, not
+  only the trim path.
+- trim-report: the OHOS `--lto=off` build merges interpreter ranges with
+  always-kept tool features; `--gc-sections` does not change the table.
+  Matching Linux needs LTO or a linker-layout change.
