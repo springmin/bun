@@ -1,5 +1,7 @@
 name: linux-aot-classify
 on:
+  push:
+    branches: [claude/linux-aot-classify]
   workflow_dispatch:
 
 jobs:
