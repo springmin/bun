@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "fs";
-import { bunEnv, bunExe, isOhos, isWindows, tempDir } from "harness";
+import { bunEnv, bunExe, isWindows, tempDir } from "harness";
 import { join } from "path";
 
 // Every workload below is time-bounded for 100ms. On Windows JSC's
@@ -477,10 +477,7 @@ describe.concurrent("--cpu-prof", () => {
       expect(exitCode).toBe(0);
     });
 
-    // OHOS: the coordinator's scale-up can spawn one more worker while the
-    // last file is being dispatched; each worker writes a profile, so the
-    // count is 3. The extra worker runs no test.
-    test.skipIf(isOhos)("--parallel: one profile for each worker, and none for the process that only hands out files", async () => {
+    test("--parallel: one profile for each worker, and none for the process that only hands out files", async () => {
       using dir = tempDir("cpu-prof-test", files);
       await using proc = Bun.spawn({
         // 0: both workers start at once, so each gets a file.

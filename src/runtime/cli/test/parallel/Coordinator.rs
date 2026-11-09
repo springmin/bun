@@ -215,6 +215,17 @@ impl<'a> Coordinator<'a> {
         false
     }
 
+    /// Files that no live worker owns: in the range of a worker that exited or
+    /// was never spawned. A live worker's range needs no replacement worker.
+    fn has_unowned_files(&self) -> bool {
+        for (i, w) in self.workers.iter().enumerate() {
+            if !w.range.is_empty() && (i >= self.spawned_count as usize || !w.alive) {
+                return true;
+            }
+        }
+        false
+    }
+
     /// The worker (spawned or not) whose range has the most files remaining.
     fn find_steal_victim(&mut self) -> Option<*mut Worker> {
         // Callers (assign_work) hold a live `&mut Worker` pointing
@@ -978,7 +989,7 @@ impl<'a> Coordinator<'a> {
 
         let can_respawn = self.stop_reason.is_none()
             && startup_failures < MAX_STARTUP_FAILURES
-            && self.has_undispatched_files();
+            && self.has_unowned_files();
 
         if startup_failure && self.stop_reason.is_none() {
             // A false `can_respawn` is benign when no work remains; only the
