@@ -21,9 +21,15 @@ jobs:
           install -m755 package/bin/bun /usr/local/bin/bun-under-test
           bun-under-test --version
 
+      - name: Fetch the builtin table from the same engine
+        run: |
+          curl -fL --retry 5 -o "$GITHUB_WORKSPACE/aot_builtin_table.json" \
+            'https://github.com/springmin/bun/releases/download/aot-table-2596ac5/aot_builtin_table.json'
+
       - name: Run the eight AOT gaps on Linux
         env:
           BUN_FEATURE_FLAG_INTERNAL_FOR_TESTING: "1"
+          AOT_BUILTIN_TABLE: ${{ github.workspace }}/aot_builtin_table.json
         run: |
           set +e
           : > result.txt
