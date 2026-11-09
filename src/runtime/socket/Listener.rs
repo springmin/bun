@@ -844,6 +844,10 @@ impl Listener {
             self.strong_data
                 .with_mut(|s| s.clear_without_deallocation());
         } else if force_close {
+            // `stop(true)` ends the listener even while accepted sockets are
+            // still winding down; what the listener held is no longer its own.
+            self.strong_data
+                .with_mut(|s| s.clear_without_deallocation());
             self.group.with_mut(|g| g.close_all());
         }
 

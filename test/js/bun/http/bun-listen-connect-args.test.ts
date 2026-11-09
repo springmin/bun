@@ -1,6 +1,31 @@
-import { describe, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { cwdScope, isWindows, tempDir, tmpdirSync } from "harness";
 import { basename, dirname, join } from "node:path";
+
+test("stop(true) clears the listener's data while a connection is still open", async () => {
+  const accepted = Promise.withResolvers<void>();
+  using listener = Bun.listen<{ tag: string }>({
+    hostname: "127.0.0.1",
+    port: 0,
+    data: { tag: "of the listener" },
+    socket: {
+      open: accepted.resolve,
+      data() {},
+      close() {},
+      error() {},
+    },
+  });
+  const client = await Bun.connect({
+    hostname: "127.0.0.1",
+    port: listener.port,
+    socket: { data() {}, close() {}, error() {} },
+  });
+  await accepted.promise;
+  expect(listener.data).toEqual({ tag: "of the listener" });
+  client.end();
+  listener.stop(true);
+  expect(listener.data).toBeUndefined();
+});
 
 describe.if(!isWindows)("unix socket", () => {
   test("valid", () => {
