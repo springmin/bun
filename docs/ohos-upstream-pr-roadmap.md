@@ -168,3 +168,20 @@ build, including `mock-builtin-live` and the layered jest/vitest cases.
 - Report: `/storage/Users/currentUser/exchanges/ci-test/ohos-test-report-20261109.md`.
 - Mirror note: `rsync --exclude='build'` also excludes `scripts/build`; use
   `--exclude='/build'`. Test fixture `node_modules` must be copied separately.
+
+## Test skip audit (2026-11-09)
+
+Re-checked every `isOhos` skip in `test/` against the built runtime.
+
+- Removed obsolete skips: `cpu-prof` (16/17 pass; only the `--parallel`
+  extra-worker case remains), `node:vm` (374 pass), `bun:ffi` `cc` and
+  `cc-shares`, `spawn.ipc`, and AOT `texts-that-tell-builds-apart`.
+- Source fixes: `Listener.stop(true)` now clears `data` with connections
+  still open; `operator new` reports OOM when OHOS `mi_new` returns null;
+  `process.execve` stops/restarts the CPU profiler around the syscall.
+- Kept skips that are real platform differences: sandbox hard links and
+  `ulimit` limits, non-loopback interfaces, patchelf, memfd, AOT signal
+  mapping, and the 78.3 vs 79.1 ICU floor.
+- Kept as source candidates, not hidden: TLS/WebSocket send-path
+  backpressure on OHOS, trim-report interpreter retention, carrier/payload
+  layout, and the `bun test --parallel` extra worker.
