@@ -182,6 +182,9 @@ Re-checked every `isOhos` skip in `test/` against the built runtime.
 - Kept skips that are real platform differences: sandbox hard links and
   `ulimit` limits, non-loopback interfaces, patchelf, memfd, AOT signal
   mapping, and the 78.3 vs 79.1 ICU floor.
+- Fixed: `bun test --parallel` respawns a worker only for a range that no
+  live worker owns, so `cpu-prof --parallel` writes two profiles again
+  (1 pass / 0 fail).
 - Kept as source candidates, not hidden: TLS/WebSocket send-path
-  backpressure on OHOS, trim-report interpreter retention, carrier/payload
-  layout, and the `bun test --parallel` extra worker.
+  backpressure on OHOS, trim-report interpreter retention, and
+  carrier/payload layout.
