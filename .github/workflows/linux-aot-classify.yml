@@ -1,0 +1,46 @@
+name: linux-aot-classify
+on:
+  workflow_dispatch:
+
+jobs:
+  classify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ohos-aarch64
+
+      - name: Fetch the canary built from 2596ac5
+        run: |
+          curl -fL --retry 5 -o bun.tgz \
+            'https://registry.npmjs.org/@oven/bun-linux-x64/-/bun-linux-x64-1.4.4-canary.20261108.1.tgz'
+          tar -xzf bun.tgz
+          install -m755 package/bin/bun /usr/local/bin/bun-under-test
+          bun-under-test --version
+
+      - name: Run the eight AOT gaps on Linux
+        env:
+          BUN_FEATURE_FLAG_INTERNAL_FOR_TESTING: "1"
+        run: |
+          set +e
+          : > result.txt
+          for f in \
+            test/aot/one-object-one-entry.test.ts \
+            test/aot/the-table-of-built-ins-lists-the-own-names-of-what-its-rows-make.test.ts \
+            test/aot/builtins/rows-of-the-host-are-held-by-calls-written-by-hand.test.ts \
+            test/aot/runner-suites/bundler-11.test.ts \
+            test/aot/trim-report-first-pages.test.ts \
+            test/aot/trim-report-places.test.ts \
+            test/aot/a-line-of-the-stage-log-goes-out-in-one-write.test.ts \
+            test/aot/carrier-with-much-behind-the-payload.test.ts
+          do
+            echo "===== $f" | tee -a result.txt
+            timeout 300 bun-under-test test --expose-internals --timeout 240000 "$f" >> result.txt 2>&1
+            echo "EXIT=$?" | tee -a result.txt
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-aot-result
+          path: result.txt
