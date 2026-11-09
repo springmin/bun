@@ -153,3 +153,18 @@ The 70 files matching `test/aot/*mock*.test.ts` run 0 fail on the merged
 build, including `mock-builtin-live` and the layered jest/vitest cases.
 `package.json` is `1.4.4`, matching the latest upstream release tag
 `bun-v1.4.4`.
+
+## Full test run (2026-11-09)
+
+- 3,710 files. The merged run recorded 3,637 pass / 72 fail, with one file
+  missing a report line because the first segment ended in an environment OOM.
+- Isolated reruns and mirror fixes recovered 50; the final file-level result is
+  **3,688 pass / 22 fail (99.41%)**, 0 timeout. AOT is **1,047 / 1,067
+  (98.13%)**.
+- 14 remaining failures are OHOS platform semantics: anonymous code mapping and
+  the smaller ASLR range, `/proc` and memory accounting, the loader/ELF and
+  temp-file permissions, and stack/fault/termios behavior. 8 are new AOT engine
+  table/trim/payload gaps and stay visible until reproduced on Linux.
+- Report: `/storage/Users/currentUser/exchanges/ci-test/ohos-test-report-20261109.md`.
+- Mirror note: `rsync --exclude='build'` also excludes `scripts/build`; use
+  `--exclude='/build'`. Test fixture `node_modules` must be copied separately.
