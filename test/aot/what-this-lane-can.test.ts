@@ -41,7 +41,7 @@ test("this lane can what it could", () => {
 
 // Words that say where a test runs, which a lane does not lose.
 const wordsOfThePlatform =
-  /^(?:is(?:Windows|Linux|MacOS|Posix|ASAN|Debug|CI|BuildKite|Musl|Glibc|X64|Arm64|SlowBuild|FreeBSD|Android)|unsupported|process|platform|arch|env|typeof|undefined|true|false|null|without|includes|x64|arm64|linux|darwin|win32|string)$/;
+  /^(?:is(?:Windows|Linux|MacOS|Posix|ASAN|Debug|CI|BuildKite|Musl|Glibc|X64|Arm64|SlowBuild|FreeBSD|Android|Ohos)|unsupported|process|platform|arch|env|typeof|undefined|true|false|null|without|includes|x64|arm64|linux|darwin|win32|string)$/;
 const declaresSkip = /^\s*(?:test|it|describe|testOneByOne)(?:\.\w+)*\.(?:skipIf|if|todoIf)\(([^\n]*)$/gm;
 
 test("a test skips itself for want of a thing only through without()", () => {

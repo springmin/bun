@@ -1,7 +1,7 @@
 // `bun test --aot` and `bun run --debug-aot` build the program in one process and run it in others. It gets there in an unnamed
 // file: a memfd, else shared memory, else a deleted file of the temporary directory. Only Linux has all three.
 import { expect } from "bun:test";
-import { bunEnv, bunExe, isLinux, isWindows, tempDirWithBunTypes as tempDir } from "harness";
+import { bunEnv, bunExe, isLinux, isOhos, isWindows, tempDirWithBunTypes as tempDir } from "harness";
 import { existsSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -57,7 +57,8 @@ const namesInSharedMemory = () =>
 const sharedMemoryHoldsCode =
   isLinux && /^\S+ \/dev\/shm \S+ (?!\S*\bnoexec\b)/m.test(readFileSync("/proc/mounts", "utf8"));
 // macOS has the last one alone: it maps shared memory neither executable nor private.
-const kinds = isLinux ? ["memfd", ...(sharedMemoryHoldsCode ? ["shared-memory"] : []), "deleted"] : ["deleted"];
+// OHOS maps the handed-over program anonymously: /proc/self/maps names no file, and the helper says "none".
+const kinds = isOhos ? ["none"] : isLinux ? ["memfd", ...(sharedMemoryHoldsCode ? ["shared-memory"] : []), "deleted"] : ["deleted"];
 // A build costs over a second of CPU however small the program. With three kinds, Linux runs each under --parallel, which hands the
 // program on twice, and kills a run of one. The runs with /dev/shm mounted anew are without --parallel.
 const kindThatIsKilled = kinds.includes("shared-memory") ? "shared-memory" : "deleted";
@@ -67,7 +68,7 @@ describe.skipIf(isWindows).each(kinds)("in %s", kind => {
     ...bunEnv,
     BUN_TMPDIR: join(dir, "tmp"),
     // Elsewhere the test says which kind Bun takes by itself.
-    BUN_DEBUG_TEST_AOT_PROGRAM_FILE: isLinux ? kind : undefined,
+    BUN_DEBUG_TEST_AOT_PROGRAM_FILE: isLinux && !isOhos ? kind : undefined,
   });
   // Under --parallel what a test prints comes out on stderr.
   const whatEachTestSees = (output: string) =>
