@@ -1,10 +1,12 @@
 mod descriptor;
 mod elf;
+mod file;
 mod merkle;
 mod sha256;
 
 pub use elf::SignError;
 pub use elf::is_elf64;
+pub use file::{is_validly_signed_file, sign_file_in_place};
 
 // Exported under `__` names so integration tests can reach internal primitives
 // without exposing them as first-class public API.

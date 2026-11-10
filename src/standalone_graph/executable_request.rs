@@ -94,6 +94,66 @@ impl<'a> ExecutableAdditions<'a, '_> {
     }
 }
 
+/// A compiled executable is a new image: the template's code signature no
+/// longer describes it, and OHOS puts `.codesign` after the section table, so
+/// a trim that cuts to the last section drops the carrier's appended tail.
+/// Drop the signature from the template; the output is unsigned (and runs) or
+/// is signed by whatever packs it.
+fn strip_code_signature(template: &mut [u8]) {
+    if template.len() < 64 || &template[..4] != b"\x7fELF" {
+        return;
+    }
+    let word = |at: usize| -> u64 {
+        template
+            .get(at..at + 8)
+            .map_or(0, |b| u64::from_le_bytes(b.try_into().unwrap()))
+    };
+    let half = |at: usize| -> u16 {
+        template
+            .get(at..at + 2)
+            .map_or(0, |b| u16::from_le_bytes(b.try_into().unwrap()))
+    };
+    let shoff = usize::try_from(word(40)).unwrap_or(usize::MAX);
+    let shentsize = usize::from(half(58));
+    let shnum = usize::from(half(60));
+    let shstrndx = usize::from(half(62));
+    if shentsize < 64 || shnum == 0 || shstrndx >= shnum {
+        return;
+    }
+    let Some(table_end) = shoff.checked_add(shnum.saturating_mul(shentsize)) else {
+        return;
+    };
+    if table_end > template.len() {
+        return;
+    }
+    let section_at = |index: usize| shoff.saturating_add(index.saturating_mul(shentsize));
+    let string_offset = usize::try_from(word(section_at(shstrndx) + 24)).unwrap_or(usize::MAX);
+    let string_size = usize::try_from(word(section_at(shstrndx) + 32)).unwrap_or(0);
+    let Some(names) = template.get(string_offset..string_offset.saturating_add(string_size)) else {
+        return;
+    };
+    for index in 0..shnum {
+        let at = section_at(index);
+        let name_start = u32::from_le_bytes(template[at..at + 4].try_into().unwrap()) as usize;
+        if name_start >= names.len() {
+            continue;
+        }
+        let name = &names[name_start..];
+        let name = &name[..name.iter().position(|byte| *byte == 0).unwrap_or(name.len())];
+        if name != b".codesign" {
+            continue;
+        }
+        if index + 1 == shnum {
+            template[60..62].copy_from_slice(&(shnum as u16 - 1).to_le_bytes());
+        } else {
+            // A SHT_NULL entry names nothing: leaving sh_name behind would
+            // make a later reader take the old signature for this image's.
+            template[at..at + 64].fill(0);
+        }
+        return;
+    }
+}
+
 impl InjectionAdditions<'_> {
     /// `payload` is what the executable gets, with the image as the compiler made it.
     pub(crate) fn name_executable(&mut self, payload: &PayloadParts<'_>) {
@@ -110,6 +170,7 @@ impl InjectionAdditions<'_> {
     }
 
     pub(crate) fn write_build_id(&mut self, template: &mut [u8]) {
+        strip_code_signature(template);
         self.build_id = self
             .build_id
             .filter(|id| bun_exe_format::build_id::write(template, id));

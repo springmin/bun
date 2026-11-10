@@ -11,6 +11,8 @@ pub enum SignError {
     NoSectionHeaders,
     ShstrtabOutOfBounds,
     AlreadySigned,
+    Malformed,
+    Io(std::io::Error),
 }
 
 impl fmt::Display for SignError {
@@ -25,11 +27,19 @@ impl fmt::Display for SignError {
                     "already has .codesign section; strip first or use --force"
                 )
             }
+            SignError::Malformed => write!(f, "malformed ELF"),
+            SignError::Io(error) => write!(f, "{error}"),
         }
     }
 }
 
 impl std::error::Error for SignError {}
+
+impl From<std::io::Error> for SignError {
+    fn from(error: std::io::Error) -> Self {
+        SignError::Io(error)
+    }
+}
 
 // ── ELF64 header field offsets ────────────────────────────────────────────
 const E_SHOFF: usize = 0x28;

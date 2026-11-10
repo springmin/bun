@@ -111,6 +111,40 @@ pub fn ensure_signed_inplace(path: &Path) -> bool {
         attempted_file_cache().lock().unwrap().insert(key);
         return false;
     }
+    // A compiled executable can be hundreds of megabytes. The file signer
+    // reads it a MiB at a time and hashes it a page at a time, so the build's
+    // peak does not grow with it.
+    // Anything it cannot handle (an ELF whose section table is unusual, a
+    // read-only path) falls through to the whole-file path below.
+    match ohos_sign::is_validly_signed_file(path) {
+        Ok(true) => {
+            if let Ok(md) = stat_path(path) {
+                signed_file_cache().lock().unwrap().insert(file_key(&md));
+            }
+            return true;
+        }
+        Ok(false) => match ohos_sign::sign_file_in_place(path, true) {
+            Ok(true) => {
+                if let Ok(md) = stat_path(path) {
+                    signed_file_cache().lock().unwrap().insert(file_key(&md));
+                }
+                return true;
+            }
+            Ok(false) => {
+                attempted_file_cache().lock().unwrap().insert(key);
+                return false;
+            }
+            Err(_) => {}
+        },
+        Err(ohos_sign::SignError::NotElf64) => {
+            // Not something this signer handles (an ELF32, or a header this
+            // reader does not know): leave it alone, as the whole-file path
+            // below does for anything that is not ELF64.
+            signed_file_cache().lock().unwrap().insert(key);
+            return true;
+        }
+        Err(_) => {}
+    }
     // One read serves both the validation and the fallback signing below.
     let Ok(bytes) = read_file(path) else {
         attempted_file_cache().lock().unwrap().insert(key);

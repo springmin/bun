@@ -42,6 +42,12 @@ pub(crate) fn root_hash_and_tree(data: &[u8], cs_off: u64, cs_len: u64) -> ([u8;
         })
         .collect();
 
+    root_hash_from_leaves(leaves)
+}
+
+/// The root over leaves that a caller hashed page by page, for a file too
+/// large to hold twice. `root_hash_and_tree` is this over the pages of `data`.
+pub(crate) fn root_hash_from_leaves(leaves: Vec<[u8; H]>) -> ([u8; H], Vec<u8>) {
     // Single page case: leaf is also the root, no intermediate tree.
     if leaves.len() == 1 {
         return (leaves[0], Vec::new());
