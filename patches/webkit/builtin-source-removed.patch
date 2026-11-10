@@ -1,0 +1,20 @@
+diff --git a/Source/JavaScriptCore/builtins/BuiltinExecutables.cpp b/Source/JavaScriptCore/builtins/BuiltinExecutables.cpp
+index e8b0c4edf5b8..6af7e4a27f28 100644
+--- a/Source/JavaScriptCore/builtins/BuiltinExecutables.cpp
++++ b/Source/JavaScriptCore/builtins/BuiltinExecutables.cpp
+@@ -55,7 +55,14 @@ static ALWAYS_INLINE const char* builtinSourceText()
+ 
+ BuiltinExecutables::BuiltinExecutables(VM& vm)
+     : m_vm(vm)
+-    , m_combinedSourceProvider(BuiltinsSourceProvider::create(StringImpl::createWithoutCopying({ builtinSourceText(), s_JSCCombinedCodeLength }), s_JSCBuiltinSourceStarts, 0))
++    , m_combinedSourceProvider([&] {
++        if (const char* source = builtinSourceText())
++            return BuiltinsSourceProvider::create(StringImpl::createWithoutCopying({ source, s_JSCCombinedCodeLength }), s_JSCBuiltinSourceStarts, 0);
++        // The source is gone in an executable that compiled the builtins it
++        // links. Nothing reads this provider then; a non-null empty one lets
++        // the engine start without the source text.
++        return BuiltinsSourceProvider::create(String(), { }, 0);
++    }())
+ {
+ }
+ 
