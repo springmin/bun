@@ -1,8 +1,8 @@
 diff --git a/Source/JavaScriptCore/aot/facts/AOTFactsOfProgram.cpp b/Source/JavaScriptCore/aot/facts/AOTFactsOfProgram.cpp
-index 22c5a2f2b6dd..fafa1961119d 100644
+index e06a1c88d303..cabbce4a28ec 100644
 --- a/Source/JavaScriptCore/aot/facts/AOTFactsOfProgram.cpp
 +++ b/Source/JavaScriptCore/aot/facts/AOTFactsOfProgram.cpp
-@@ -2355,7 +2355,7 @@ public:
+@@ -2814,7 +2814,7 @@ public:
      Vector<FeatureUseRecord> run(std::span<const BuiltinUseRecord>);
  
  private:
@@ -11,7 +11,7 @@ index 22c5a2f2b6dd..fafa1961119d 100644
  
      void collectUses(std::span<const BuiltinUseRecord>, bool namedAtRunTime);
      void visitRowsThatWait();
-@@ -2401,6 +2401,7 @@ private:
+@@ -2860,6 +2860,7 @@ private:
      BitVector m_makersNameFeatures;
      BitVector m_makersNameFeaturesOfConstructor;
      BitVector m_isLetGo;
@@ -19,7 +19,7 @@ index 22c5a2f2b6dd..fafa1961119d 100644
      BitVector m_isBoundAtSite;
      Vector<FeatureUseRecord> m_records;
  };
-@@ -2417,6 +2418,7 @@ FeaturesOfProgramFacts::FeaturesOfProgramFacts(const InputsOfProgramFacts& input
+@@ -2876,6 +2877,7 @@ FeaturesOfProgramFacts::FeaturesOfProgramFacts(const InputsOfProgramFacts& input
      , m_unseenCodeMayRun(unseenCodeMayRun)
      , m_isNamed(m_builtins.builtinCount())
      , m_codeMayRun(m_builtins.builtinCount())
@@ -27,7 +27,7 @@ index 22c5a2f2b6dd..fafa1961119d 100644
      , m_madeClasses(m_builtins.classCount())
  {
      m_witnesses.fill(noWitness, m_builtins.builtinCount());
-@@ -2458,6 +2460,9 @@ void FeaturesOfProgramFacts::collectUses(std::span<const BuiltinUseRecord> recor
+@@ -2917,6 +2919,9 @@ void FeaturesOfProgramFacts::collectUses(std::span<const BuiltinUseRecord> recor
          if ((uses - OptionSet<BuiltinUse> { BuiltinUse::Tested }).isEmpty())
              continue;
          noteCodeMayRun(builtin, record.witness);
@@ -37,7 +37,7 @@ index 22c5a2f2b6dd..fafa1961119d 100644
          if (uses.contains(BuiltinUse::Escaped))
              m_isLetGo.set(builtin.index());
          if (namedAtRunTime || (uses - usesThatNameNothing).isEmpty())
-@@ -2728,18 +2733,27 @@ void FeaturesOfProgramFacts::visitRow(BuiltinID builtin)
+@@ -3187,18 +3192,27 @@ void FeaturesOfProgramFacts::visitRow(BuiltinID builtin)
  {
      const Builtin& entry = m_builtins.at(builtin);
      Witness witness = m_witnesses[builtin.index()];
@@ -69,7 +69,7 @@ index 22c5a2f2b6dd..fafa1961119d 100644
      }
      for (const BuiltinOverload& overload : m_builtins.overloadsOf(builtin))
          noteTypesThatOverloadMakes(overload, witness);
-@@ -2851,8 +2865,11 @@ Vector<FeatureUseRecord> FeaturesOfProgramFacts::run(std::span<const BuiltinUseR
+@@ -3310,8 +3324,11 @@ Vector<FeatureUseRecord> FeaturesOfProgramFacts::run(std::span<const BuiltinUseR
      m_codeMayRunWithoutNamesFromRunTime = m_codeMayRun;
      collectUses(uses, true);
      visitRowsThatWait();
@@ -82,7 +82,7 @@ index 22c5a2f2b6dd..fafa1961119d 100644
      sortRecordsAndMarkUnnamed();
      return WTF::move(m_records);
  }
-@@ -3379,7 +3396,7 @@ private:
+@@ -3839,7 +3856,7 @@ private:
      void followRequestsOfEvaluatedModules();
      void evaluate(ModuleID, const Witness&);
  
@@ -91,7 +91,7 @@ index 22c5a2f2b6dd..fafa1961119d 100644
      void lookThrough(BuiltinID canonicalHolder);
      void spreadBelow(BuiltinID canonicalHolder);
      void findMembersOffUnknownValues(BuiltinID canonicalHolder);
-@@ -3467,6 +3484,7 @@ private:
+@@ -3927,6 +3944,7 @@ private:
      BitVector m_isNamedByOperation;
      Vector<Witness> m_witnessesOfEscapes;
      BitVector m_isLetGo;
@@ -99,7 +99,7 @@ index 22c5a2f2b6dd..fafa1961119d 100644
      bool m_followsClimbsFromWhatIsLetGo { false };
      bool m_climberMayBeHandedWhatNobodyKnows { false };
      BitVector m_isOutOfSight;
-@@ -3598,6 +3616,7 @@ BuilderOfProgramFacts::BuilderOfProgramFacts(const InputsOfProgramFacts& inputs,
+@@ -4058,6 +4076,7 @@ BuilderOfProgramFacts::BuilderOfProgramFacts(const InputsOfProgramFacts& inputs,
      , m_program(tables.program)
      , m_isNamedByOperation(m_builtins.builtinCount())
      , m_isLetGo(m_builtins.builtinCount())
@@ -107,7 +107,7 @@ index 22c5a2f2b6dd..fafa1961119d 100644
      , m_isOutOfSight(m_builtins.builtinCount())
      , m_isCalledOutOfSightOfLink(m_builtins.builtinCount())
      , m_isCalledWithoutRow(m_builtins.builtinCount())
-@@ -4463,16 +4482,20 @@ void BuilderOfProgramFacts::noteEvaluated(ModuleID id)
+@@ -4926,16 +4945,20 @@ void BuilderOfProgramFacts::noteEvaluated(ModuleID id)
      followRequestsOfEvaluatedModules();
  }
  
@@ -132,7 +132,7 @@ index 22c5a2f2b6dd..fafa1961119d 100644
      m_holdersToSpreadBelow.append(canonical);
      lookThrough(canonical);
  }
-@@ -4486,9 +4509,10 @@ void BuilderOfProgramFacts::lookThrough(BuiltinID canonicalHolder)
+@@ -4949,9 +4972,10 @@ void BuilderOfProgramFacts::lookThrough(BuiltinID canonicalHolder)
  void BuilderOfProgramFacts::spreadBelow(BuiltinID canonicalHolder)
  {
      Witness witness = m_witnessesOfEscapes[canonicalHolder.index()];
@@ -144,7 +144,7 @@ index 22c5a2f2b6dd..fafa1961119d 100644
      if (defersMembersOf(canonicalHolder)) {
          m_hasDeferredMembers = true;
          return;
-@@ -4497,9 +4521,9 @@ void BuilderOfProgramFacts::spreadBelow(BuiltinID canonicalHolder)
+@@ -4960,9 +4984,9 @@ void BuilderOfProgramFacts::spreadBelow(BuiltinID canonicalHolder)
      for (BuiltinID member : m_builtins.membersOf(canonicalHolder)) {
          if (!handsOutEvents && m_rows.areEvents.quickGet(m_builtins.canonicalID(member).index()))
              continue;
@@ -156,7 +156,7 @@ index 22c5a2f2b6dd..fafa1961119d 100644
      }
  }
  
-@@ -4838,7 +4862,7 @@ void BuilderOfProgramFacts::listBuiltinUses()
+@@ -5301,7 +5325,7 @@ void BuilderOfProgramFacts::listBuiltinUses()
  
  Vector<BuiltinUseRecord> BuilderOfProgramFacts::usesWithWhatNobodyNamesAsEscaped() const
  {
@@ -165,7 +165,7 @@ index 22c5a2f2b6dd..fafa1961119d 100644
      BitVector isNamed = m_isSpelledInTexts;
      for (uint32_t index = 0; index < m_builtins.builtinCount(); ++index) {
          bool isNamedInBody = m_isNamedByOperation.quickGet(index) || m_uses[index].containsAny({ BuiltinUse::Written, BuiltinUse::StoredByName });
-@@ -6098,7 +6122,7 @@ void BuilderOfProgramFacts::settle()
+@@ -6561,7 +6585,7 @@ void BuilderOfProgramFacts::settle()
      }
      useBuiltinsThatHostHandsExportsTo();
      for (const BuiltinUsedAtStart& used : m_source.builtinsUsedAtStart)
@@ -175,12 +175,12 @@ index 22c5a2f2b6dd..fafa1961119d 100644
      if (m_source.admitsInspector) {
          add(m_program.unseenCode, UnseenCodeCause::OptionAdmitsCode, { }, noWitness);
 diff --git a/Source/JavaScriptCore/aot/ir/schema/compile-call.def b/Source/JavaScriptCore/aot/ir/schema/compile-call.def
-index 1c42b4470770..b49e22da4f57 100644
+index 5c247e616578..e94227d15bb5 100644
 --- a/Source/JavaScriptCore/aot/ir/schema/compile-call.def
 +++ b/Source/JavaScriptCore/aot/ir/schema/compile-call.def
-@@ -3,7 +3,7 @@ enum AccessCost { ByName TestsReceiver TestsSlot Free }
- enum AccessKind { Unknown Read Store Define Has Delete Call Construct Truthiness Equality Arithmetic Comparison Conversion TypeOf InstanceOf Iteration Spread }
+@@ -4,7 +4,7 @@ enum AccessKind { Unknown Read Store Define Has Delete Call Construct Truthiness
  enum UnprovenCause { Unknown UnknownObject UnknownCallee Untracked }
+ enum TypeOriginReason { Unknown Untracked BuiltinResult CallResult PropertyRead OutsideCaller ExposedObject ExposedVariable CaughtException OtherValue ArrayArgument OtherBuiltin OtherFunction ManyShapes ManyFunctions ChangedShape MissingField CheckedElement CheckedResult CheckedKeys StaticField BuiltinProperty ComputedName }
  enum UnseenCodeCause { Unknown EvaluatesText ImportsUncompiledModule LoadsModuleByName RunsUnseenCode OptionAdmitsCode FlowResultDisabled RunsMachineCode LoadsCodeByName }
 -flags BuiltinUse { Tested Read Called Constructed Written Escaped StoredByName NamedAtRunTime }
 +flags BuiltinUse { Tested Read Called Constructed Written Escaped StoredByName NamedAtRunTime UsedAtStart }
