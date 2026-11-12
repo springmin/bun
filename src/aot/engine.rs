@@ -34,7 +34,7 @@ use self::tests::{
     fake_apply_option_word as Bun__AOT__applyOptionWord,
     fake_initialize_options as Bun__AOT__initializeOptions,
 };
-pub use self::used_features::used_features;
+pub use self::used_features::{used_features, used_features_of_program};
 use crate::emit::{ExternalBodies, ExternalFunctionBodies, ProgramBytes};
 pub use crate::ir::generated::{
     AccessCountRecord, AccessRecord, AllocationRemarkRecord, BuiltinUseRecord, FeatureUseRecord,

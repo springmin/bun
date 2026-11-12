@@ -8,7 +8,7 @@ use bun_trim::{
 use super::format::write_parts;
 use super::positions::{PathStyle, Positions, write_shown_position};
 use super::wording::{trim_blocker_code, unseen_code_sentence};
-use super::{ReportEntry, ReportInput};
+use super::{ModuleOrigin, ReportEntry, ReportInput, SourceTexts};
 use crate::builtins::BuiltinId;
 use crate::builtins::table::{self, BuiltinKind};
 use crate::engine::{
@@ -40,7 +40,7 @@ pub(super) fn collect(input: &ReportInput<'_>, out: &mut Vec<ReportEntry>) {
         ]);
         out.push(entry_at(line, None));
     }
-    let items = item_lines(input.engine.builtins_used());
+    let items = item_lines(input.engine.builtins_used(), input.texts);
     out.extend(items.into_iter().map(|line| entry_at(line, None)));
     out.push(locale_line(input, &mut positions));
     match input.decision {
@@ -110,6 +110,9 @@ fn find_removed_but_reachable<'a>(
     let mut seen = FeatureSet::EMPTY;
     let mut found = Vec::new();
     for record in input.engine.features_used() {
+        if skips_feature_record(input, record) {
+            continue;
+        }
         let Some(feature) = feature_of(record.feature) else {
             continue;
         };
@@ -195,9 +198,63 @@ fn cause_lines(
     run_time_name_lines(reachable, positions, out);
 }
 
-fn item_lines(records: &[BuiltinUseRecord]) -> Vec<Vec<u8>> {
+#[cfg(target_env = "ohos")]
+fn skips_builtin_record(texts: &SourceTexts, record: &BuiltinUseRecord) -> bool {
+    // The host linked this one while the realm started; the program does not
+    // use it.
+    if record.uses.contains(BuiltinUse::USED_AT_START)
+        && record
+            .uses
+            .without(BuiltinUse::TESTED | BuiltinUse::USED_AT_START)
+            .is_empty()
+    {
+        return true;
+    }
+    let Some(module) = record.witness.location.module_id() else {
+        return true;
+    };
+    is_internal_builtin(record.builtin) || matches!(texts.origin(module), ModuleOrigin::Runtime)
+}
+
+#[cfg(not(target_env = "ohos"))]
+fn skips_builtin_record(_: &SourceTexts, _: &BuiltinUseRecord) -> bool {
+    false
+}
+
+#[cfg(target_env = "ohos")]
+fn skips_feature_record(input: &ReportInput<'_>, record: &FeatureUseRecord) -> bool {
+    if input.options.trim.checks_only {
+        return false;
+    }
+    let Some(module) = record.witness.location.module_id() else {
+        return true;
+    };
+    is_internal_builtin(record.builtin) || matches!(input.texts.origin(module), ModuleOrigin::Runtime)
+}
+
+#[cfg(not(target_env = "ohos"))]
+fn skips_feature_record(_: &ReportInput<'_>, _: &FeatureUseRecord) -> bool {
+    false
+}
+
+#[cfg(target_env = "ohos")]
+fn is_internal_builtin(builtin: u32) -> bool {
+    let Some(id) = builtin_of(builtin) else {
+        return false;
+    };
+    let Some(module) = table::entry(id).module else {
+        return false;
+    };
+    let specifier = table::module_data(module).specifier;
+    specifier.starts_with("internal:") || specifier.starts_with("$bun")
+}
+
+fn item_lines(records: &[BuiltinUseRecord], texts: &SourceTexts) -> Vec<Vec<u8>> {
     let mut items = Vec::new();
     for record in records {
+        if skips_builtin_record(texts, record) {
+            continue;
+        }
         let Some(id) = builtin_of(record.builtin) else {
             continue;
         };
@@ -296,6 +353,20 @@ fn feature_lines(
     out: &mut Vec<ReportEntry>,
 ) {
     for &Retained { feature, reason } in &decision.retained {
+        // A check keeps the source text so it can link the built-ins that a
+        // realm starts with; the report is about the program, which does not
+        // use it. An executable gets their code from its image instead. A
+        // program that does use it keeps the line.
+        if feature == Feature::BuiltinSourceText
+            && input.options.trim.checks_only
+            && matches!(reason, RetainReason::NotRequested)
+        {
+            let mut line = line_from(&[b"removed "]);
+            write_feature(&mut line, Feature::BuiltinSourceText);
+            line.extend_from_slice(b": unused");
+            out.push(entry_at(line, None));
+            continue;
+        }
         let mut line = line_from(&[b"kept "]);
         write_feature(&mut line, feature);
         line.extend_from_slice(b": ");

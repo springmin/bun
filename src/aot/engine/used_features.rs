@@ -10,6 +10,7 @@ use super::{
 };
 use crate::builtins::id::{BuiltinId, Feature};
 use crate::ir::generated::{FeatureUseKind, LocaleUseKind, UnseenCodeCause as EngineCause};
+use crate::report::{ModuleOrigin, SourceTexts};
 
 pub fn used_features(result: &EngineResult) -> UsedFeatures {
     if result.image().is_none() {
@@ -21,6 +22,49 @@ pub fn used_features(result: &EngineResult) -> UsedFeatures {
         result.locales_used(),
         &|range| result.text(range).to_vec(),
     )
+}
+
+fn is_internal_builtin(builtin: u32) -> bool {
+    let Some(id) = builtin_of(builtin) else {
+        return false;
+    };
+    let Some(module) = crate::builtins::table::entry(id).module else {
+        return false;
+    };
+    let specifier = crate::builtins::table::module_data(module).specifier;
+    specifier.starts_with("internal:") || specifier.starts_with("$bun")
+}
+
+/// The uses of the program alone: a feature or a cause whose place is in the
+/// library is the host's, not the program's.
+pub fn used_features_of_program(result: &EngineResult, texts: &SourceTexts) -> UsedFeatures {
+    let mut used = used_features(result);
+    let is_in_program = |witness: &super::SourceLocation| {
+        witness
+            .module_id()
+            .is_some_and(|module| !matches!(texts.origin(module), ModuleOrigin::Runtime))
+    };
+    used.features.retain(|used| {
+        used.witness.is_some_and(|index| {
+            result
+                .features_used()
+                .get(index.0 as usize)
+                .is_some_and(|record| {
+                    !is_internal_builtin(record.builtin) && is_in_program(&record.witness.location)
+                })
+        })
+    });
+    used.causes.retain(|cause| {
+        cause.witness.is_some_and(|index| {
+            result
+                .unseen_code()
+                .get(index.0 as usize)
+                .is_some_and(|record| {
+                    !is_internal_builtin(record.builtin) && is_in_program(&record.witness.location)
+                })
+        })
+    });
+    used
 }
 
 fn from_records(

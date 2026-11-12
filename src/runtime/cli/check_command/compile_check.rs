@@ -120,6 +120,7 @@ fn set_compile_context(ctx: &mut ContextData, options: &Options, cwd: &[u8]) {
     aot.code_generation_from_strings =
         compile_options::code_generation_from_strings(exec_argv.as_deref().unwrap_or_default());
     aot.trim.removes_unused = options.trim || explain.contains(ExplainSet::RUNTIME_USE);
+    aot.trim.checks_only = true;
     bundler_options.compile_exec_argv = exec_argv;
     bundler_options.aot = Some(Box::new(aot));
 }

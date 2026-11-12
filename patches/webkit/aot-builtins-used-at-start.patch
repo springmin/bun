@@ -1,0 +1,189 @@
+diff --git a/Source/JavaScriptCore/aot/facts/AOTFactsOfProgram.cpp b/Source/JavaScriptCore/aot/facts/AOTFactsOfProgram.cpp
+index 22c5a2f2b6dd..fafa1961119d 100644
+--- a/Source/JavaScriptCore/aot/facts/AOTFactsOfProgram.cpp
++++ b/Source/JavaScriptCore/aot/facts/AOTFactsOfProgram.cpp
+@@ -2355,7 +2355,7 @@ public:
+     Vector<FeatureUseRecord> run(std::span<const BuiltinUseRecord>);
+ 
+ private:
+-    static constexpr OptionSet<BuiltinUse> usesThatNameNothing { BuiltinUse::Tested, BuiltinUse::Escaped };
++    static constexpr OptionSet<BuiltinUse> usesThatNameNothing { BuiltinUse::Tested, BuiltinUse::Escaped, BuiltinUse::UsedAtStart };
+ 
+     void collectUses(std::span<const BuiltinUseRecord>, bool namedAtRunTime);
+     void visitRowsThatWait();
+@@ -2401,6 +2401,7 @@ private:
+     BitVector m_makersNameFeatures;
+     BitVector m_makersNameFeaturesOfConstructor;
+     BitVector m_isLetGo;
++    BitVector m_isUsedAtStart;
+     BitVector m_isBoundAtSite;
+     Vector<FeatureUseRecord> m_records;
+ };
+@@ -2417,6 +2418,7 @@ FeaturesOfProgramFacts::FeaturesOfProgramFacts(const InputsOfProgramFacts& input
+     , m_unseenCodeMayRun(unseenCodeMayRun)
+     , m_isNamed(m_builtins.builtinCount())
+     , m_codeMayRun(m_builtins.builtinCount())
++    , m_isUsedAtStart(m_builtins.builtinCount())
+     , m_madeClasses(m_builtins.classCount())
+ {
+     m_witnesses.fill(noWitness, m_builtins.builtinCount());
+@@ -2458,6 +2460,9 @@ void FeaturesOfProgramFacts::collectUses(std::span<const BuiltinUseRecord> recor
+         if ((uses - OptionSet<BuiltinUse> { BuiltinUse::Tested }).isEmpty())
+             continue;
+         noteCodeMayRun(builtin, record.witness);
++        if (uses.contains(BuiltinUse::UsedAtStart)
++            && (uses - OptionSet<BuiltinUse> { BuiltinUse::Tested, BuiltinUse::UsedAtStart }).isEmpty())
++            m_isUsedAtStart.set(builtin.index());
+         if (uses.contains(BuiltinUse::Escaped))
+             m_isLetGo.set(builtin.index());
+         if (namedAtRunTime || (uses - usesThatNameNothing).isEmpty())
+@@ -2728,18 +2733,27 @@ void FeaturesOfProgramFacts::visitRow(BuiltinID builtin)
+ {
+     const Builtin& entry = m_builtins.at(builtin);
+     Witness witness = m_witnesses[builtin.index()];
++    bool usedAtStart = m_isUsedAtStart.get(builtin.index());
+     BuiltinID prototype = entry.kind == BuiltinKind::Prototype ? builtin : BuiltinID();
+     if ((entry.kind == BuiltinKind::Method || entry.kind == BuiltinKind::Accessor) && entry.holder)
+         prototype = m_builtins.canonicalID(entry.holder);
+     bool makersRoot = !!classWhoseMakersRoot(builtin);
+     if (prototype && (!makersRoot || isNamedByStatement(prototype))) {
+-        if (BuiltinClassID owner = m_classOfPrototype[prototype.index()])
+-            noteCodeMayRun(entryWithFeaturesOf(owner), witness);
++        if (BuiltinClassID owner = m_classOfPrototype[prototype.index()]) {
++            BuiltinID entryOfOwner = entryWithFeaturesOf(owner);
++            noteCodeMayRun(entryOfOwner, witness);
++            if (usedAtStart)
++                m_isUsedAtStart.set(entryOfOwner.index());
++        }
+     }
+     if (!makersRoot && (entry.kind == BuiltinKind::Function || entry.kind == BuiltinKind::Accessor || entry.kind == BuiltinKind::Prototype) && entry.holder) {
+         const Builtin& holder = m_builtins.at(m_builtins.canonicalID(entry.holder));
+-        if (holder.kind == BuiltinKind::Constructor && !holder.flags.contains(BuiltinFlag::EvaluatesText))
+-            noteCodeMayRun(m_builtins.canonicalID(entry.holder), witness);
++        if (holder.kind == BuiltinKind::Constructor && !holder.flags.contains(BuiltinFlag::EvaluatesText)) {
++            BuiltinID holderID = m_builtins.canonicalID(entry.holder);
++            noteCodeMayRun(holderID, witness);
++            if (usedAtStart)
++                m_isUsedAtStart.set(holderID.index());
++        }
+     }
+     for (const BuiltinOverload& overload : m_builtins.overloadsOf(builtin))
+         noteTypesThatOverloadMakes(overload, witness);
+@@ -2851,8 +2865,11 @@ Vector<FeatureUseRecord> FeaturesOfProgramFacts::run(std::span<const BuiltinUseR
+     m_codeMayRunWithoutNamesFromRunTime = m_codeMayRun;
+     collectUses(uses, true);
+     visitRowsThatWait();
+-    for (size_t index : m_codeMayRun)
++    for (size_t index : m_codeMayRun) {
++        if (m_isUsedAtStart.get(index))
++            continue;
+         appendRecordsOf(BuiltinID(static_cast<uint32_t>(index)));
++    }
+     sortRecordsAndMarkUnnamed();
+     return WTF::move(m_records);
+ }
+@@ -3379,7 +3396,7 @@ private:
+     void followRequestsOfEvaluatedModules();
+     void evaluate(ModuleID, const Witness&);
+ 
+-    void letGo(BuiltinID canonical, const Witness&);
++    void letGo(BuiltinID canonical, const Witness&, bool atStart = false);
+     void lookThrough(BuiltinID canonicalHolder);
+     void spreadBelow(BuiltinID canonicalHolder);
+     void findMembersOffUnknownValues(BuiltinID canonicalHolder);
+@@ -3467,6 +3484,7 @@ private:
+     BitVector m_isNamedByOperation;
+     Vector<Witness> m_witnessesOfEscapes;
+     BitVector m_isLetGo;
++    BitVector m_isUsedAtStart;
+     bool m_followsClimbsFromWhatIsLetGo { false };
+     bool m_climberMayBeHandedWhatNobodyKnows { false };
+     BitVector m_isOutOfSight;
+@@ -3598,6 +3616,7 @@ BuilderOfProgramFacts::BuilderOfProgramFacts(const InputsOfProgramFacts& inputs,
+     , m_program(tables.program)
+     , m_isNamedByOperation(m_builtins.builtinCount())
+     , m_isLetGo(m_builtins.builtinCount())
++    , m_isUsedAtStart(m_builtins.builtinCount())
+     , m_isOutOfSight(m_builtins.builtinCount())
+     , m_isCalledOutOfSightOfLink(m_builtins.builtinCount())
+     , m_isCalledWithoutRow(m_builtins.builtinCount())
+@@ -4463,16 +4482,20 @@ void BuilderOfProgramFacts::noteEvaluated(ModuleID id)
+     followRequestsOfEvaluatedModules();
+ }
+ 
+-void BuilderOfProgramFacts::letGo(BuiltinID canonical, const Witness& witness)
++void BuilderOfProgramFacts::letGo(BuiltinID canonical, const Witness& witness, bool atStart)
+ {
+     uint32_t index = canonical.index();
+     bool isLower = isPreferredWitness(witness, m_witnessesOfEscapes[index]);
+-    if (m_isLetGo.quickSet(index) && !isLower)
++    if (atStart) {
++        if (m_isUsedAtStart.quickSet(index))
++            return;
++    } else if (m_isLetGo.quickSet(index) && !isLower)
+         return;
+     if (isLower)
+         m_witnessesOfEscapes[index] = witness;
+-    m_uses[index].add(BuiltinUse::Escaped);
+-    keepPlaceOf(canonical, m_witnesses[index], witness);
++    m_uses[index].add(atStart ? BuiltinUse::UsedAtStart : BuiltinUse::Escaped);
++    if (!atStart)
++        keepPlaceOf(canonical, m_witnesses[index], witness);
+     m_holdersToSpreadBelow.append(canonical);
+     lookThrough(canonical);
+ }
+@@ -4486,9 +4509,10 @@ void BuilderOfProgramFacts::lookThrough(BuiltinID canonicalHolder)
+ void BuilderOfProgramFacts::spreadBelow(BuiltinID canonicalHolder)
+ {
+     Witness witness = m_witnessesOfEscapes[canonicalHolder.index()];
++    bool atStart = m_isUsedAtStart.get(canonicalHolder.index());
+     const Builtin& holder = m_builtins.at(canonicalHolder);
+     if (m_followsClimbsFromWhatIsLetGo && holder.prototypeLink == BuiltinPrototypeLink::Builtin && holder.inheritsFrom)
+-        letGo(m_builtins.canonicalID(holder.inheritsFrom), witness);
++        letGo(m_builtins.canonicalID(holder.inheritsFrom), witness, atStart);
+     if (defersMembersOf(canonicalHolder)) {
+         m_hasDeferredMembers = true;
+         return;
+@@ -4497,9 +4521,9 @@ void BuilderOfProgramFacts::spreadBelow(BuiltinID canonicalHolder)
+     for (BuiltinID member : m_builtins.membersOf(canonicalHolder)) {
+         if (!handsOutEvents && m_rows.areEvents.quickGet(m_builtins.canonicalID(member).index()))
+             continue;
+-        m_uses[member.index()].add(BuiltinUse::Escaped);
++        m_uses[member.index()].add(atStart ? BuiltinUse::UsedAtStart : BuiltinUse::Escaped);
+         keepLowerWitnessInProgramFacts(m_witnesses[member.index()], witness);
+-        letGo(m_builtins.canonicalID(member), witness);
++        letGo(m_builtins.canonicalID(member), witness, atStart);
+     }
+ }
+ 
+@@ -4838,7 +4862,7 @@ void BuilderOfProgramFacts::listBuiltinUses()
+ 
+ Vector<BuiltinUseRecord> BuilderOfProgramFacts::usesWithWhatNobodyNamesAsEscaped() const
+ {
+-    static constexpr OptionSet<BuiltinUse> usesThatNameNothing { BuiltinUse::Tested, BuiltinUse::Escaped };
++    static constexpr OptionSet<BuiltinUse> usesThatNameNothing { BuiltinUse::Tested, BuiltinUse::Escaped, BuiltinUse::UsedAtStart };
+     BitVector isNamed = m_isSpelledInTexts;
+     for (uint32_t index = 0; index < m_builtins.builtinCount(); ++index) {
+         bool isNamedInBody = m_isNamedByOperation.quickGet(index) || m_uses[index].containsAny({ BuiltinUse::Written, BuiltinUse::StoredByName });
+@@ -6098,7 +6122,7 @@ void BuilderOfProgramFacts::settle()
+     }
+     useBuiltinsThatHostHandsExportsTo();
+     for (const BuiltinUsedAtStart& used : m_source.builtinsUsedAtStart)
+-        letGo(m_builtins.canonicalID(used.builtin), noWitness);
++        letGo(m_builtins.canonicalID(used.builtin), noWitness, true);
+ 
+     if (m_source.admitsInspector) {
+         add(m_program.unseenCode, UnseenCodeCause::OptionAdmitsCode, { }, noWitness);
+diff --git a/Source/JavaScriptCore/aot/ir/schema/compile-call.def b/Source/JavaScriptCore/aot/ir/schema/compile-call.def
+index 1c42b4470770..b49e22da4f57 100644
+--- a/Source/JavaScriptCore/aot/ir/schema/compile-call.def
++++ b/Source/JavaScriptCore/aot/ir/schema/compile-call.def
+@@ -3,7 +3,7 @@ enum AccessCost { ByName TestsReceiver TestsSlot Free }
+ enum AccessKind { Unknown Read Store Define Has Delete Call Construct Truthiness Equality Arithmetic Comparison Conversion TypeOf InstanceOf Iteration Spread }
+ enum UnprovenCause { Unknown UnknownObject UnknownCallee Untracked }
+ enum UnseenCodeCause { Unknown EvaluatesText ImportsUncompiledModule LoadsModuleByName RunsUnseenCode OptionAdmitsCode FlowResultDisabled RunsMachineCode LoadsCodeByName }
+-flags BuiltinUse { Tested Read Called Constructed Written Escaped StoredByName NamedAtRunTime }
++flags BuiltinUse { Tested Read Called Constructed Written Escaped StoredByName NamedAtRunTime UsedAtStart }
+ enum FeatureUseKind { Named Unnamed NamedAtRunTime FoundByName }
+ enum LocaleUseKind { Unknown HostDefault Constant }
+ enum TypeTestFailure { TakesGenericPath Throws ExitsToSlowVersion }

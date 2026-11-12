@@ -9,6 +9,7 @@ use crate::Opaque;
 use crate::linked;
 pub use crate::linked::{
     bun_aot_check_option_word as check_option_word, bun_aot_used_features as used_features,
+    bun_aot_used_features_of_program as used_features_of_program,
 };
 
 #[inline(always)]

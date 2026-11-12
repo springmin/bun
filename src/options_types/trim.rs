@@ -10,6 +10,8 @@ pub struct TrimRequest {
     pub logs: bool,
     /// The result is what other executables are built on: it keeps all that a program can ask for, and can be trimmed again.
     pub is_template: bool,
+    /// `bun check --aot` and `bun run --aot`: the program is compiled for its report alone. The source text stays so a check can link the built-ins that a realm starts from, and an executable gets their code from its image instead.
+    pub checks_only: bool,
 }
 
 impl TrimRequest {

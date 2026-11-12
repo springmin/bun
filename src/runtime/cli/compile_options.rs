@@ -595,6 +595,7 @@ fn resolve_trim<'a>(flags: &CompileFlags<'a>) -> Result<TrimRequest, OptionError
             .map(|tags| tags.iter().map(|tag| Box::from(*tag)).collect()),
         logs: trim.logs,
         is_template: trim.is_template,
+        checks_only: false,
     })
 }
 
@@ -914,7 +915,13 @@ pub(crate) fn parse_build_flags(cmd: Tag, args: &clap::Args<clap::Help>, ctx: Co
     };
     apply_code_generation_flag(args, &mut *ctx, origin);
 
-    let settings = match resolve(&read_build_flags(cmd, args, &ctx)) {
+    let flags = read_build_flags(cmd, args, &ctx);
+    // `bun check --aot` and `bun run --aot` write no executable: they compile
+    // the program for its report alone. `bun test --aot` and every `--compile`
+    // build do write one, and their image carries the built-ins that a realm
+    // starts.
+    let checks_only = !flags.is_executable && cmd != Tag::TestCommand;
+    let settings = match resolve(&flags) {
         Ok(settings) => settings,
         Err(error) => exit_with_error(&error, origin),
     };
@@ -923,6 +930,9 @@ pub(crate) fn parse_build_flags(cmd: Tag, args: &clap::Args<clap::Help>, ctx: Co
         options.compile_autoload_bunfig = false;
     }
     options.aot = settings.aot;
+    if let Some(aot) = options.aot.as_mut() {
+        aot.trim.checks_only = checks_only;
+    }
     options.trim = settings.trim;
 }
 

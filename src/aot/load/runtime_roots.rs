@@ -46,7 +46,16 @@ pub(crate) fn builtins_used_at_start(options: &AotOptions) -> Vec<BuiltinId> {
     };
     let features = options.features_of_embedded_options.iter();
     let warnings = (options.warns_of_rejections).then_some(BuiltinId::WarningsOfRejections);
-    features.filter_map(read_for).chain(warnings).collect()
+    let mut used: Vec<BuiltinId> = features.filter_map(read_for).chain(warnings).collect();
+    // An executable compiles the built-ins that a realm may link at start:
+    // with the source text trimmed, their code has to be in its image. A
+    // check, and a build that leaves the library out, links them from the
+    // text, which its image keeps.
+    #[cfg(target_env = "ohos")]
+    if !options.trim.checks_only && !options.omits_builtin_modules {
+        used.extend(BuiltinId::ALL);
+    }
+    used
 }
 
 pub(crate) fn uses_of_what_start_reads(

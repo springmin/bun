@@ -28,6 +28,7 @@ bun_aot_interface::define_linked_functions! {
     fn bun_aot_parse_json<'s>(_text: &[u8], _arena: &'s Arena, _atoms: &Interner<'s>) -> Option<&'s DataValue<'s>> { absent() }
     fn bun_aot_check_option_word(_earlier_words: &[Box<[u8]>], _word: &[u8]) -> Result<(), RejectedOptionWord> { Ok(()) }
     fn bun_aot_used_features(_result: &EngineResult) -> UsedFeatures { absent() }
+    fn bun_aot_used_features_of_program(_result: &EngineResult, _texts: &bun_aot_interface::report::SourceTexts) -> UsedFeatures { absent() }
     fn bun_aot_image(_result: &EngineResult) -> Option<&[u8]> { absent() }
     fn bun_aot_image_mut_and_symbols(_result: &mut EngineResult) -> (Option<&mut [u8]>, &[u8]) { absent() }
     fn bun_aot_entry_module_ids(_result: &EngineResult) -> &[EngineModuleId] { absent() }

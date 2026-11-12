@@ -94,6 +94,10 @@ interface::define_linked_functions! {
         engine::used_features(result.0.get())
     }
 
+    fn bun_aot_used_features_of_program(result: &interface::engine::EngineResult, texts: &interface::report::SourceTexts) -> UsedFeatures {
+        engine::used_features_of_program(result.0.get(), texts.0.get())
+    }
+
     fn bun_aot_image(result: &interface::engine::EngineResult) -> Option<&[u8]> {
         result.0.get::<EngineResult>().image()
     }

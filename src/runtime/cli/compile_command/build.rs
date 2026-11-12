@@ -1,6 +1,6 @@
 use bun_aot::engine::{
     EngineModuleId, ExecutableIdentity, TargetImageForm, describe_difference_of_runtime,
-    has_compiler, image_alignment, used_features,
+    has_compiler, image_alignment, used_features, used_features_of_program,
 };
 use bun_aot::statistics::{log_part_outside_stages, log_time_outside_stages};
 use bun_ast::Loader;
@@ -96,7 +96,24 @@ pub(crate) fn compile_to_executable(
     // With =strict a Worker runs nothing but compiled code.
     used.starts_workers_from_unseen_code = build.starts_workers_from_unseen_code
         && options.code_generation_from_strings != CodeGenerationFromStrings::Strict;
+    let reported = (cfg!(target_env = "ohos")
+        && !options.trim.checks_only
+        && !options.omits_builtin_modules)
+        .then(|| {
+        let mut reported = used_features_of_program(&build.engine, &build.texts);
+        reported.starts_workers_from_unseen_code = used.starts_workers_from_unseen_code;
+        reported
+    });
     let trimming = trimming::decide_trimming(request, &used)?;
+    let report_used = reported.as_ref().unwrap_or(&used);
+    let report_trimming = if reported.is_some()
+        && options.explain.contains(bun_options_types::aot_options::ExplainSet::RUNTIME_USE)
+    {
+        Some(trimming::decide_trimming(request, report_used)?)
+    } else {
+        None
+    };
+    let report_trimming = report_trimming.as_ref().unwrap_or(&trimming);
     let untrimmed_outfile = bun_core::env_var::BUN_DEBUG_TEST_UNTRIMMED_OUTFILE
         .get_not_empty()
         .filter(|_| options.trim.removes_unused);
@@ -106,7 +123,7 @@ pub(crate) fn compile_to_executable(
     };
     log_part_outside_stages("behind the engine: used features, trimming");
     let mut outcome =
-        reports::collect_reports(&build, options, &used, &trimming, compiler_called_at);
+        reports::collect_reports(&build, options, report_used, report_trimming, compiler_called_at);
     log_part_outside_stages("behind the engine: reports");
 
     let outfile = match request.product {

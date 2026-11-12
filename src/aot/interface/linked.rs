@@ -47,6 +47,7 @@ linked_functions! {
     pub(crate) fn bun_aot_parse_json<'s>(text: &[u8], arena: &'s Arena, atoms: &Interner<'s>) -> Option<&'s DataValue<'s>>;
     pub fn bun_aot_check_option_word(earlier_words: &[Box<[u8]>], word: &[u8]) -> Result<(), RejectedOptionWord>;
     pub fn bun_aot_used_features(result: &EngineResult) -> UsedFeatures;
+    pub fn bun_aot_used_features_of_program(result: &EngineResult, texts: &crate::report::SourceTexts) -> UsedFeatures;
     pub(crate) fn bun_aot_image(result: &EngineResult) -> Option<&[u8]>;
     pub(crate) fn bun_aot_image_mut_and_symbols(result: &mut EngineResult) -> (Option<&mut [u8]>, &[u8]);
     pub(crate) fn bun_aot_entry_module_ids(result: &EngineResult) -> &[EngineModuleId];
