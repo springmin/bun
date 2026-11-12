@@ -6,7 +6,9 @@ use bun_sema::resolve::ExternalKind;
 use bun_sema::util::{FxHashSet, SharedSort};
 
 use crate::builtins::runtime_uses::Mentions;
-use crate::builtins::table::{ModuleFlags, module_by_specifier, module_data, runtime_function};
+use crate::builtins::table::{
+    ModuleFlags, Origin, entry, module_by_specifier, module_data, runtime_function,
+};
 use crate::builtins::{
     AsksOfText, BuiltinId, Platforms, RuntimeFunction, RuntimeModule, RuntimeUses,
 };
@@ -53,7 +55,14 @@ pub(crate) fn builtins_used_at_start(options: &AotOptions) -> Vec<BuiltinId> {
     // text, which its image keeps.
     #[cfg(target_env = "ohos")]
     if !options.trim.checks_only && !options.omits_builtin_modules {
-        used.extend(BuiltinId::ALL);
+        // The engine's built-ins are the language that a realm starts with.
+        // A host built-in that the program names comes in through its own
+        // use, so it does not have to stand here.
+        used.extend(
+            BuiltinId::ALL
+                .into_iter()
+                .filter(|&builtin| entry(builtin).origin == Origin::Engine),
+        );
     }
     used
 }
