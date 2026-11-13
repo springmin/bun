@@ -243,8 +243,10 @@ impl Checker<'_, '_> {
         if self.task.file != Some(file) {
             self.flow_memo.let_kept_walks_go();
         }
+        self.recent_symbol_types.begin_visit();
         self.task
             .begin_file(file, !self.files().module(file).is_leaf);
+        self.note_visited_module(file);
         self.provisional.clear();
         self.rejected_expressions.clear();
         self.side_effect_free.get_mut().clear();
@@ -489,7 +491,7 @@ impl Checker<'_, '_> {
         }
         let hir = self.hir(d.file);
         // What a string holds is the run's. The tree may be gone before the build sorts what it reports.
-        if hir.is_in_known_evaluation(d.start) {
+        if hir.is_in_known_evaluation(d.start) || hir.is_in_copied_factory(d.start) {
             return None;
         }
         let is_unconditional = self.is_unconditional_error(&d);

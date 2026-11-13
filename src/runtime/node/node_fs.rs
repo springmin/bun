@@ -372,10 +372,16 @@ fn graph_after_disk(path: &[u8]) -> Option<&'static bun_standalone_graph::Graph>
     compiled_program_graph().filter(|_| !bun_standalone_graph::is_bun_standalone_file_path(path))
 }
 
-/// For what may remove files of the program, also half of a folder: a process that it starts, or a removal of its own.
+/// For a removal by the program, which may remove files of its own, also half of a folder.
 pub(crate) fn note_found_on_disk() {
     if let Some(graph) = compiled_program_graph() {
         graph.note_found_on_disk();
+    }
+}
+
+pub(crate) fn note_process_start() {
+    if let Some(graph) = compiled_program_graph() {
+        graph.note_process_start();
     }
 }
 
@@ -461,17 +467,17 @@ fn holds_more_than_disk(path: &[u8]) -> bool {
     })
 }
 
-/// What is at `path` can't be renamed over: a folder that the executable holds, or holds more of than the disk.
+/// Whether a rename over `path` is refused: the executable has a folder there, or more of it than the disk has.
 fn refuses_rename_over(path: &[u8]) -> bool {
     holds_more_than_disk(path) || is_embedded_folder(path)
 }
 
-/// Whether the executable holds a folder at `path` that the disk does not have.
+/// Whether `path` is a folder of the executable that is not on disk.
 fn is_embedded_folder(path: &[u8]) -> bool {
     graph_after_disk(path).is_some_and(|graph| graph.may_answer_for(path) && graph.find_dir(path))
 }
 
-/// As `rename()` refuses, for what the shell moves, which is relative to its folders.
+/// The same refusal as `rename()`'s for `mv` in the shell, whose operands are relative to its working directory.
 pub(crate) fn refuse_move(from: (FD, &[u8]), to: (FD, &[u8])) -> Option<sys::Error> {
     compiled_program_graph()?;
     let resolve = |(folder, name): (FD, &[u8])| {
@@ -514,10 +520,40 @@ pub(crate) fn note_opened_for_write(path: &[u8], is_whole: bool) {
         && bun_standalone_graph::has_descriptors()
         && let Some(graph) = graph_after_disk(path).filter(|graph| graph.may_answer_for(path))
     {
-        graph.move_descriptors_to_disk(path);
+        graph.move_descriptors_to_disk(path, VirtualMachine::get_or_null().is_some());
     }
     #[cfg(windows)]
     let _ = is_whole;
+}
+
+/// As `note_opened_for_write`, for a file or a folder that was copied. macOS clones a folder whole.
+fn note_copied(path: &[u8]) {
+    note_opened_for_write(path, true);
+    #[cfg(target_os = "macos")]
+    if let Some(graph) = compiled_program_graph() {
+        for file in graph.find_files_on_disk_below(path) {
+            note_opened_for_write(&file, true);
+        }
+    }
+}
+
+/// As `read()`, of what may be open of an embedded file.
+pub(crate) fn read_descriptor(fd: FD, buffer: &mut [u8]) -> Maybe<usize> {
+    #[cfg(not(windows))]
+    return bun_standalone_graph::read_descriptor(fd, || Syscall::read(fd, buffer));
+    #[cfg(windows)]
+    Syscall::read(fd, buffer)
+}
+
+/// In front of each call of `node:fs` and behind each that a thread of the pool has made.
+#[inline]
+pub(crate) fn move_waiting_descriptors() {
+    #[cfg(not(windows))]
+    if bun_standalone_graph::has_waiting_descriptors()
+        && let Some(graph) = compiled_program_graph()
+    {
+        graph.move_waiting_descriptors();
+    }
 }
 
 /// EEXIST for what would make `path`, where the executable holds a file that is not on the disk. A folder that it holds may be made there: whoever writes into it needs it.
@@ -547,7 +583,7 @@ fn has_folder_on_disk(path: &[u8]) -> bool {
     bun_paths::dirname(strings::without_trailing_slash(path)).is_none_or(sys::exists)
 }
 
-/// For every open that writes: the executable is read-only, EEXIST for one that must make a file that it holds, and EISDIR where it holds a folder.
+/// Called by every open that writes. The executable is read-only. An open that must create a file of the executable fails with EEXIST, and one of a folder with EISDIR.
 pub(crate) fn refuse_open_for_write(path: &[u8], flags: i32) -> Option<sys::Error> {
     if flags & FLAGS_OF_WRITES == 0 {
         return None;
@@ -570,7 +606,7 @@ pub(crate) fn is_embedded_source_file(path: &[u8]) -> bool {
         .is_some_and(|graph| graph.may_answer_for(path) && graph.contains_file(path))
 }
 
-/// As `refuse_open_for_write`, for the file of a redirect of the shell, which is relative to the shell's working directory.
+/// `refuse_open_for_write` for the file of a shell redirect, which is relative to the shell's working directory.
 pub(crate) fn refuse_shell_redirect(cwd: &[u8], file: &[u8], flags: i32) -> Maybe<()> {
     match refuse_open_for_write(&resolve_shell_operand(cwd, file), flags) {
         Some(error) => Err(error),
@@ -578,7 +614,7 @@ pub(crate) fn refuse_shell_redirect(cwd: &[u8], file: &[u8], flags: i32) -> Mayb
     }
 }
 
-/// As `note_opened_for_write`, for the same.
+/// `note_opened_for_write` for the file of a shell redirect.
 pub(crate) fn note_shell_redirect(cwd: &[u8], file: &[u8], flags: i32) {
     if flags & FLAGS_OF_WRITES != 0 {
         let path = resolve_shell_operand(cwd, file);
@@ -1438,7 +1474,7 @@ mod _async_tasks {
                         let task_ptr: *mut Self = task;
                         task.global_object()
                             .bun_vm()
-                            .event_loop_mut()
+                            .event_loop()
                             .enqueue_task(bun_jsc::Task::init(task_ptr));
                         return task.completion.value();
                     }
@@ -1569,7 +1605,7 @@ mod _async_tasks {
                         let task_ptr: *mut Self = task;
                         task.global_object()
                             .bun_vm()
-                            .event_loop_mut()
+                            .event_loop()
                             .enqueue_task(bun_jsc::Task::init(task_ptr));
                         return task.completion.value();
                     }
@@ -1635,7 +1671,7 @@ mod _async_tasks {
             let this_ptr: *mut Self = this;
             this.global_object()
                 .bun_vm()
-                .event_loop_mut()
+                .event_loop()
                 .enqueue_task(bun_jsc::Task::init(this_ptr));
         }
 
@@ -1656,7 +1692,7 @@ mod _async_tasks {
             let this_ptr: *mut Self = this;
             this.global_object()
                 .bun_vm()
-                .event_loop_mut()
+                .event_loop()
                 .enqueue_task(bun_jsc::Task::init(this_ptr));
         }
 
@@ -2124,7 +2160,7 @@ mod _async_tasks {
         }
 
         fn call(global: &JSGlobalObject, callback: JSValue, arguments: &[JSValue]) {
-            global.bun_vm().event_loop_mut().run_callback(
+            global.bun_vm().event_loop().run_callback(
                 bun_event_loop::ContextId::NONE,
                 callback,
                 global,
@@ -2166,6 +2202,7 @@ mod _async_tasks {
             let global_object = cx.global();
             let _dispatch = js.tracker.dispatch(global_object);
 
+            move_waiting_descriptors();
             if let Ok(result) = &this.result {
                 this.args.write_back(result.bytes_read());
             }
@@ -2287,6 +2324,9 @@ mod _async_tasks {
         /// `fs.cp`: the context whose script asked. The shell's `cp`: a step of its script.
         pub(crate) context: bun_event_loop::ContextId,
         pub(crate) has_result: AtomicBool,
+        /// What this has written where the executable holds something, for the
+        /// notes of `run_from_js_thread`. A copy that fails has written some of it.
+        written: bun_threading::Guarded<Vec<Box<[u8]>>>,
         /// Number of in-flight references to `this`. Starts at 1 for the main
         /// directory-scan task; incremented for each `SingleTask` spawned. Every
         /// holder calls `onSubtaskDone` exactly once when finished (regardless of
@@ -2398,6 +2438,7 @@ mod _async_tasks {
                         parent.finish_concurrently(result);
                     }
                     Ok(_) => {
+                        parent.record_written(self.dest());
                         parent.on_copy(self.src(), self.dest());
                     }
                 }
@@ -2430,6 +2471,32 @@ mod _async_tasks {
     }
 
     impl<const IS_SHELL: bool> NewAsyncCpTask<IS_SHELL> {
+        /// May be called from any thread (the subtasks).
+        fn record_written(&self, dest: &OSPathSliceZ) {
+            let Some(graph) = compiled_program_graph() else {
+                return;
+            };
+            #[cfg(windows)]
+            let mut buffer = paths::path_buffer_pool::get();
+            #[cfg(windows)]
+            let dest: &[u8] = paths::strings::from_wpath(&mut buffer, dest.as_slice());
+            #[cfg(not(windows))]
+            let dest = dest.as_bytes();
+            let path = bun_standalone_graph::normalize_source_path(dest);
+            if let Some(path) = path.filter(|it| graph.may_answer_for(it)) {
+                self.written.lock().push(path);
+            }
+        }
+
+        /// As `record_written`, for each file of a folder that was not there.
+        #[cfg(target_os = "macos")]
+        fn record_written_folder(&self, dest: &OSPathSliceZ) {
+            if let Some(graph) = compiled_program_graph() {
+                let files = graph.find_files_on_disk_below(dest.as_bytes());
+                self.written.lock().extend(files);
+            }
+        }
+
         pub(crate) fn on_copy(
             &self,
             src: impl AsRef<[OSPathChar]>,
@@ -2461,7 +2528,7 @@ mod _async_tasks {
             Self::schedule_new(
                 promise,
                 cp_args,
-                EventLoopHandle::init(vm.event_loop.cast()),
+                EventLoopHandle::init(vm.event_loop_ptr()),
                 bun_jsc::ConcurrentPoster::Js(vm.ticket()),
                 tracker,
                 cx.context().id(),
@@ -2505,6 +2572,7 @@ mod _async_tasks {
                 context,
                 args: cp_args,
                 has_result: AtomicBool::new(false),
+                written: bun_threading::Guarded::new(Vec::new()),
                 // Sentinel — overwritten by `finish_concurrently` (gated by the
                 // `has_result` CAS) before any read on the JS thread.
                 result: core::cell::Cell::new(Ok(())),
@@ -2539,9 +2607,6 @@ mod _async_tasks {
         /// in-flight subtask has dropped its reference, so that subtasks still
         /// running on the thread pool don't dereference a freed parent.
         fn finish_concurrently(&self, result: Maybe<ret::Cp>) {
-            if result.is_ok() {
-                note_opened_for_write(self.args.dest.slice(), true);
-            }
             if self
                 .has_result
                 .compare_exchange(false, true, Ordering::Relaxed, Ordering::Relaxed)
@@ -2609,6 +2674,9 @@ mod _async_tasks {
         }
 
         pub(crate) fn run_from_js_thread(mut self: Box<Self>) -> JsResult<()> {
+            for path in self.written.get_mut().drain(..) {
+                note_opened_for_write(&path, true);
+            }
             if IS_SHELL {
                 // SAFETY: shelltask is set by create_for_shell and outlives this task
                 // Move the result out — `Maybe<ret::Cp>` (= `Maybe<()>`) has a cheap
@@ -2724,6 +2792,7 @@ mod _async_tasks {
                     };
                     let copied = nodefs.copy_embedded_source_at(src, &err, args);
                     if copied.is_ok() {
+                        this.record_written(dest);
                         this.on_copy(src, dest);
                     }
                     this.finish_concurrently(copied);
@@ -2751,6 +2820,9 @@ mod _async_tasks {
                             return;
                         }
                     }
+                    if r.is_ok() {
+                        this.record_written(dest);
+                    }
                     this.on_copy(src, dest);
                     this.finish_concurrently(r);
                     return;
@@ -2763,6 +2835,7 @@ mod _async_tasks {
                     Err(err) => {
                         let copied = nodefs.copy_embedded_source_at(src, &err, args);
                         if copied.is_ok() {
+                            this.record_written(dest);
                             this.on_copy(src, dest);
                         }
                         this.finish_concurrently(copied);
@@ -2790,6 +2863,9 @@ mod _async_tasks {
                             this.finish_concurrently(Ok(()));
                             return;
                         }
+                    }
+                    if r.is_ok() {
+                        this.record_written(dest);
                     }
                     this.on_copy(src, dest);
                     this.finish_concurrently(r);
@@ -2895,6 +2971,7 @@ mod _async_tasks {
                         _ => {}
                     }
                 } else {
+                    this_ref.record_written_folder(dest);
                     return Ok(());
                 }
             }
@@ -5489,6 +5566,8 @@ impl NodeFS {
         // Explicit `fs.close`/`fs.closeSync` must close the descriptor the user
         // asked for, including stdio (0/1/2), and surface EBADF like Node does.
         // The stdio guard only applies to Bun's own internal closes.
+        #[cfg(not(windows))]
+        bun_standalone_graph::forget_descriptor(args.fd);
         if let Some(err) = args.fd.close_allowing_standard_io(None) {
             Err(err)
         } else {
@@ -6875,7 +6954,7 @@ impl NodeFS {
         buf = &mut buf[off..];
         let l = (args.length as usize).min(buf.len());
         buf = &mut buf[..l];
-        match Syscall::read(args.fd, buf) {
+        match read_descriptor(args.fd, buf) {
             Err(err) => Err(err),
             Ok(amt) => Ok(ret::Read {
                 bytes_read: amt as u64,
@@ -7050,7 +7129,11 @@ impl NodeFS {
         let bufs = args.buffers.buffers.as_slice();
         // libuv `uv__fs_read`: cap `nbufs` at IOV_MAX and issue one syscall.
         let bufs = &bufs[..bufs.len().min(IOV_MAX)];
-        match Syscall::readv(args.fd, bufs) {
+        #[cfg(not(windows))]
+        let read = bun_standalone_graph::read_descriptor(args.fd, || Syscall::readv(args.fd, bufs));
+        #[cfg(windows)]
+        let read = Syscall::readv(args.fd, bufs);
+        match read {
             Err(err) => Err(err),
             Ok(amt) => Ok(ret::Readv {
                 bytes_read: amt as u64,
@@ -7944,7 +8027,7 @@ impl NodeFS {
         let temporary_read_buffer_before_stat_call: &[u8] = {
             let mut available: &mut [u8] = &mut pre_stat_buf[..];
             while !available.is_empty() {
-                let amt = Syscall::read(fd, available)?;
+                let amt = read_descriptor(fd, available)?;
                 if amt == 0 {
                     did_succeed = true;
                     break;
@@ -8124,7 +8207,7 @@ impl NodeFS {
             // Do NOT pre-grow here; growth happens only in the `total > size && amt != 0 &&
             // !has_max_size` arm below.
             let upper = (buf.capacity() as u64).min(max_size) as usize;
-            let amt = Syscall::read(fd, &mut buf[total..upper])?;
+            let amt = read_descriptor(fd, &mut buf[total..upper])?;
             total += amt;
 
             if args.limit_size_for_javascript {
@@ -9120,7 +9203,7 @@ impl NodeFS {
             args,
         );
         let copied = copied.or_else(|err| Self::copy_embedded_source(err, args));
-        copied.inspect(|()| note_opened_for_write(args.dest.slice(), true))
+        copied.inspect(|()| note_copied(args.dest.slice()))
     }
 
     /// The disk has failed with `err`. Copies the file that the program finds in the executable at `args.src`.
