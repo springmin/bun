@@ -1,5 +1,5 @@
 import { expect } from "bun:test";
-import { isLinux, tempDir } from "harness";
+import { isLinux, isOhos, tempDir } from "harness";
 import { sayGoal } from "../aot/harness/goals";
 import { test } from "../aot/supported";
 import {
@@ -46,6 +46,13 @@ const timesThePlainProgram: Record<string, number> = {
   "defines-its-exports.cjs": 6.76,
   "reads-the-constructor.cjs": 6.76,
 };
+// These three stay under the bound on OHOS, where the image already holds the
+// built-ins a realm links at start; the other two still bring modules there.
+const metOnOhos = new Set([
+  "asks-for-its-parent.cjs",
+  "compares-its-parent.cjs",
+  "reads-the-name-of-its-parent.cjs",
+]);
 const sayTimes = (name: string, bytes: number, plain: number) =>
   sayGoal(name, Number((bytes / plain).toFixed(2)), 1.125);
 const measuredAgainstBound = (times: number) => `: ${times} times the plain program, the bound is 1.125 times`;
@@ -75,7 +82,7 @@ test.skipIf(!startsAtAnyEntryPoint)(
 
 for (const entry of Object.keys(all)) {
   const times = timesThePlainProgram[entry];
-  (times ? test.failing : test.skipIf(!startsAtAnyEntryPoint))(
+  (times ? (isOhos && metOnOhos.has(entry) ? test : test.failing) : test.skipIf(!startsAtAnyEntryPoint))(
     `${entry} brings no built-in module into the executable${times ? measuredAgainstBound(times) : ""}`,
     async () => {
       const ran = await compiledOnce();
@@ -105,7 +112,7 @@ test("they run under bun run --debug-aot too", async () => {
   expect(Object.values(ran).map(({ exitCode }) => exitCode)).toEqual([0, 0]);
 }, 120_000);
 
-test.failing(
+(isOhos ? test : test.failing)(
   `nor do they make bun run --debug-aot compile built-in modules${measuredAgainstBound(6.76)}`,
   async () => {
     const ran = await compiledInPlaceOnce();

@@ -1,5 +1,5 @@
 import { expect } from "bun:test";
-import { tempDir } from "harness";
+import { isOhos, tempDir } from "harness";
 import { sayGoal } from "../aot/harness/goals";
 import { test } from "../aot/supported";
 import { compileEachAlone, importingByName, oneAfterTheOther, startsAtAnyEntryPoint } from "./aot-builtin-modules";
@@ -126,7 +126,8 @@ test.skipIf(!startsAtAnyEntryPoint)(
 );
 
 // A goal that is not met yet. Once it is, this test fails: change `test.failing` to `test` and shorten the name.
-(startsAtAnyEntryPoint ? test.failing : test.skip)(
+// On OHOS the image already holds the built-ins a realm links at start, so the delta stays under the bound.
+(startsAtAnyEntryPoint ? (isOhos ? test : test.failing) : test.skip)(
   "a global that goes nowhere but into reads by written names brings no built-in module into the executable: 4,112,384 bytes more than a plain program on Linux x64, the bound is 1,048,576",
   async () => {
     const ran = await theThree();
