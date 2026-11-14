@@ -2223,7 +2223,7 @@ describe("the trusted set", () => {
       await rm(join(ctx.packageDir, "node_modules", "native"), { recursive: true, force: true });
       const { err, exitCode } = await bun(ctx, ["run", "setup"]);
       expect(err).not.toContain("error:");
-      expect(await built(ctx)).toBe(`${osType()}\n`);
+      expect(await built(ctx)).toBe(realUname);
       expect(exitCode).toBe(0);
     });
 
