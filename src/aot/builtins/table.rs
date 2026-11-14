@@ -17,6 +17,14 @@ pub use entries::{
     QuietCall, RuntimeFunctionData, RuntimeFunctionRole, Scope, StartupLoad, TypeName,
     WrittenOperand,
 };
+
+/// Whether a module is one of Bun's own, by the name the table gives it:
+/// `internal:` or `$bun...`. A program cannot ask for such a module by name.
+pub fn is_internal_module(module: RuntimeModule) -> bool {
+    let specifier = module_data(module).specifier;
+    specifier.starts_with("internal:") || specifier.starts_with("$bun")
+}
+
 pub use ids::{
     BuiltinClass, BuiltinId, BuiltinName, CheckedJSType, LinkTimeConstant, RuntimeFunction,
     RuntimeModule,

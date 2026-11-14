@@ -29,11 +29,10 @@ fn is_internal_builtin(builtin: u32) -> bool {
     let Some(id) = builtin_of(builtin) else {
         return false;
     };
-    let Some(module) = crate::builtins::table::entry(id).module else {
+    let Some(module) = table::entry(id).module else {
         return false;
     };
-    let specifier = crate::builtins::table::module_data(module).specifier;
-    specifier.starts_with("internal:") || specifier.starts_with("$bun")
+    table::is_internal_module(module)
 }
 
 /// The uses of the program alone: a feature or a cause whose place is in the

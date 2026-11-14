@@ -1,8 +1,8 @@
 diff --git a/Source/JavaScriptCore/aot/facts/AOTFactsOfProgram.cpp b/Source/JavaScriptCore/aot/facts/AOTFactsOfProgram.cpp
-index e06a1c88d303..cabbce4a28ec 100644
+index d940e11cee69..dcb1608cb04d 100644
 --- a/Source/JavaScriptCore/aot/facts/AOTFactsOfProgram.cpp
 +++ b/Source/JavaScriptCore/aot/facts/AOTFactsOfProgram.cpp
-@@ -2814,7 +2814,7 @@ public:
+@@ -3544,7 +3544,7 @@ public:
      Vector<FeatureUseRecord> run(std::span<const BuiltinUseRecord>);
  
  private:
@@ -11,7 +11,7 @@ index e06a1c88d303..cabbce4a28ec 100644
  
      void collectUses(std::span<const BuiltinUseRecord>, bool namedAtRunTime);
      void visitRowsThatWait();
-@@ -2860,6 +2860,7 @@ private:
+@@ -3590,6 +3590,7 @@ private:
      BitVector m_makersNameFeatures;
      BitVector m_makersNameFeaturesOfConstructor;
      BitVector m_isLetGo;
@@ -19,7 +19,7 @@ index e06a1c88d303..cabbce4a28ec 100644
      BitVector m_isBoundAtSite;
      Vector<FeatureUseRecord> m_records;
  };
-@@ -2876,6 +2877,7 @@ FeaturesOfProgramFacts::FeaturesOfProgramFacts(const InputsOfProgramFacts& input
+@@ -3606,6 +3607,7 @@ FeaturesOfProgramFacts::FeaturesOfProgramFacts(const InputsOfProgramFacts& input
      , m_unseenCodeMayRun(unseenCodeMayRun)
      , m_isNamed(m_builtins.builtinCount())
      , m_codeMayRun(m_builtins.builtinCount())
@@ -27,7 +27,7 @@ index e06a1c88d303..cabbce4a28ec 100644
      , m_madeClasses(m_builtins.classCount())
  {
      m_witnesses.fill(noWitness, m_builtins.builtinCount());
-@@ -2917,6 +2919,9 @@ void FeaturesOfProgramFacts::collectUses(std::span<const BuiltinUseRecord> recor
+@@ -3647,6 +3649,9 @@ void FeaturesOfProgramFacts::collectUses(std::span<const BuiltinUseRecord> recor
          if ((uses - OptionSet<BuiltinUse> { BuiltinUse::Tested }).isEmpty())
              continue;
          noteCodeMayRun(builtin, record.witness);
@@ -37,7 +37,7 @@ index e06a1c88d303..cabbce4a28ec 100644
          if (uses.contains(BuiltinUse::Escaped))
              m_isLetGo.set(builtin.index());
          if (namedAtRunTime || (uses - usesThatNameNothing).isEmpty())
-@@ -3187,18 +3192,27 @@ void FeaturesOfProgramFacts::visitRow(BuiltinID builtin)
+@@ -3917,18 +3922,27 @@ void FeaturesOfProgramFacts::visitRow(BuiltinID builtin)
  {
      const Builtin& entry = m_builtins.at(builtin);
      Witness witness = m_witnesses[builtin.index()];
@@ -69,7 +69,7 @@ index e06a1c88d303..cabbce4a28ec 100644
      }
      for (const BuiltinOverload& overload : m_builtins.overloadsOf(builtin))
          noteTypesThatOverloadMakes(overload, witness);
-@@ -3310,8 +3324,11 @@ Vector<FeatureUseRecord> FeaturesOfProgramFacts::run(std::span<const BuiltinUseR
+@@ -4040,8 +4054,11 @@ Vector<FeatureUseRecord> FeaturesOfProgramFacts::run(std::span<const BuiltinUseR
      m_codeMayRunWithoutNamesFromRunTime = m_codeMayRun;
      collectUses(uses, true);
      visitRowsThatWait();
@@ -82,7 +82,7 @@ index e06a1c88d303..cabbce4a28ec 100644
      sortRecordsAndMarkUnnamed();
      return WTF::move(m_records);
  }
-@@ -3839,7 +3856,7 @@ private:
+@@ -4611,7 +4628,7 @@ private:
      void followRequestsOfEvaluatedModules();
      void evaluate(ModuleID, const Witness&);
  
@@ -91,7 +91,7 @@ index e06a1c88d303..cabbce4a28ec 100644
      void lookThrough(BuiltinID canonicalHolder);
      void spreadBelow(BuiltinID canonicalHolder);
      void findMembersOffUnknownValues(BuiltinID canonicalHolder);
-@@ -3927,6 +3944,7 @@ private:
+@@ -4700,6 +4717,7 @@ private:
      BitVector m_isNamedByOperation;
      Vector<Witness> m_witnessesOfEscapes;
      BitVector m_isLetGo;
@@ -99,7 +99,7 @@ index e06a1c88d303..cabbce4a28ec 100644
      bool m_followsClimbsFromWhatIsLetGo { false };
      bool m_climberMayBeHandedWhatNobodyKnows { false };
      BitVector m_isOutOfSight;
-@@ -4058,6 +4076,7 @@ BuilderOfProgramFacts::BuilderOfProgramFacts(const InputsOfProgramFacts& inputs,
+@@ -4831,6 +4849,7 @@ BuilderOfProgramFacts::BuilderOfProgramFacts(const InputsOfProgramFacts& inputs,
      , m_program(tables.program)
      , m_isNamedByOperation(m_builtins.builtinCount())
      , m_isLetGo(m_builtins.builtinCount())
@@ -107,7 +107,7 @@ index e06a1c88d303..cabbce4a28ec 100644
      , m_isOutOfSight(m_builtins.builtinCount())
      , m_isCalledOutOfSightOfLink(m_builtins.builtinCount())
      , m_isCalledWithoutRow(m_builtins.builtinCount())
-@@ -4926,16 +4945,20 @@ void BuilderOfProgramFacts::noteEvaluated(ModuleID id)
+@@ -5733,16 +5752,20 @@ void BuilderOfProgramFacts::noteEvaluated(ModuleID id)
      followRequestsOfEvaluatedModules();
  }
  
@@ -132,23 +132,33 @@ index e06a1c88d303..cabbce4a28ec 100644
      m_holdersToSpreadBelow.append(canonical);
      lookThrough(canonical);
  }
-@@ -4949,9 +4972,10 @@ void BuilderOfProgramFacts::lookThrough(BuiltinID canonicalHolder)
+@@ -5756,9 +5779,17 @@ void BuilderOfProgramFacts::lookThrough(BuiltinID canonicalHolder)
  void BuilderOfProgramFacts::spreadBelow(BuiltinID canonicalHolder)
  {
      Witness witness = m_witnessesOfEscapes[canonicalHolder.index()];
 +    bool atStart = m_isUsedAtStart.get(canonicalHolder.index());
      const Builtin& holder = m_builtins.at(canonicalHolder);
-     if (m_followsClimbsFromWhatIsLetGo && holder.prototypeLink == BuiltinPrototypeLink::Builtin && holder.inheritsFrom)
+-    if (m_followsClimbsFromWhatIsLetGo && holder.prototypeLink == BuiltinPrototypeLink::Builtin && holder.inheritsFrom)
 -        letGo(m_builtins.canonicalID(holder.inheritsFrom), witness);
++    // What start reaches is the engine's own built-ins. A host built-in that
++    // hangs below one of them is only there because a realm may ask for it:
++    // its features stay unless the program itself names it.
++    auto isHost = [&](BuiltinID builtin) {
++        return m_builtins.at(m_builtins.canonicalID(builtin)).origin == BuiltinOrigin::Host;
++    };
++    if (m_followsClimbsFromWhatIsLetGo && holder.prototypeLink == BuiltinPrototypeLink::Builtin && holder.inheritsFrom
++        && !(atStart && isHost(holder.inheritsFrom)))
 +        letGo(m_builtins.canonicalID(holder.inheritsFrom), witness, atStart);
      if (defersMembersOf(canonicalHolder)) {
          m_hasDeferredMembers = true;
          return;
-@@ -4960,9 +4984,9 @@ void BuilderOfProgramFacts::spreadBelow(BuiltinID canonicalHolder)
+@@ -5767,9 +5798,11 @@ void BuilderOfProgramFacts::spreadBelow(BuiltinID canonicalHolder)
      for (BuiltinID member : m_builtins.membersOf(canonicalHolder)) {
          if (!handsOutEvents && m_rows.areEvents.quickGet(m_builtins.canonicalID(member).index()))
              continue;
 -        m_uses[member.index()].add(BuiltinUse::Escaped);
++        if (atStart && isHost(member))
++            continue;
 +        m_uses[member.index()].add(atStart ? BuiltinUse::UsedAtStart : BuiltinUse::Escaped);
          keepLowerWitnessInProgramFacts(m_witnesses[member.index()], witness);
 -        letGo(m_builtins.canonicalID(member), witness);
@@ -156,7 +166,7 @@ index e06a1c88d303..cabbce4a28ec 100644
      }
  }
  
-@@ -5301,7 +5325,7 @@ void BuilderOfProgramFacts::listBuiltinUses()
+@@ -6108,7 +6141,7 @@ void BuilderOfProgramFacts::listBuiltinUses()
  
  Vector<BuiltinUseRecord> BuilderOfProgramFacts::usesWithWhatNobodyNamesAsEscaped() const
  {
@@ -165,7 +175,7 @@ index e06a1c88d303..cabbce4a28ec 100644
      BitVector isNamed = m_isSpelledInTexts;
      for (uint32_t index = 0; index < m_builtins.builtinCount(); ++index) {
          bool isNamedInBody = m_isNamedByOperation.quickGet(index) || m_uses[index].containsAny({ BuiltinUse::Written, BuiltinUse::StoredByName });
-@@ -6561,7 +6585,7 @@ void BuilderOfProgramFacts::settle()
+@@ -7381,7 +7414,7 @@ void BuilderOfProgramFacts::settle()
      }
      useBuiltinsThatHostHandsExportsTo();
      for (const BuiltinUsedAtStart& used : m_source.builtinsUsedAtStart)
@@ -175,7 +185,7 @@ index e06a1c88d303..cabbce4a28ec 100644
      if (m_source.admitsInspector) {
          add(m_program.unseenCode, UnseenCodeCause::OptionAdmitsCode, { }, noWitness);
 diff --git a/Source/JavaScriptCore/aot/ir/schema/compile-call.def b/Source/JavaScriptCore/aot/ir/schema/compile-call.def
-index 5c247e616578..e94227d15bb5 100644
+index 23be8223884c..b395b2d879b3 100644
 --- a/Source/JavaScriptCore/aot/ir/schema/compile-call.def
 +++ b/Source/JavaScriptCore/aot/ir/schema/compile-call.def
 @@ -4,7 +4,7 @@ enum AccessKind { Unknown Read Store Define Has Delete Call Construct Truthiness
