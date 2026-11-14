@@ -17,6 +17,7 @@ import { join } from "node:path";
 import { run } from "../engine/testaot";
 import { afterAll } from "../harness/default-timeout";
 import { withProgramOutput } from "../harness/flags";
+import { without } from "../harness/capabilities";
 import { describe, test } from "../supported";
 import { build } from "./measure";
 
@@ -149,7 +150,7 @@ function run() {
 run();
 `;
 
-describe("compile/aot/independent-statements-change-places", () => {
+describe.skipIf(!!without("testaot"))("compile/aot/independent-statements-change-places", () => {
   const folder = String(tempDir("aot-statements-change-places", {}));
   afterAll(() => rmSync(folder, { recursive: true, force: true }));
   let numberOfTexts = 0;

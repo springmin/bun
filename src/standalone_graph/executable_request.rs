@@ -139,7 +139,7 @@ fn strip_code_signature(template: &mut [u8]) {
             continue;
         }
         let name = &names[name_start..];
-        let name = &name[..name.iter().position(|byte| *byte == 0).unwrap_or(name.len())];
+        let name = &name[..bun_core::strings::index_of_char_usize(name, 0).unwrap_or(name.len())];
         if name != b".codesign" {
             continue;
         }

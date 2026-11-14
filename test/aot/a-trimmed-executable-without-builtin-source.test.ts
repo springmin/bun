@@ -3,12 +3,12 @@
 import { expect } from "bun:test";
 import { bunEnv, bunExe, isOhos, tempDir } from "harness";
 import { join } from "node:path";
-import { canTrim } from "../bundler/compile-trim-features";
+import { without } from "./harness/capabilities";
 import { run } from "./harness/run";
 import { withoutDebugInformation } from "./harness/without-debug-information";
 import { describe, test } from "./supported";
 
-describe.skipIf(!isOhos || !canTrim)("a trimmed executable without the source of the built-ins", () => {
+describe.skipIf(!isOhos || !!without("a Bun that trims"))("a trimmed executable without the source of the built-ins", () => {
   test(
     "runs, and its image validates",
     async () => {

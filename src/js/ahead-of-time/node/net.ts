@@ -1,5 +1,5 @@
 // What the compiler reads in place of src/js/node/net.ts, which `bun run` evaluates. The two do the same.
-// Written against that file with the SHA-256 d6861dbd59c52394231c89ff7bae0bcff81e31756f79b40db9ee7cee0562b4a5.
+// Written against that file with the SHA-256 b83f409dcf00884508a36a21bb76787958608882a1fde70e729bbeb4e41ec9e0.
 // When that file changes, bring the change here and write the new hash: test/internal/second-texts-of-modules.test.ts.
 
 // Hardcoded module "node:net"
@@ -4966,6 +4966,14 @@ function normalizeArgs(args: unknown[]): [options: ConnectOptions, cb: (() => vo
     if (args.length > 1 && typeof args[1] === "string") {
       options.host = args[1];
     }
+  }
+
+  // node accepts a net.AddressInfo object ({ address, family, port }) as
+  // connect options (what server.address() returns); map its `address`
+  // field onto host so "::" / "127.0.0.1" connect directly instead of
+  // falling back to a "localhost" lookup.
+  if (options.host === undefined && typeof options.address === "string") {
+    options.host = options.address;
   }
 
   const cb = args[args.length - 1];

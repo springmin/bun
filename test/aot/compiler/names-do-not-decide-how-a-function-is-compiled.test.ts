@@ -16,6 +16,7 @@ import { join } from "node:path";
 import { run } from "../engine/testaot";
 import { afterAll } from "../harness/default-timeout";
 import { withProgramOutput } from "../harness/flags";
+import { without } from "../harness/capabilities";
 import { describe, test } from "../supported";
 import { build } from "./measure";
 
@@ -41,7 +42,7 @@ export function f(n: number) { v1 += n; v4 += v1; const inner = () => v1 + n; re
 export function g(n: number) { v0 += n; v2 += v0; v3 += v2; v5 += v3; const inner = () => v0 + n; return inner(); }
 `;
 
-describe("compile/aot/names-do-not-decide-how-a-function-is-compiled", () => {
+describe.skipIf(!!without("testaot"))("compile/aot/names-do-not-decide-how-a-function-is-compiled", () => {
   const root = String(tempDir("aot-names-do-not-decide", {}));
   afterAll(() => rmSync(root, { recursive: true, force: true }));
   let numberOfPrograms = 0;

@@ -17,6 +17,7 @@ import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { run } from "../engine/testaot";
 import { withProgramOutput } from "../harness/flags";
+import { without } from "../harness/capabilities";
 import { test } from "../supported";
 import { build } from "./measure";
 
@@ -69,7 +70,9 @@ const lyingBeside = {
   "zz-behind.js": `export const mark = Symbol("unrelated");\nexport const holder = { [mark]: 1 };`,
 };
 
-test("files that merely lie in the folder change nothing of the program", async () => {
+const declared = without("testaot") ? test.skip : test;
+
+declared("files that merely lie in the folder change nothing of the program", async () => {
   using above = tempDir("aot-files-that-lie-beside", { inner: program });
   using elsewhere = tempDir("aot-the-same-files-in-a-folder-of-another-name-and-another-length", program);
   const folder = join(String(above), "inner");
