@@ -117,7 +117,9 @@ impl<H: ReadBytesHandler> read_file::ReadFileCompletion for H {
 // This crate layers behaviour via the `BlobExt` extension trait below.
 // ──────────────────────────────────────────────────────────────────────────
 
-pub(crate) use bun_jsc::webcore_types::{Blob, BlobContentType, ClosingState, MAX_SIZE, SizeType};
+#[cfg(not(windows))]
+pub(crate) use bun_jsc::webcore_types::ClosingState;
+pub(crate) use bun_jsc::webcore_types::{Blob, BlobContentType, MAX_SIZE, SizeType};
 
 /// 1: Initial
 /// 2: Added byte for whether it's a dom file, length and bytes for `stored_name`,
@@ -139,7 +141,7 @@ use crate::generated_bindgen::blob::{
 
 // ──────────────────────────────────────────────────────────────────────────
 // BlobExt — `bun_runtime`-tier behaviour layered on the `bun_jsc` data type.
-// Inherent methods (`new`/`init`/`shared_view`/`dupe`/`detach`/`deinit`/…)
+// Inherent methods (`new`/`init`/`shared_view`/`dupe`/`detach`/…)
 // live on `bun_jsc::webcore_types::Blob`; everything that touches the event
 // loop / S3 / fs / `VirtualMachine` is here.
 // ──────────────────────────────────────────────────────────────────────────
@@ -490,9 +492,8 @@ impl BlobExt for Blob {
                 poll: bun_io::KeepAlive,
             }
             impl<H: ReadBytesHandler> Task<H> {
-                fn done(mut self: Box<Self>, r: ReadBytesResult) -> JsResult<()> {
+                fn done(self: Box<Self>, r: ReadBytesResult) -> JsResult<()> {
                     self.poll.unref(bun_io::js_vm_ctx());
-                    self.blob.deinit();
                     // The braces move the box: the rest of the `Task` is freed here.
                     let ctx = { self }.ctx;
                     ctx.on_read_bytes(r)
@@ -529,7 +530,7 @@ impl BlobExt for Blob {
                     }
                 }
             }
-            let mut t = Box::new(Task::<H> {
+            let t = Box::new(Task::<H> {
                 ctx,
                 blob: self.dupe(),
                 poll: bun_io::KeepAlive::default(),
@@ -708,8 +709,7 @@ impl BlobExt for Blob {
         const BOUNDARY_PREFIX: &[u8; 22] = b"----WebKitFormBoundary";
         let mut boundary_buf = [0u8; BOUNDARY_PREFIX.len() + 32];
         let boundary: &[u8] = {
-            // SAFETY: bun_vm() never returns null for a Bun-owned global.
-            let random = global_this.bun_vm().as_mut().rare_data().next_uuid().bytes;
+            let random = global_this.bun_vm().rare_data().next_uuid().bytes;
             boundary_buf[..BOUNDARY_PREFIX.len()].copy_from_slice(BOUNDARY_PREFIX);
             bun_core::fmt::bytes_to_hex_lower(&random, &mut boundary_buf[BOUNDARY_PREFIX.len()..]);
             &boundary_buf
@@ -1310,15 +1310,15 @@ impl BlobExt for Blob {
                         break 'brk false;
                     }
 
-                    if let Some(rare) = cx.vm().rare_data.as_ref() {
+                    if let Some(rare) = cx.vm().rare_data.get() {
                         // `RareData::std{out,err}_store` is `Option<NonNull<c_void>>`
                         // (type-erased `*Blob.Store`); compare on raw pointer
                         // identity exactly like the POSIX arm below.
                         let store_ptr = store.as_ptr().cast::<c_void>();
-                        if rare.stdout_store.map(|p| p.as_ptr()) == Some(store_ptr) {
+                        if rare.stdout_store.get().map(|p| p.as_ptr()) == Some(store_ptr) {
                             break 'brk true;
                         }
-                        if rare.stderr_store.map(|p| p.as_ptr()) == Some(store_ptr) {
+                        if rare.stderr_store.get().map(|p| p.as_ptr()) == Some(store_ptr) {
                             break 'brk true;
                         }
                     }
@@ -1492,8 +1492,7 @@ impl BlobExt for Blob {
             use bun_io::pipe_writer::BaseWindowsPipeWriter as _;
 
             let pathlike = &store.data.as_file().pathlike;
-            // SAFETY: bun_vm() never returns null for a Bun-owned global.
-            let vm = global_this.bun_vm().as_mut();
+            let vm = global_this.bun_vm();
             let fd: Fd = match pathlike {
                 PathOrFileDescriptor::Fd(fd) => *fd,
                 PathOrFileDescriptor::Path(p) => {
@@ -1519,12 +1518,12 @@ impl BlobExt for Blob {
                 if !matches!(pathlike, PathOrFileDescriptor::Fd(_)) {
                     break 'brk false;
                 }
-                if let Some(rare) = vm.rare_data.as_ref() {
+                if let Some(rare) = vm.rare_data.get() {
                     let store_ptr = store.as_ptr().cast::<c_void>();
-                    if rare.stdout_store.map(|p| p.as_ptr()) == Some(store_ptr) {
+                    if rare.stdout_store.get().map(|p| p.as_ptr()) == Some(store_ptr) {
                         break 'brk true;
                     }
-                    if rare.stderr_store.map(|p| p.as_ptr()) == Some(store_ptr) {
+                    if rare.stderr_store.get().map(|p| p.as_ptr()) == Some(store_ptr) {
                         break 'brk true;
                     }
                 }
@@ -1766,7 +1765,7 @@ impl BlobExt for Blob {
             let current_path = bun_resolver::fs::Path::init(&filename);
             return Some(
                 current_path
-                    .loader(&jsc_vm.transpiler.options.loaders)
+                    .loader(&jsc_vm.transpiler.get().options.loaders)
                     .unwrap_or(bun_ast::Loader::Tsx),
             );
         } else if let Some(mime_type) = self.get_mime_type_or_content_type() {
@@ -1853,8 +1852,7 @@ impl BlobExt for Blob {
                     .as_file();
                 match &file.pathlike {
                     PathOrFileDescriptor::Path(path_like) => {
-                        // SAFETY: bun_vm() returns the live VM for this global.
-                        let vm = global_this.bun_vm().as_mut();
+                        let vm = global_this.bun_vm();
                         Ok(crate::node::fs::async_::Stat::schedule(
                             &cx,
                             crate::node::fs::args::Stat::owned_copy_of(path_like),
@@ -1863,8 +1861,7 @@ impl BlobExt for Blob {
                         ))
                     }
                     PathOrFileDescriptor::Fd(fd) => {
-                        // SAFETY: bun_vm() returns the live VM for this global.
-                        let vm = global_this.bun_vm().as_mut();
+                        let vm = global_this.bun_vm();
                         Ok(crate::node::fs::async_::Fstat::schedule(
                             &cx,
                             crate::node::fs::args::Fstat::for_fd(*fd),
@@ -1887,8 +1884,7 @@ impl BlobExt for Blob {
                 }) {
                     return Ok(JSValue::UNDEFINED);
                 }
-                // SAFETY: bun_vm() returns the live VM for this global.
-                let vm = global_this.bun_vm().as_mut();
+                let vm = global_this.bun_vm();
                 Ok(crate::node::fs::async_::Stat::schedule(
                     &cx,
                     crate::node::fs::args::Stat::owned(name.to_vec()),
@@ -3129,13 +3125,12 @@ impl BlobExt for Blob {
         if check_s3 {
             if let PathOrFileDescriptor::Path(p) = &*path_or_fd {
                 if p.slice().starts_with(b"s3://") {
-                    // SAFETY: bun_vm() is live for the duration of a host call.
-                    let vm = global_this.bun_vm().as_mut();
+                    let vm = global_this.bun_vm();
                     // `bun_dotenv::Loader` (T2) returns its local POD mirror by
                     // reference; lift it into the refcounted
                     // `bun_s3_signing::S3Credentials` here at the T6 call site
                     // (dotenv cannot name the s3_signing type — upward dep).
-                    let env_creds = vm.transpiler.env_mut().get_s3_credentials();
+                    let env_creds = vm.transpiler.get().env_mut().get_s3_credentials();
                     let credentials = crate::webcore::fetch::s3_credentials_from_env(env_creds);
                     let copy = core::mem::replace(
                         path_or_fd,
@@ -3189,8 +3184,7 @@ impl BlobExt for Blob {
             }
             PathOrFileDescriptor::Fd(fd) => {
                 if let Some(tag) = fd.stdio_tag() {
-                    // SAFETY: bun_vm() is live for the duration of a host call.
-                    let vm = global_this.bun_vm().as_mut();
+                    let vm = global_this.bun_vm();
                     // `RareData::{stdin,stdout,stderr}()` return the cached
                     // `webcore::blob::Store` erased to `*mut c_void` (the
                     // low-tier crate cannot name the high-tier type — see
@@ -3937,8 +3931,7 @@ fn write_file_with_empty_source_to_destination(
                                         *err = e;
                                         break 'err;
                                     }
-                                    bun_sys::Result::Ok(f) => {
-                                        let _ = f.close(); // close error is non-actionable
+                                    bun_sys::Result::Ok(_) => {
                                         return Ok(JSPromise::resolved_promise_value(
                                             cx.global(),
                                             JSValue::js_number(0.0),
@@ -4066,7 +4059,7 @@ pub(crate) fn write_file_with_source_destination(
             promise_value.ensure_still_alive();
             let mut promise = jsc::JSPromiseStrong::default();
             promise.set(cx.global(), promise_value);
-            match write_file::WriteFileWindows::create(
+            write_file::WriteFileWindows::create(
                 cx.global().bun_vm().event_loop(),
                 cx.context(),
                 destination_blob.borrowed_view(),
@@ -4074,11 +4067,7 @@ pub(crate) fn write_file_with_source_destination(
                 promise,
                 cx.global(),
                 options.mkdirp_if_not_exists.unwrap_or(true),
-            ) {
-                Err(write_file::WriteFileWindowsError::WriteFileWindowsDeinitialized) => {}
-                Err(write_file::WriteFileWindowsError::Js(err)) => return Err(err),
-                Ok(_) => {}
-            }
+            )?;
             return Ok(promise_value);
         }
 
@@ -4777,7 +4766,7 @@ fn set_content_type_from_js(
     if is_valid_blob_type(slice) {
         blob.content_type_was_set.set(true);
         blob.content_type
-            .set(match global_this.bun_vm().as_mut().mime_type(slice) {
+            .set(match global_this.bun_vm().mime_type(slice) {
                 Some(mime) => BlobContentType::from(mime),
                 None => BlobContentType::from_lowercased(slice),
             });
@@ -5149,11 +5138,10 @@ pub(crate) fn file(
                 let slice = str.slice();
                 if is_valid_blob_type(slice) {
                     blob.content_type_was_set.set(true);
-                    blob.content_type
-                        .set(match global_object.bun_vm().as_mut().mime_type(slice) {
-                            Some(mime) => BlobContentType::from(mime),
-                            None => BlobContentType::from_lowercased(slice),
-                        });
+                    blob.content_type.set(match vm.mime_type(slice) {
+                        Some(mime) => BlobContentType::from(mime),
+                        None => BlobContentType::from_lowercased(slice),
+                    });
                 }
             }
             if let Some(n) = options.last_modified {
@@ -5304,7 +5292,7 @@ impl S3BlobDownloadTask {
         // The callback may read this.blob.content_type, which is heap-owned by the
         // source JS Blob and freed on finalize(). Take an owning dupe so the task
         // outliving the source can't dangle.
-        let mut this = Box::new(S3BlobDownloadTask {
+        let this = Box::new(S3BlobDownloadTask {
             global_this: bun_ptr::BackRef::new(cx.global()),
             blob: Blob::dupe(blob),
             promise: jsc::JSPromiseStrong::init(cx.global()),
@@ -5376,7 +5364,6 @@ impl S3BlobDownloadTask {
 
 impl Drop for S3BlobDownloadTask {
     fn drop(&mut self) {
-        Blob::deinit(&mut self.blob);
         self.poll_ref.unref(bun_io::js_vm_ctx());
         // promise: Drop handles deinit.
     }
@@ -6220,6 +6207,7 @@ bun_jsc::jsc_host_abi! {
 // TODO: move to bun_sys?
 /// Generic file-open helper used by ReadFile/WriteFile/CopyFile state machines,
 /// modeled as a trait the target implements.
+#[cfg(not(windows))]
 pub(crate) trait FileOpener: Sized {
     /// Override if you need different open flags; defaults to RDONLY.
     const OPEN_FLAGS: i32 = bun_sys::O::RDONLY;
@@ -6235,7 +6223,6 @@ pub(crate) trait FileOpener: Sized {
     /// `CopyFile`) override this to call [`mkdir_if_not_exists`]; everyone else
     /// (e.g. `ReadFile`) keeps the default `Retry::No`, so the open path falls
     /// straight through to the error branch.
-    #[cfg(not(windows))]
     fn try_mkdirp(
         &mut self,
         _err: bun_sys::Error,
@@ -6244,17 +6231,6 @@ pub(crate) trait FileOpener: Sized {
     ) -> Retry {
         Retry::No
     }
-    #[cfg(windows)]
-    fn loop_(&self) -> *mut bun_libuv_sys::uv_loop_t;
-    #[cfg(windows)]
-    fn req(&mut self) -> &mut bun_libuv_sys::uv_fs_t;
-    /// Stash/retrieve the open completion callback across the libuv async hop.
-    /// Rust can't const-generic over fn
-    /// pointers, so the implementor stores it on `self` (e.g. next to `req`).
-    #[cfg(windows)]
-    fn set_open_callback(&mut self, cb: fn(&mut Self, Fd));
-    #[cfg(windows)]
-    fn open_callback(&self) -> fn(&mut Self, Fd);
 
     fn get_fd_by_opening(&mut self, callback: fn(&mut Self, Fd)) {
         let mut buf = bun_paths::path_buffer_pool::get();
@@ -6264,132 +6240,41 @@ pub(crate) trait FileOpener: Sized {
         };
         let path = path_string.slice_z(&mut buf);
 
-        #[cfg(windows)]
-        {
-            use bun_sys::ReturnCodeExt as _;
-            // Monomorphic libuv completion thunk — recovers `*mut Self` from
-            // `req.data`.
-            extern "C" fn wrapped_callback<S: FileOpener>(req: *mut bun_libuv_sys::uv_fs_t) {
-                use bun_sys::ReturnCodeExt as _;
-                // SAFETY: `req.data` was set to `self as *mut Self` below before
-                // `uv_fs_open` was queued; libuv guarantees `req` is valid here.
-                let self_: &mut S = unsafe { bun_ptr::callback_ctx::<S>((*req).data) };
-                {
-                    // SAFETY: req points into self_.req(); cleanup before reuse.
-                    scopeguard::defer! { unsafe { bun_libuv_sys::uv_fs_req_cleanup(req); } }
-                    // SAFETY: req is the live uv_fs_t from the open request.
-                    let result = unsafe { (*req).result };
-                    if let Some(err_enum) = result.errno() {
-                        let path_string_2 = match self_.pathlike() {
-                            PathOrFileDescriptor::Path(p) => p.clone(),
-                            PathOrFileDescriptor::Fd(_) => unreachable!(),
-                        };
-                        self_.set_errno(bun_errno::from_errno(err_enum as i32).into());
-                        self_.set_system_error(
-                            node::fs::error_for_caller(
-                                [Some(&path_string_2), None],
-                                bun_sys::Error::from_code(err_enum, bun_sys::Tag::open)
-                                    .with_path(path_string_2.slice()),
-                            )
-                            .to_system_error()
-                            .into(),
-                        );
-                        self_.set_opened_fd(bun_sys::Fd::INVALID);
-                    } else {
-                        self_.set_opened_fd(Fd::from_uv(result.to_fd()));
-                    }
+        loop {
+            match bun_sys::open(
+                path,
+                Self::OPEN_FLAGS | Self::OPENER_FLAGS,
+                crate::node::fs::DEFAULT_PERMISSION,
+            ) {
+                bun_sys::Result::Ok(fd) => {
+                    self.set_opened_fd(fd);
+                    break;
                 }
-                let cb = self_.open_callback();
-                cb(self_, self_.opened_fd());
-            }
-
-            self.set_open_callback(callback);
-            let loop_ = self.loop_();
-            let self_ptr: *mut Self = core::ptr::from_mut(self);
-            // Derive `req` THROUGH `self_ptr` rather than via a fresh `self.req()`
-            // reborrow. Under Stacked Borrows, a direct `self.req()` here would
-            // create a sibling `&mut` that pops `self_ptr`'s tag, making the
-            // later deref in `wrapped_callback` (via `req.data`) UB. Going
-            // through the raw pointer keeps the reborrow as a child of
-            // `self_ptr`, so its provenance survives until the callback fires.
-            // SAFETY: `self_ptr` was just derived from a live `&mut self`.
-            let req = unsafe { (*self_ptr).req() };
-            // Stash `self` on the request BEFORE dispatch. libuv never touches
-            // `req.data`, so pre-setting is safe; doing it after `uv_fs_open`
-            // is a UAF when the call fails synchronously and `callback` frees
-            // `self` (ReadFileUV::on_finish → finalize → heap::take).
-            req.data = self_ptr.cast();
-            // SAFETY: loop_/req are live for the duration of the async open;
-            // req.data is consumed by `wrapped_callback::<Self>` above.
-            let rc = unsafe {
-                bun_libuv_sys::uv_fs_open(
-                    loop_,
-                    req,
-                    path.as_ptr(),
-                    Self::OPEN_FLAGS | Self::OPENER_FLAGS,
-                    node::fs::DEFAULT_PERMISSION as i32,
-                    Some(wrapped_callback::<Self>),
-                )
-            };
-            if let Some(errno) = rc.errno() {
-                self.set_errno(bun_errno::from_errno(errno as i32).into());
-                self.set_system_error(
-                    node::fs::error_for_caller(
-                        [Some(&path_string), None],
-                        bun_sys::Error::from_code(errno, bun_sys::Tag::open)
-                            .with_path(path_string.slice()),
-                    )
-                    .to_system_error()
-                    .into(),
-                );
-                self.set_opened_fd(bun_sys::Fd::INVALID);
-                // `callback` may free `self` (see comment above) — must be the
-                // last thing we touch on this path.
-                callback(self, bun_sys::Fd::INVALID);
-                return;
-            }
-            return;
-        }
-
-        #[cfg(not(windows))]
-        {
-            loop {
-                match bun_sys::open(
-                    path,
-                    Self::OPEN_FLAGS | Self::OPENER_FLAGS,
-                    crate::node::fs::DEFAULT_PERMISSION,
-                ) {
-                    bun_sys::Result::Ok(fd) => {
-                        self.set_opened_fd(fd);
-                        break;
-                    }
-                    bun_sys::Result::Err(err) => {
-                        if err.get_errno() == bun_sys::E::ENOENT {
-                            match self.try_mkdirp(err.clone(), path, path_string.slice()) {
-                                Retry::Continue => continue,
-                                Retry::Fail => {
-                                    // `mkdir_if_not_exists` already populated
-                                    // `errno`/`system_error` on the impl.
-                                    self.set_opened_fd(Fd::INVALID);
-                                    break;
-                                }
-                                Retry::No => {}
+                bun_sys::Result::Err(err) => {
+                    if err.get_errno() == bun_sys::E::ENOENT {
+                        match self.try_mkdirp(err.clone(), path, path_string.slice()) {
+                            Retry::Continue => continue,
+                            Retry::Fail => {
+                                // `mkdir_if_not_exists` has set `errno` and `system_error`.
+                                self.set_opened_fd(Fd::INVALID);
+                                break;
                             }
+                            Retry::No => {}
                         }
-                        let err = node::fs::error_for_caller(
-                            [Some(&path_string), None],
-                            err.with_path(path_string.slice()),
-                        );
-                        self.set_errno(bun_errno::from_errno(err.errno as i32).into());
-                        self.set_system_error(jsc::SysErrorJsc::to_system_error(&err));
-                        self.set_opened_fd(Fd::INVALID);
-                        break;
                     }
+                    let err = node::fs::error_for_caller(
+                        [Some(&path_string), None],
+                        err.with_path(path_string.slice()),
+                    );
+                    self.set_errno(bun_errno::from_errno(err.errno as i32).into());
+                    self.set_system_error(jsc::SysErrorJsc::to_system_error(&err));
+                    self.set_opened_fd(Fd::INVALID);
+                    break;
                 }
             }
-
-            callback(self, self.opened_fd());
         }
+
+        callback(self, self.opened_fd());
     }
 
     fn get_fd(&mut self, callback: fn(&mut Self, Fd)) {
@@ -6413,6 +6298,7 @@ pub(crate) trait FileOpener: Sized {
 pub(crate) use io_parking::IoParking;
 
 // TODO: move to bun_sys?
+#[cfg(not(windows))]
 pub(crate) trait FileCloser: Sized {
     const IO_TAG: bun_io::Tag;
 
@@ -6420,11 +6306,9 @@ pub(crate) trait FileCloser: Sized {
     fn set_opened_fd(&mut self, fd: Fd);
     fn close_after_io(&self) -> bool;
     fn state(&self) -> &core::sync::atomic::AtomicU8;
-    fn io_request(&mut self) -> Option<&mut bun_io::Request>;
+    fn io_request(&mut self) -> &mut bun_io::Request;
     fn io_poll(&mut self) -> &mut bun_io::Poll;
     fn task(&mut self) -> &mut bun_jsc::WorkPoolTask;
-    #[cfg(windows)]
-    fn loop_(&self) -> *mut bun_libuv_sys::uv_loop_t;
 
     /// Intrusive backref: Rust `offset_of!` cannot name
     /// fields on a trait `Self`, so each concrete impl supplies its own
@@ -6451,38 +6335,26 @@ pub(crate) trait FileCloser: Sized {
     fn on_close_io_request(task: *mut bun_jsc::WorkPoolTask);
 
     fn do_close(&mut self, is_allowed_to_close_fd: bool) -> bool {
-        // Check `close_after_io()` before `io_request()` so the immutable
-        // `self` reads finish before
-        // taking the `&mut self` borrow via `io_request()`.
         if self.close_after_io() {
             self.state().store(
                 ClosingState::Closing as u8,
                 core::sync::atomic::Ordering::SeqCst,
             );
-            if let Some(io_request) = self.io_request() {
-                // The io thread reads `callback` after popping from its MPSC
-                // queue; a plain store here is a data race. `bun_io::Request::
-                // store_callback_seq_cst` lowers to a volatile write + SeqCst
-                // fence (Rust has no `AtomicFnPtr`).
-                io_request.store_callback_seq_cst(Self::schedule_close);
-                if !io_request.scheduled {
-                    bun_io::IoRequestLoop::schedule(io_request);
-                }
-                return true;
+            let io_request = self.io_request();
+            // The io thread reads `callback` after popping the request: a plain store would race.
+            io_request.store_callback_seq_cst(Self::schedule_close);
+            if !io_request.scheduled {
+                bun_io::IoRequestLoop::schedule(io_request);
             }
+            return true;
         }
 
         if is_allowed_to_close_fd
             && self.opened_fd() != Fd::INVALID
             && self.opened_fd().stdio_tag().is_none()
         {
-            #[cfg(windows)]
-            bun_io::Closer::close(self.opened_fd(), self.loop_());
-            #[cfg(not(windows))]
-            {
-                use bun_sys::FdExt as _;
-                let _ = self.opened_fd().close_allowing_bad_file_descriptor(None);
-            }
+            use bun_sys::FdExt as _;
+            let _ = self.opened_fd().close_allowing_bad_file_descriptor(None);
             self.set_opened_fd(Fd::INVALID);
         }
 
@@ -6496,6 +6368,7 @@ pub(crate) trait FileCloser: Sized {
 /// The type must also carry `bun_threading::intrusive_work_task!` and
 /// `bun_io::intrusive_io_request!`, which provide the parent-pointer recovery
 /// used by the two trampolines.
+#[cfg(not(windows))]
 macro_rules! impl_file_closer {
     ($T:ident) => {
         impl crate::webcore::blob::FileCloser for $T {
@@ -6512,18 +6385,14 @@ macro_rules! impl_file_closer {
             fn state(&self) -> &::core::sync::atomic::AtomicU8 {
                 &self.state
             }
-            fn io_request(&mut self) -> Option<&mut ::bun_io::Request> {
-                Some(&mut self.io_request)
+            fn io_request(&mut self) -> &mut ::bun_io::Request {
+                &mut self.io_request
             }
             fn io_poll(&mut self) -> &mut ::bun_io::Poll {
                 &mut self.io_poll
             }
             fn task(&mut self) -> &mut ::bun_jsc::WorkPoolTask {
                 &mut self.task
-            }
-            #[cfg(windows)]
-            fn loop_(&self) -> *mut ::bun_libuv_sys::uv_loop_t {
-                unreachable!()
             }
 
             fn schedule_close(request: &mut ::bun_io::Request) -> ::bun_io::Action<'_> {
@@ -6567,4 +6436,5 @@ macro_rules! impl_file_closer {
         }
     };
 }
+#[cfg(not(windows))]
 pub(crate) use impl_file_closer;

@@ -4,8 +4,8 @@ use crate::webcore::ReadableStream;
 use bun_io::BufferedReader;
 #[cfg(unix)]
 use bun_io::FilePollFlag;
-use bun_io::Loop as AsyncLoop;
-use bun_io::max_buf::MaxBuf;
+use bun_io::LoopRef;
+use bun_io::max_buf;
 #[cfg(unix)]
 use bun_io::pipe_reader::PosixFlags;
 use bun_jsc::event_loop::EventLoop;
@@ -104,7 +104,7 @@ impl PipeReader {
         event_loop: &EventLoop,
         process: NonNull<Subprocess<'static>>,
         result: StdioResult,
-        limit: Option<NonNull<MaxBuf>>,
+        limit: Option<&max_buf::OwnerRef>,
     ) -> RefPtr<PipeReader> {
         let mut this = Box::new(PipeReader {
             ref_count: RefCount::init(),
@@ -117,7 +117,7 @@ impl PipeReader {
             stdio_result: result,
             state: State::Pending,
         });
-        MaxBuf::add_to_pipereader(limit, &mut this.reader.maxbuf);
+        this.reader.maxbuf = limit.map(max_buf::OwnerRef::for_reader);
         #[cfg(windows)]
         {
             // On Windows `StdioResult` is the `WindowsStdioResult` enum and the
@@ -366,15 +366,13 @@ impl PipeReader {
     }
 
     #[cfg(unix)]
-    fn loop_(&self) -> *mut AsyncLoop {
+    fn loop_(&self) -> LoopRef {
         self.event_loop.native_loop()
     }
 
     #[cfg(windows)]
-    fn loop_(&self) -> *mut AsyncLoop {
-        let uws = self.event_loop.vm_ref().uws_loop();
-        // SAFETY: uws loop pointer is live for the VM lifetime.
-        unsafe { (*uws).uv_loop() }
+    fn loop_(&self) -> LoopRef {
+        self.event_loop.vm_ref().uws_loop().uv_loop()
     }
 }
 
@@ -395,6 +393,6 @@ bun_io::impl_buffered_reader_parent! {
     has_on_read_chunk = false;
     on_reader_done  = |this| (*this).on_reader_done();
     on_reader_error = |this, err| (*this).on_reader_error(err);
-    loop_           = |this| (*this).loop_().cast();
+    loop_           = |this| (*this).loop_();
     event_loop      = |this| (*this).event_loop_handle.as_event_loop_ctx();
 }

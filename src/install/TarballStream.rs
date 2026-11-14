@@ -14,7 +14,6 @@
 //! resolve thread pool without ever parking a worker on a condvar, and
 //! without holding the full compressed or decompressed tarball in memory.
 
-use core::mem::ManuallyDrop;
 use core::sync::atomic::{AtomicBool, Ordering};
 
 use bun_archive::tar::{self, Event};
@@ -26,7 +25,7 @@ use bun_paths::resolve_path::{self, platform};
 use bun_paths::{self, OSPathChar, OSPathSliceZ};
 #[cfg(not(windows))]
 use bun_sys::FdDirExt;
-use bun_sys::{self, Dir, Fd, FdExt, FileKind, Mode, O};
+use bun_sys::{self, Dir, Fd, File, FileKind, Mode, O};
 use bun_threading::{Mutex, thread_pool};
 
 use crate::NetworkTask;
@@ -34,11 +33,6 @@ use crate::bun_fs::FileSystem;
 use crate::cache_publish::StagedEntry;
 use crate::integrity::{self, Integrity};
 use crate::package_manager_real::PackageManager;
-
-// `crate::Task` is a `()` stub; the real Task lives in `package_manager_task`.
-// `'static` is sound here because we only ever hold raw `*mut Task` and never
-// materialise a `&'static` borrow of the inner `Request` lifetime.
-type Task = crate::package_manager_task::Task<'static>;
 
 type OSPathZ<'a> = &'a OSPathSliceZ;
 
@@ -120,7 +114,8 @@ struct Extraction {
     /// Temp directory files are written into before being renamed into the
     /// cache. Lazily opened on the first drain so the HTTP thread never
     /// touches the filesystem.
-    dest: Option<Fd>,
+    // Not a `Dir`, which closes 0-2: auto-install can run after script has closed one of them.
+    dest: Option<File>,
     /// Owned copy of the temp-directory name.
     // `ZBox` is the owned NUL-terminated counterpart of `&ZStr`.
     tmpname: ZBox,
@@ -141,7 +136,7 @@ struct Extraction {
     /// Completion task that carries the final result back to the main
     /// thread. Populated by `finish()` and pushed onto `resolve_tasks` there.
     /// BACKREF — `*mut Task` constructed via `ParentRef::from_raw_mut` so the
-    /// read-only `request_extract()` accessor in `open_destination` goes
+    /// read-only `tarball()` accessor in `open_destination` goes
     /// through safe `Deref`; `finish()` recovers the raw via `as_mut_ptr()`.
     extract_task: bun_ptr::ParentRef<Task, bun_ptr::Mut>,
 }
@@ -177,18 +172,13 @@ impl TarballStream {
     ) -> Box<TarballStream> {
         // Caller guarantees `extract_task` is live for the lifetime of this
         // stream (it is published back to the main thread only in `finish()`).
-        // Wrapped once as `ParentRef` so
-        // the union read goes through the centralised tag-checked
-        // `request_extract()` accessor; `extract` is the active `Request`
-        // variant for streaming tarballs (set by `create_extract_task_for_streaming`,
-        // `tag == Tag::Extract`).
         let extract_task =
             core::ptr::NonNull::new(extract_task).expect("extract_task non-null (Zig *Task)");
         // SAFETY: `extract_task` is the caller's live task pointer.
         let extract_task = unsafe {
             bun_ptr::ParentRef::<Task, bun_ptr::Mut>::from_raw_mut(extract_task.as_ptr())
         };
-        let tarball = &extract_task.request_extract().tarball;
+        let tarball = extract_task.tarball();
 
         // For GitHub/URL/local tarballs we need a SHA-512 to record in the
         // lockfile even when there is no expected value to verify against,
@@ -367,7 +357,7 @@ impl TarballStream {
                             (crate::Error::Fail, Some(http_err)) => http_err,
                             (err, _) => err,
                         });
-                        (*this).extraction.close_output_file();
+                        (*this).extraction.out = None;
                     }
 
                     if (*this).fail.is_none() && !(*this).extraction.done {
@@ -570,9 +560,7 @@ impl Extraction {
 
     fn open_destination(&mut self) -> crate::Result<()> {
         // BACKREF: `extract_task` is live until `finish()` publishes it.
-        // `request_extract()` is the tag-checked union accessor (`tag ==
-        // Tag::Extract` for streaming tarballs).
-        let tarball = &self.extract_task.request_extract().tarball;
+        let tarball = self.extract_task.tarball();
         let (_, basename) = tarball.name_and_basename();
         let truncated_basename = &basename[0..basename.len().min(32)];
         let tmpname_suffix: &[u8] =
@@ -591,14 +579,12 @@ impl Extraction {
         // allocator.dupeZ → owned NUL-terminated copy.
         self.tmpname = ZBox::from_bytes(tmpname.as_bytes());
 
-        self.dest = Some(
-            bun_sys::make_path::make_open_path(
-                Dir::borrow(&tarball.temp_dir),
-                self.tmpname.as_bytes(),
-                Default::default(),
-            )?
-            .into_raw(),
-        );
+        let dest = bun_sys::make_path::make_open_path(
+            Dir::borrow(&tarball.temp_dir),
+            self.tmpname.as_bytes(),
+            Default::default(),
+        )?;
+        self.dest = Some(File::from_fd(dest.into_raw()));
         Ok(())
     }
 
@@ -607,16 +593,7 @@ impl Extraction {
         let Some(mut out) = self.out.take() else {
             return Ok(());
         };
-        let result = out.finish(end);
-        out.fd().close();
-        result.map_err(|e| e.to_zig_err().into())
-    }
-
-    /// For an entry that did not reach its end.
-    fn close_output_file(&mut self) {
-        if let Some(out) = self.out.take() {
-            out.fd().close();
-        }
+        out.finish(end).map_err(|e| e.to_zig_err().into())
     }
 
     fn write_block(&mut self, offset: i64, bytes: &[u8]) -> crate::Result<()> {
@@ -630,7 +607,7 @@ impl Extraction {
     /// Process one entry header. Opens the output file (or creates the
     /// directory). With `out` left empty, the entry's data is skipped.
     fn begin_entry(&mut self, entry: &tar::Entry) -> crate::Result<()> {
-        self.out = None;
+        debug_assert!(self.out.is_none());
         let mut os_path_buf: Vec<OSPathChar> = Vec::new();
         let pathname: &[OSPathChar] = bun_archive::os_path(entry, &mut os_path_buf)?;
 
@@ -714,7 +691,7 @@ impl Extraction {
         }
         #[cfg(windows)]
         {
-            if bun_paths::is_absolute_windows_wtf16(path) {
+            if bun_archive::has_windows_root(path) {
                 return Ok(());
             }
             if self.npm_mode {
@@ -724,7 +701,7 @@ impl Extraction {
 
         let path: OSPathZ = OSPathSliceZ::from_buf(&norm_buf[..], norm_len);
         let path_slice: &[OSPathChar] = &path[..];
-        let dest = self.dest.unwrap();
+        let dest = self.dest.as_ref().unwrap().fd();
 
         match kind {
             FileKind::Directory => {
@@ -737,9 +714,9 @@ impl Extraction {
                 // archive never reach `openat`'s mode argument.
                 #[cfg(not(windows))]
                 let mode: Mode = Mode::try_from((entry.perm() & 0o777) | 0o666).expect("int cast");
-                let fd = open_output_file(dest, path, path_slice, mode)?;
+                let file = File::from_fd(open_output_file(dest, path, path_slice, mode)?);
                 self.entry_count += 1;
-                self.out = Some(bun_archive::EntryWriter::new(fd));
+                self.out = Some(bun_archive::EntryWriter::new(file));
             }
             _ => {}
         }
@@ -753,10 +730,6 @@ impl TarballStream {
     /// — caller must not touch it after return. Takes a raw pointer (not
     /// `&mut self`) so no Rust reference dangles across the drop of the
     /// `Box` in `network_task.tarball_stream`.
-    // The `&(&(*task).request.extract)` wrappers below are deliberate — they
-    // sidestep `dangerous_implicit_autorefs` by making the ref explicit before
-    // the union deref. `needless_borrow` flags them as redundant but they are not.
-    #[allow(clippy::needless_borrow)]
     unsafe fn finish(this: *mut Self) {
         // SAFETY: see fn-level # Safety — `this`/`task`/`network`/`manager`
         // are live raw pointers; this fn is the sole owner. After
@@ -769,7 +742,7 @@ impl TarballStream {
             let network: *mut NetworkTask = (*this).network_task;
             let manager: *mut PackageManager = (*this).package_manager;
 
-            (*this).extraction.close_output_file();
+            (*this).extraction.out = None;
 
             // The HTTP thread has delivered the final `has_more=false` chunk
             // (that's the only way `closed` gets set) and `notify()` does not
@@ -785,27 +758,20 @@ impl TarballStream {
             // set, so `http_err` is stable without the lock.
             let http_err = (*this).http_err;
 
-            // SAFETY: `task` is live until pushed onto `resolve_tasks` below, and `extract` is
-            // its active `request` variant (set by `create_extract_task_for_streaming`).
+            // SAFETY: `task` is live until pushed onto `resolve_tasks` below.
             // `(*this).extraction.extract_task` is a raw `*mut Task` (not `&mut`), so this
             // is the only writer — no aliasing with a stored reference.
             // `populate_result` does not touch `(*this).extraction.extract_task`.
-            match (*this).populate_result(
-                &(&(*task).request.extract).tarball,
-                &mut (*task).log,
-                http_err,
-            ) {
-                Ok(data) => {
-                    (*task).data = TaskData {
-                        extract: ManuallyDrop::new(data),
-                    };
+            let Job::Extract { tarball, data, .. } = &mut (*task).job else {
+                unreachable!("`create_extract_task_for_streaming` built it");
+            };
+            match (*this).populate_result(tarball, &mut (*task).log, http_err) {
+                Ok(extracted) => {
+                    *data = Some(extracted);
                     (*task).err = None;
                     (*task).status = TaskStatus::Success;
                 }
                 Err(err) => {
-                    (*task).data = TaskData {
-                        extract: ManuallyDrop::new(Default::default()),
-                    };
                     (*task).err = Some(err);
                     (*task).status = TaskStatus::Fail;
                 }
@@ -813,21 +779,15 @@ impl TarballStream {
 
             // Temp-dir cleanup must happen before we release the stream or
             // publish the task: both `(*this).extraction.tmpname` and
-            // `task.request.extract.tarball.temp_dir` become invalid once
-            // `Drop` runs / the main thread recycles the Task.
+            // `tarball.temp_dir` become invalid once
+            // the stream drops / the main thread recycles the Task.
             // SAFETY: task is live (see above).
             if (*task).status != TaskStatus::Success && !(*this).extraction.tmpname.is_empty() {
                 // `populate_result` closes `dest` on the success path before the
                 // rename; the early-return failure paths leave it open, so close
                 // it here first — Windows can't remove an open directory.
-                if let Some(d) = (*this).extraction.dest.take() {
-                    d.close();
-                }
-                // SAFETY: task is live (see above). `request` is an untagged
-                // union; `extract` is the active variant. Explicit `&` (no
-                // implicit autoref through the raw-ptr deref) for the
-                // `ManuallyDrop` → `ExtractRequest` deref.
-                let _ = Dir::borrow(&(&(*task).request.extract).tarball.temp_dir)
+                (*this).extraction.dest = None;
+                let _ = Dir::borrow(&tarball.temp_dir)
                     .delete_tree((*this).extraction.tmpname.as_bytes());
             }
 
@@ -851,7 +811,7 @@ impl TarballStream {
 
             // The `Box<TarballStream>` lives in `(*network).tarball_stream`
             // (`generate_network_task_for_tarball` stores `Some(init(..))` there). Take
-            // it out via the Option and drop the Box — this both runs `Drop` and
+            // it out via the Option and drop the Box — this both frees it and
             // leaves `tarball_stream = None` so `HiveArray::put`'s
             // `drop_in_place<NetworkTask>` (1e76047) does not double-free a
             // dangling Box. Before 1e76047 the dangling `Some` was harmless
@@ -863,11 +823,6 @@ impl TarballStream {
             );
             drop((*network).tarball_stream.take());
 
-            // `task.apply_patch_task` is intentionally not touched: the
-            // buffered `.extract` path (`enqueue_extract_npm_package` →
-            // `Task.callback`) never populates it for npm tarballs either —
-            // patching is handled later by the install phase.
-            //
             // Publish last: once the task is on `resolve_tasks` the main
             // thread may immediately recycle it *and* the NetworkTask it
             // references, so nothing below this line may touch either.
@@ -949,8 +904,9 @@ impl TarballStream {
                 if self.extraction.resolved_github_dirname.is_empty() {
                     break 'insert_tag;
                 }
-                if bun_sys::File::openat(
-                    self.extraction.dest.unwrap(),
+                let dest = self.extraction.dest.as_ref().unwrap().fd();
+                if File::openat(
+                    dest,
                     bun_core::zstr!(".bun-tag"),
                     O::WRONLY | O::CREAT | O::TRUNC | if cfg!(windows) { 0 } else { O::NOFOLLOW },
                     0o664,
@@ -958,18 +914,13 @@ impl TarballStream {
                 .and_then(|f| f.write_all(self.extraction.resolved_github_dirname))
                 .is_err()
                 {
-                    let _ = bun_sys::unlinkat(
-                        self.extraction.dest.unwrap(),
-                        bun_core::zstr!(".bun-tag"),
-                    );
+                    let _ = bun_sys::unlinkat(dest, bun_core::zstr!(".bun-tag"));
                 }
             }
         }
 
         // Close the temp dir handle before renaming so Windows can move it.
-        if let Some(d) = self.extraction.dest.take() {
-            d.close();
-        }
+        self.extraction.dest = None;
 
         let (name, basename) = tarball.name_and_basename();
 
@@ -1008,17 +959,6 @@ impl TarballStream {
         self.bytes_received = 0;
         self.content_length = None;
         self.mutex.unlock();
-    }
-}
-
-impl Drop for TarballStream {
-    fn drop(&mut self) {
-        if let Some(out) = self.extraction.out.take() {
-            out.fd().close();
-        }
-        if let Some(d) = self.extraction.dest {
-            d.close();
-        }
     }
 }
 
@@ -1116,11 +1056,7 @@ fn apply_windows_npm_path_escapes(path: &mut [OSPathChar]) {
     // Same transformation as Archiver.extractToDir: encode characters
     // Windows rejects in filenames into the 0xf000 private-use range so
     // the extraction round-trips with node-tar.
-    let mut remain: &mut [OSPathChar] = path;
-    if strings::starts_with_windows_drive_letter_t(&*remain) {
-        remain = &mut remain[2..];
-    }
-    for ch in remain.iter_mut() {
+    for ch in path.iter_mut() {
         match *ch {
             c if c == ('|' as OSPathChar)
                 || c == ('<' as OSPathChar)
@@ -1155,6 +1091,6 @@ fn tokenize_rest_after_first(s: &[OSPathChar], npm: bool) -> &[OSPathChar] {
 }
 
 // Resolved Phase-B paths: Resolution::Tag is the real npm/git/tarball
-// discriminant; Data/Status live on PackageManagerTask.
-use crate::package_manager_task::{Data as TaskData, Status as TaskStatus};
+// discriminant; Job/Status live on PackageManagerTask.
+use crate::package_manager_task::{Job, Status as TaskStatus, Task};
 use crate::resolution::Tag as ResolutionTag;

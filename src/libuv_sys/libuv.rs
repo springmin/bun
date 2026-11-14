@@ -448,7 +448,9 @@ impl Loop {
     /// closed while its owner was alive; what remains here is uSockets' own
     /// pre/check/async/timer, closed by us_loop_free and freed by their close
     /// callbacks when the loop next turns.
-    pub fn close_thread_loop() {
+    ///
+    /// SAFETY: no pointer to this loop is used again. The uws loop and the VM hold one.
+    pub unsafe fn close_thread_loop() {
         /// Caps how long `terminate()` and process exit wait for a close that
         /// never completes. A healthy teardown finishes in milliseconds.
         const CLOSE_THREAD_LOOP_DEADLINE: Duration = Duration::from_secs(10);
@@ -1943,7 +1945,6 @@ pub struct fs_t {
     file: fs_file,
     fs: fs_fs,
 }
-pub type uv_fs_t = fs_t;
 
 impl fs_t {
     #[cfg(debug_assertions)]

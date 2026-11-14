@@ -73,7 +73,7 @@ impl<'a> PipeReader<'a> {
         }
     }
 
-    fn event_loop_ptr(&self) -> *mut MiniEventLoop {
+    fn event_loop(&self) -> &'static MiniEventLoop {
         // SAFETY: handle is a backref set in ProcessHandle::start() before any read; State
         // outlives all handles (lives on `run`'s stack frame for the whole event loop).
         unsafe { (*(*self.handle).state).event_loop }
@@ -104,8 +104,8 @@ bun_io::impl_buffered_reader_parent! {
         let state = &mut *(*handle).state.cast_mut();
         let _ = state.maybe_finish(&mut *handle);
     };
-    loop_           = |this| bun_io::uws_to_native((*(*this).event_loop_ptr()).loop_);
-    event_loop      = |this| (*(*(*this).handle).state).event_loop_handle.as_event_loop_ctx();
+    loop_           = |this| bun_io::uws_to_native((*this).event_loop().loop_);
+    event_loop      = |this| (*(*(*this).handle).state).event_loop.as_event_loop_ctx();
 }
 
 struct ProcessSlot {
@@ -275,23 +275,21 @@ impl<'a> ProcessHandle<'a> {
             end_time: None,
         });
         let self_ptr = std::ptr::from_mut::<Self>(self);
-        // The exit handler re-borrows `self.process`, so go through the
-        // `Process` allocation itself rather than a borrow of the slot.
-        // SAFETY: just spawned; the slot's handle keeps it live.
-        let process = unsafe { &mut *self.process.as_ref().unwrap().process.as_ptr() };
+        // Not a borrow of the slot, which the exit handler borrows again.
+        let process = self.process.as_ref().unwrap().process.this_ptr();
         // SAFETY: `self` is the live `ProcessHandle` slot in `State.handles`;
         // it lives for the whole event loop and outlives `process`.
         process.set_exit_handler(unsafe {
             bun_spawn::ProcessExit::new(bun_spawn::ProcessExitKind::MultiRunHandle, self_ptr)
         });
 
-        match process.watch_or_reap() {
+        match spawn::Process::watch_or_reap(process) {
             Ok(_) => {}
             Err(err) => {
                 if !process.has_exited() {
                     // SAFETY: all-zero is a valid Rusage (POD C struct)
                     let rusage = bun_core::ffi::zeroed::<Rusage>();
-                    process.on_exit(Status::Err(err), &rusage);
+                    spawn::Process::on_exit(process, Status::Err(err), &rusage);
                 }
             }
         }
@@ -356,7 +354,7 @@ impl<'a> ProcessHandle<'a> {
 
 bun_spawn::link_impl_ProcessExit! {
     MultiRunHandle for ProcessHandle<'static> => |this| {
-        on_process_exit(_process, status, _rusage) => {
+        on_process_exit(status, _rusage) => {
             let slot = (*this).process.as_mut().unwrap();
             slot.status = status;
             slot.end_time = Some(Instant::now());
@@ -383,10 +381,9 @@ const RESET: &[u8] = ansi::RESET.as_bytes();
 
 struct State<'a> {
     handles: Box<[ProcessHandle<'a>]>,
-    event_loop: *mut MiniEventLoop,
+    event_loop: &'static MiniEventLoop,
     /// Typed enum mirror of `event_loop` for the io-layer FilePoll vtable
     /// (`bun_io::EventLoopHandle` wraps `*const EventLoopHandle`).
-    event_loop_handle: EventLoopHandle,
     remaining_scripts: usize,
     max_label_len: usize,
     /// The POSIX shell that the scripts run under. `None` on Windows (see `ScriptArgv`).
@@ -1013,7 +1010,6 @@ pub(crate) fn run(ctx: &mut Command::ContextData) -> Result<core::convert::Infal
     let event_loop = bun_event_loop::MiniEventLoop::init_global(
         // SAFETY: env_ptr is the process-lifetime DotEnv loader; no other borrow of it is live yet.
         Some(unsafe { &mut *env_ptr }),
-        None,
     );
     // Windows: recursive kill-on-close Job so cmd.exe/.cmd-shim grandchildren
     // (which escape libuv's SILENT_BREAKAWAY job) die with us. POSIX: no-op.
@@ -1234,7 +1230,6 @@ pub(crate) fn run(ctx: &mut Command::ContextData) -> Result<core::convert::Infal
     let mut state = State {
         handles: Box::default(),
         event_loop,
-        event_loop_handle: EventLoopHandle::init_mini(event_loop),
         remaining_scripts: 0,
         max_label_len,
         shell_bin,
@@ -1355,9 +1350,7 @@ pub(crate) fn run(ctx: &mut Command::ContextData) -> Result<core::convert::Infal
             // non-blocking, drain, then yield. 2 ms while output is flowing,
             // backing off to 10 ms after a few empty passes: each tick still
             // reads, so the added latency stays bounded.
-            unsafe {
-                (*event_loop).tick_without_idle((&raw const state).cast_mut().cast::<c_void>())
-            };
+            event_loop.tick_without_idle((&raw const state).cast_mut().cast::<c_void>());
             let read_any = state.drain_ohos_pipes();
             idle_polls = if read_any {
                 0
@@ -1368,10 +1361,7 @@ pub(crate) fn run(ctx: &mut Command::ContextData) -> Result<core::convert::Infal
             std::thread::sleep(std::time::Duration::from_millis(sleep_ms));
         }
         #[cfg(not(target_env = "ohos"))]
-        {
-            // SAFETY: event_loop points at the thread-lifetime MiniEventLoop singleton.
-            unsafe { (*event_loop).tick_once((&raw const state).cast_mut().cast::<c_void>()) };
-        }
+        event_loop.tick_once((&raw const state).cast_mut().cast::<c_void>());
     }
 
     let status = state.finalize();
