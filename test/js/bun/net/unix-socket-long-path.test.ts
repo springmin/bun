@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { bunEnv, bunExe, isLinux, tempDir } from "harness";
+import { mkdirSync } from "node:fs";
+import { join } from "node:path";
 
 // Linux sun_path is 108 bytes. Bun works around longer paths by opening the
 // parent directory and binding to "/proc/self/fd/<dirfd>/<basename>". The
@@ -10,14 +12,22 @@ import { bunEnv, bunExe, isLinux, tempDir } from "harness";
 
 describe.skipIf(!isLinux)("unix domain socket long-path workaround", () => {
   function makeSockPath(prefix: string, total: number) {
-    // Pad the directory so tempDir() returns something long enough to leave a
-    // short basename that still fits inside /proc/self/fd/N/.
-    const pad = Buffer.alloc(Math.max(0, total - 60), "d").toString();
-    const dir = tempDir(prefix + pad, {});
-    const basenameLen = total - String(dir).length - 1;
-    const sock = String(dir) + "/" + Buffer.alloc(basenameLen, "l").toString();
+    // tempDir() may sit under a long TMPDIR (OHOS uses an app-private folder),
+    // so derive the length with a nested folder instead of padding the name:
+    // the socket is exactly `total` bytes whether TMPDIR is short or long.
+    const base = tempDir(prefix, {});
+    let dir = String(base);
+    // "/s" leaves one byte for the basename that the long-path workaround
+    // resolves through /proc/self/fd/<dirfd>/<basename>.
+    const wanted = total - 2;
+    if (dir.length < wanted) {
+      dir = join(dir, "d".repeat(wanted - dir.length - 1));
+      mkdirSync(dir);
+    }
+    expect(dir.length).toBe(wanted);
+    const sock = dir + "/s";
     expect(sock.length).toBe(total);
-    return { dir, sock };
+    return { dir: base, sock };
   }
 
   async function run(fixture: string, sock: string) {

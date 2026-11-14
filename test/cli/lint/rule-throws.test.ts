@@ -216,7 +216,7 @@ describe.concurrent("with an oxlint config", () => {
         );
         // The fingerprint is a hash of the message, which contains the temporary directory's path.
         const timeless = (text: string) =>
-          text.replace(/[\d.]+(?=m?s\b)|"start_time": [\d.]+|"fingerprint": "\w+"/g, "");
+          text.replace(/\[[\d.]*m?s\]|[\d.]+(?=m?s\b)|"start_time": [\d.]+|"fingerprint": "\w+"/g, "");
         expect({ format, stdout: timeless(a.tidy(a.stdout)), exitCode: a.exitCode }).toEqual({
           format,
           stdout: timeless(b.tidy(b.stdout)),
