@@ -1669,10 +1669,7 @@ impl Terminal {
     #[cfg(target_env = "ohos")]
     fn flush_kernel_buffered_output(&self) {
         let flags = self.flags.get();
-        if flags.contains(Flags::CLOSED)
-            || !flags.contains(Flags::READER_STARTED)
-            || flags.contains(Flags::READER_DONE)
-        {
+        if flags.contains(Flags::CLOSED) || !flags.contains(Flags::READER_STARTED) || self.is_reader_done() {
             return;
         }
         // Both reader callbacks below re-enter user JS and may deref; hold a +1

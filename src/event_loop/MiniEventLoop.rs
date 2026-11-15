@@ -228,7 +228,7 @@ impl MiniEventLoop {
         }
     }
 
-    pub(crate) fn tick_without_idle(&self, context: *mut c_void) {
+    pub fn tick_without_idle(&self, context: *mut c_void) {
         loop {
             let _ = self.tick_concurrent();
             self.run_tasks(context);

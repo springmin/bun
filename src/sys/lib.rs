@@ -2856,7 +2856,7 @@ mod posix_impl {
         let source = File::openat(src_dir, src, O::RDONLY | O::CLOEXEC, 0)?;
         let stat = source.stat()?;
         if stat.st_mode & libc::S_IFMT == libc::S_IFDIR {
-            let _ = source.close();
+            drop(source);
             return Err(Error::from_code(E::EPERM, Tag::link).with_path(src.as_bytes()));
         }
         let dest_file = File::openat(
@@ -2883,8 +2883,8 @@ mod posix_impl {
                 },
             );
         }
-        let _ = source.close();
-        let _ = dest_file.close();
+        drop(source);
+        drop(dest_file);
         result
     }
     /// Materialize an `O_TMPFILE` fd. Fast path

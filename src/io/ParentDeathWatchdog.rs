@@ -699,14 +699,22 @@ fn list_child_pids_linux(parent: libc::pid_t, out: &mut [libc::pid_t]) -> Option
 /// `--no-orphans` teardown path (process exit, or the spawnSync disarm defer),
 /// never in steady-state execution.
 #[cfg(any(target_os = "linux", target_os = "android"))]
+struct CloseFdOnDrop(Fd);
+
+#[cfg(any(target_os = "linux", target_os = "android"))]
+impl Drop for CloseFdOnDrop {
+    fn drop(&mut self) {
+        let _ = bun_sys::close(self.0);
+    }
+}
+
+#[cfg(any(target_os = "linux", target_os = "android"))]
 fn list_child_pids_by_scan(parent: libc::pid_t, out: &mut [libc::pid_t]) -> Option<usize> {
     let proc_fd = match bun_sys::open_dir_for_iteration_os_path(Fd::cwd(), &b"/proc"[..]) {
         Ok(fd) => fd,
         Err(_) => return None,
     };
-    let _proc_fd_guard = scopeguard::guard(proc_fd, |fd| {
-        let _ = bun_sys::close(fd);
-    });
+    let _proc_fd_guard = CloseFdOnDrop(proc_fd);
 
     let mut written: usize = 0;
     let mut it = bun_sys::dir_iterator::iterate(proc_fd);

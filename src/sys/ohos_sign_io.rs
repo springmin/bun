@@ -73,7 +73,7 @@ fn open_above_stdio(path: &Path) -> Maybe<File> {
 fn read_file(path: &Path) -> Maybe<Vec<u8>> {
     let f = open_above_stdio(path)?;
     let out = f.read_to_end();
-    let _ = f.close();
+    drop(f);
     out
 }
 
@@ -85,7 +85,7 @@ fn has_elf_magic(path: &Path) -> bool {
     };
     let mut magic = [0u8; 4];
     let is_elf = matches!(f.read(&mut magic), Ok(4)) && magic == [0x7f, b'E', b'L', b'F'];
-    let _ = f.close();
+    drop(f);
     is_elf
 }
 
@@ -201,7 +201,7 @@ fn write_signed(path: &Path, data: &[u8]) -> Maybe<()> {
                 mode as Mode,
             )?;
             let out = f.write_all(data);
-            let _ = f.close();
+            drop(f);
             out
         }
     }
@@ -218,7 +218,7 @@ fn write_temp_then_rename(tmp: &Path, dest: &Path, data: &[u8]) -> Maybe<()> {
         mode,
     )?;
     f.write_all(data)?;
-    let _ = f.close();
+    drop(f);
     with_zstr(tmp, Tag::rename, |t| {
         with_zstr(dest, Tag::rename, |d| crate::rename(t, d))
     })

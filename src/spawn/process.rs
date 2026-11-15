@@ -1663,6 +1663,36 @@ mod spawn_process_body {
     #[cfg(unix)]
     pub use bun_spawn_sys::spawn_process_posix;
 
+    /// RAII fd owner — closes the wrapped [`Fd`] on drop iff it is valid.
+    /// Used by `sync::spawn_posix` (ppid pidfd on OHOS).
+    #[cfg(any(target_os = "linux", target_os = "android", target_os = "macos"))]
+    struct AutoCloseFd(Fd);
+
+    #[cfg(any(target_os = "linux", target_os = "android", target_os = "macos"))]
+    impl AutoCloseFd {
+        #[inline]
+        const fn new(fd: Fd) -> Self {
+            Self(fd)
+        }
+        #[inline]
+        const fn invalid() -> Self {
+            Self(Fd::INVALID)
+        }
+        #[inline]
+        fn fd(&self) -> Fd {
+            self.0
+        }
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "android", target_os = "macos"))]
+    impl Drop for AutoCloseFd {
+        fn drop(&mut self) {
+            if self.0 != Fd::INVALID {
+                let _ = bun_sys::close(self.0);
+            }
+        }
+    }
+
     /// # Safety
     /// `argv` must point to a null-terminated array of NUL-terminated C
     /// strings with at least one non-null element; `envp` must point to a
