@@ -23,8 +23,8 @@
 #   2. CC/CXX 指向 Homebrew 的 cc/c++ shims (llvm-gcc-compat → ohos-sdk clang,
 #      供 node-gyp 等子进程使用)
 #   3. bun scripts/build.ts 直接驱动构建 (--webkit=local + $BUN_WEBKIT_PATH 编译 WebKit)
-#   4. rust nightly (nightly-2026-07-20, aarch64-linux-ohos) 预装于
-#      ~/.rust-nightly/nightly-2026-07-20 (已签名, 持久目录);
+#   4. rust nightly (nightly-2026-11-14, aarch64-linux-ohos) 预装于
+#      ~/.rust-nightly/nightly-2026-11-14 (已签名, 持久目录);
 #      rust-toolchain.toml 里的 channel 只影响裸 cargo, 构建用 RUST_HOME 硬钉
 #   5. ICU 用 OHOS libc++ (std::__n1) 编译, 由 libc++_static.a 真实解析, 无需 shim
 #
@@ -86,8 +86,8 @@ OUTDIR="$REPO_ROOT/build/release"
 
 # Rust nightly (CI 匹配版本)
 # 安装位置: ~/.rust-nightly/nightly-<date>/ (避免 /data/storage/el2/base/tmp 被清理)
-RUST_VER="nightly-2026-07-20"
-RUST_HOME="${RUST_HOME:-$HOME/.rust-nightly/nightly-2026-07-20}"
+RUST_VER="nightly-2026-11-14"
+RUST_HOME="${RUST_HOME:-$HOME/.rust-nightly/nightly-2026-11-14}"
 RUST_READY="$RUST_HOME/BREW_SIGNED_OK"
 
 # 已知的陈旧 libc++ ABI 命名空间 (mangled 前缀)。std 里没有以双下划线开头的
@@ -137,8 +137,8 @@ phase_rust_nightly() {
   if [ ! -f "$RUST_READY" ] || [ ! -f "$RUST_HOME/bin/rustc" ]; then
     err "Rust nightly $RUST_VER 未安装或未签名!"
     err "请手动安装:"
-    err "  1. curl -fsSL 'https://static.rust-lang.org/dist/2026-07-20/rust-nightly-aarch64-unknown-linux-ohos.tar.gz' -o $TMPDIR/rust-tarballs/"
-    err "  2. curl -fsSL 'https://static.rust-lang.org/dist/2026-07-20/rust-src-nightly.tar.gz' -o $TMPDIR/rust-tarballs/"
+    err "  1. curl -fsSL 'https://static.rust-lang.org/dist/2026-11-14/rust-nightly-aarch64-unknown-linux-ohos.tar.gz' -o $TMPDIR/rust-tarballs/"
+    err "  2. curl -fsSL 'https://static.rust-lang.org/dist/2026-11-14/rust-src-nightly.tar.gz' -o $TMPDIR/rust-tarballs/"
     err "  3. 解压 install.sh --prefix=$RUST_HOME"
     err "  4. binary-sign-tool 签名所有 ELF"
     err "  5. touch $RUST_READY"

@@ -37,7 +37,7 @@
 
 use core::ffi::{CStr, c_char};
 
-use bun_core::{Once, ZBox, env_var, strings};
+use bun_core::{CStrRef, Once, ZBox, env_var, strings};
 use bun_sys as sys;
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -159,7 +159,7 @@ fn is_node_like(base: &[u8]) -> bool {
 /// Checking only the former misses the latter; checking only the latter
 /// misses a plain shell-set global toggle on a call that passed an explicit
 /// non-inheriting `env:` for an unrelated reason. Either one disables it.
-fn is_disabled(env_array: &[*const c_char]) -> bool {
+fn is_disabled(env_array: &[Option<CStrRef<'_>>]) -> bool {
     if find_env_value(env_array, b"BUN_OHOS_NO_NODE_USERINFO").is_some()
         || std::env::var_os("BUN_OHOS_NO_NODE_USERINFO").is_some()
     {
@@ -452,7 +452,7 @@ pub(crate) struct Injection {
 /// whatever storage mechanism it owns. The two call sites (`Bun.spawn`'s
 /// `Vec<ZBox>` vs. the shell interpreter's bump arena) don't share a storage
 /// type, so ownership has to stay on their side.
-pub(crate) fn compute(argv0: &[u8], env_array: &[*const c_char]) -> Option<Injection> {
+pub(crate) fn compute(argv0: &[u8], env_array: &[Option<CStrRef<'_>>]) -> Option<Injection> {
     if !is_node_like(basename(argv0)) {
         return None;
     }
@@ -497,25 +497,16 @@ pub(crate) fn compute(argv0: &[u8], env_array: &[*const c_char]) -> Option<Injec
 /// the *first* match, so an appended-only entry would silently lose to a
 /// stale one earlier in the array (same hazard the PWD block in
 /// `js_bun_spawn_bindings.rs` documents at its `is_pwd_key` closure).
-pub(crate) fn is_managed_key(ptr: *const c_char) -> bool {
-    if ptr.is_null() {
-        return false;
-    }
-    // SAFETY: caller contract -- every entry in a live `env_array` at this
-    // point is NUL-terminated storage that outlives this call, same
-    // invariant `is_pwd_key` and `find_env_value` rely on.
-    let bytes = unsafe { CStr::from_ptr(ptr) }.to_bytes();
+pub(crate) fn is_managed_key(entry: CStrRef<'_>) -> bool {
+    let bytes = entry.to_cstr().to_bytes();
     let key_end = strings::index_of_char_usize(bytes, b'=').unwrap_or(bytes.len());
     matches!(&bytes[..key_end], b"NODE_OPTIONS" | b"BUN_OHOS_USERNAME")
 }
 
-fn find_env_value(env_array: &[*const c_char], key: &[u8]) -> Option<Vec<u8>> {
-    for &ptr in env_array {
-        if ptr.is_null() {
-            continue;
-        }
-        // SAFETY: see `is_managed_key`.
-        let bytes = unsafe { CStr::from_ptr(ptr) }.to_bytes();
+fn find_env_value(env_array: &[Option<CStrRef<'_>>], key: &[u8]) -> Option<Vec<u8>> {
+    for entry in env_array {
+        let Some(entry) = entry else { continue };
+        let bytes = entry.to_cstr().to_bytes();
         let key_end = strings::index_of_char_usize(bytes, b'=').unwrap_or(bytes.len());
         if &bytes[..key_end] == key {
             // musl/glibc getenv() returns the FIRST match -- mirror that so
@@ -601,12 +592,18 @@ mod tests {
             CString::new("PATH=/usr/bin").unwrap(),
             CString::new("BUN_OHOS_NO_NODE_USERINFO=1").unwrap(),
         ];
-        let ptrs: Vec<*const c_char> = entries.iter().map(|e| e.as_ptr()).collect();
-        assert!(is_disabled(&ptrs));
+        let refs: Vec<Option<CStrRef<'_>>> = entries
+            .iter()
+            .map(|e| Some(CStrRef::from(e.as_c_str())))
+            .collect();
+        assert!(is_disabled(&refs));
 
         let entries_without: Vec<CString> = vec![CString::new("PATH=/usr/bin").unwrap()];
-        let ptrs_without: Vec<*const c_char> = entries_without.iter().map(|e| e.as_ptr()).collect();
-        assert!(!is_disabled(&ptrs_without));
+        let refs_without: Vec<Option<CStrRef<'_>>> = entries_without
+            .iter()
+            .map(|e| Some(CStrRef::from(e.as_c_str())))
+            .collect();
+        assert!(!is_disabled(&refs_without));
     }
 
     #[test]
@@ -616,8 +613,11 @@ mod tests {
         // BUN_OHOS_NO_NODE_USERINFO turns this off.
         let entries: Vec<CString> =
             vec![CString::new("OHOS_COMPAT_SHIM_DISABLE=close_range,getpwuid_r").unwrap()];
-        let ptrs: Vec<*const c_char> = entries.iter().map(|e| e.as_ptr()).collect();
-        assert!(!is_disabled(&ptrs));
+        let refs: Vec<Option<CStrRef<'_>>> = entries
+            .iter()
+            .map(|e| Some(CStrRef::from(e.as_c_str())))
+            .collect();
+        assert!(!is_disabled(&refs));
     }
 
     #[test]

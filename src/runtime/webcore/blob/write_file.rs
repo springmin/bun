@@ -145,13 +145,8 @@ impl FileOpener for WriteFile {
             .as_file()
             .pathlike
     }
-    fn try_mkdirp(
-        &mut self,
-        err: bun_sys::Error,
-        path: &bun_core::ZStr,
-        display_path: &[u8],
-    ) -> Retry {
-        mkdir_if_not_exists(self, &err, path, display_path)
+    fn try_mkdirp(&mut self, err: bun_sys::Error, path: &bun_core::ZStr) -> Retry {
+        mkdir_if_not_exists(self, &err, path)
     }
 }
 
@@ -510,10 +505,10 @@ pub(crate) use self::windows_impl::WriteFileWindows;
 mod windows_impl {
     use super::*;
     use crate::dispatch::fold;
-    use bun_io::{self as aio, IntrusiveUvFs as _, KeepAlive};
+    use bun_io::{self as aio, IntrusiveUvFs as _, JsKeepAlive};
     // `bun_jsc::EventLoop` is a *module* (namespace re-export); the struct
     // lives one level deeper.
-    use bun_jsc::{ConcurrentTask, event_loop::EventLoop};
+    use bun_jsc::event_loop::EventLoop;
     use bun_sys::ReturnCodeExt as _;
     use bun_sys::windows::libuv as uv;
 
@@ -533,28 +528,35 @@ mod windows_impl {
         pub(crate) err: Option<sys::Error>,
         pub(crate) total_written: usize,
         pub(crate) event_loop: &'static EventLoop,
-        pub poll_ref: KeepAlive,
+        _keep_alive: JsKeepAlive,
 
         pub(crate) owned_fd: bool,
     }
 
     bun_io::intrusive_uv_fs!(WriteFileWindows, io_request);
 
-    /// `mkdirp` finished on the work pool: the hop back to the JS thread.
-    impl bun_event_loop::Taskable for WriteFileWindows {
-        const TAG: bun_event_loop::TaskTag = bun_event_loop::task_tag::WriteFileWindowsMkdirp;
-        unsafe fn release_unrun(this: *mut Self) {
-            // SAFETY: fn contract: the box that `on_mkdirp_complete_concurrent` posted.
-            drop(unsafe { bun_core::heap::take(this) });
+    impl crate::node::fs::async_::AsyncMkdirpTarget for WriteFileWindows {
+        fn directory(&self) -> &[u8] {
+            let path = self.path();
+            bun_core::dirname(path).unwrap_or(path)
         }
+        fn set_error(&mut self, err: sys::Error) {
+            self.err = Some(err);
+        }
+    }
+
+    /// `mkdirp` finished on the work pool: the hop back to the JS thread.
+    impl bun_event_loop::BoxedTask for WriteFileWindows {
+        const TAG: bun_event_loop::TaskTag = bun_event_loop::task_tag::WriteFileWindowsMkdirp;
+        fn release_unrun(self: Box<Self>) {}
         /// Enters no context.
-        unsafe fn context(_: *const Self) -> bun_event_loop::ContextId {
+        fn context(&self) -> bun_event_loop::ContextId {
             bun_event_loop::ContextId::NONE
         }
     }
 
     impl WriteFileWindows {
-        pub(crate) fn create(
+        pub(crate) fn start(
             event_loop: &'static EventLoop,
             script_context: &bun_jsc::ScriptExecutionContext,
             file_blob: Blob,
@@ -585,32 +587,16 @@ mod windows_impl {
                 fd: -1,
                 err: None,
                 total_written: 0,
-                poll_ref: KeepAlive::default(),
+                _keep_alive: JsKeepAlive::active(),
                 owned_fd: false,
             });
             write_file.io_request.loop_ = event_loop.uv_loop();
-            write_file.poll_ref.ref_(event_loop.event_loop_ctx());
 
             let store = write_file.file_blob.store.get().as_ref().unwrap();
             let PathOrFileDescriptor::Fd(fd) = &store.data.as_file().pathlike else {
                 return write_file.open();
             };
-            write_file.fd = 'brk: {
-                // `RareData::std{out,err,in}_store` is type-erased: compare the addresses.
-                if let Some(rare) = event_loop.vm_ref().rare_data.get() {
-                    let store_ptr = Some(store.as_ptr().cast::<c_void>());
-                    if rare.stdout_store.get().map(|p| p.as_ptr()) == store_ptr {
-                        break 'brk 1;
-                    } else if rare.stderr_store.get().map(|p| p.as_ptr()) == store_ptr {
-                        break 'brk 2;
-                    } else if rare.stdin_store.get().map(|p| p.as_ptr()) == store_ptr {
-                        break 'brk 0;
-                    }
-                }
-
-                // The file stored descriptor is not stdin, stdout, or stderr.
-                fd.uv()
-            };
+            write_file.fd = fd.uv();
 
             write_file.do_write_loop()
         }
@@ -659,7 +645,7 @@ mod windows_impl {
 
         extern "C" fn on_open(req: *mut uv::fs_t) {
             // SAFETY: `req` is the `io_request` of the box that `open` left to libuv.
-            let mut this = unsafe { bun_core::heap::take(WriteFileWindows::from_uv_fs(req)) };
+            let mut this = unsafe { WriteFileWindows::take_from_uv_fs(req) };
             let rc = this.io_request.result;
             #[cfg(debug_assertions)]
             bun_output::scoped_log!(
@@ -691,17 +677,7 @@ mod windows_impl {
         fn mkdirp(mut self: Box<Self>) {
             bun_output::scoped_log!(WriteFile, "mkdirp");
             self.mkdirp_if_not_exists = false;
-
-            let path = self.path();
-            // BORROW: points into the store of `file_blob`, alive until `completion` runs.
-            let path: *const [u8] = bun_core::dirname(path).unwrap_or(path);
-            crate::node::fs::async_::AsyncMkdirp::schedule(crate::node::fs::async_::AsyncMkdirp {
-                completion: Self::on_mkdirp_complete_concurrent,
-                completion_ctx: bun_core::heap::into_raw(self).cast::<()>(),
-                path,
-                ticket: bun_jsc::virtual_machine::VirtualMachine::get().ticket(),
-                task: Default::default(),
-            });
+            crate::node::fs::async_::AsyncMkdirp::schedule(self);
         }
 
         pub(crate) fn on_mkdirp_complete(mut self: Box<Self>) {
@@ -711,26 +687,9 @@ mod windows_impl {
             });
         }
 
-        fn on_mkdirp_complete_concurrent(
-            ctx: *mut (),
-            err_: bun_sys::Result<()>,
-            ticket: &bun_jsc::Ticket,
-        ) {
-            // SAFETY: `ctx` is the `*mut Self` stored in `AsyncMkdirp.completion_ctx`
-            // by `mkdirp` above; sole owner on this concurrent path.
-            let this = unsafe { bun_ptr::callback_ctx::<WriteFileWindows>(ctx.cast()) };
-            bun_output::scoped_log!(WriteFile, "mkdirp complete");
-            debug_assert!(this.err.is_none());
-            this.err = match err_ {
-                bun_sys::Result::Err(e) => Some(e),
-                bun_sys::Result::Ok(()) => None,
-            };
-            ticket.post(ConcurrentTask::create_from(ctx.cast::<Self>()));
-        }
-
         extern "C" fn on_write_complete(req: *mut uv::fs_t) {
             // SAFETY: `req` is the `io_request` of the box that `do_write_loop` left to libuv.
-            let mut this = unsafe { bun_core::heap::take(WriteFileWindows::from_uv_fs(req)) };
+            let mut this = unsafe { WriteFileWindows::take_from_uv_fs(req) };
             let rc = this.io_request.result;
             if let Some(err) = rc.to_error(sys::Tag::write) {
                 fold(this.throw(err));
@@ -744,7 +703,6 @@ mod windows_impl {
         fn on_finish(mut self: Box<Self>) -> jsc::JsResult<()> {
             let _exit = self.event_loop.enter_scope();
 
-            // We don't need to enqueue task since this is already in a task.
             let (mut promise, global_this) = (self.promise.take(), self.global_this);
             let _context =
                 bun_jsc::virtual_machine::VirtualMachine::get().enter_context(self.context);
@@ -839,8 +797,6 @@ mod windows_impl {
             if self.fd > 0 && self.owned_fd {
                 aio::Closer::close(Fd::from_uv(self.fd), self.io_request.loop_);
             }
-            self.poll_ref.disable();
-            self.io_request.deinit();
         }
     }
 }
@@ -908,18 +864,15 @@ impl WriteFileWaitFromLockedValueTask {
         let global_ref = this.global_this;
         let global_this = global_ref.get();
         let context = global_this.bun_vm().context_of(this.context);
-        let mut file_blob = core::mem::take(&mut this.file_blob);
         match value {
             body::Value::Error(err_ref) => {
                 let err = err_ref.to_js(global_this);
-                file_blob.detach();
                 let _ = value.use_();
                 this.promise
                     .get()
                     .reject_with_async_stack(global_this, Ok(err))?;
             }
             body::Value::Used => {
-                file_blob.detach();
                 let _ = value.use_();
                 this.promise.get().reject(
                     global_this,
@@ -938,7 +891,7 @@ impl WriteFileWaitFromLockedValueTask {
                 let new_promise = match blob::write_file_with_source_destination(
                     &global_this.js_thread(context),
                     &mut blob,
-                    &mut file_blob,
+                    &mut this.file_blob,
                     &blob::WriteFileOptions {
                         mkdirp_if_not_exists: Some(this.mkdirp_if_not_exists),
                         ..Default::default()
@@ -946,13 +899,10 @@ impl WriteFileWaitFromLockedValueTask {
                 ) {
                     Ok(p) => p,
                     Err(err) => {
-                        file_blob.detach();
                         this.promise.get().reject(global_this, Err(err))?;
                         return Ok(());
                     }
                 };
-
-                let _g = scopeguard::guard((), |()| file_blob.detach());
 
                 if let Some(p) = new_promise.as_any_promise() {
                     let promise = this.promise.get();
@@ -970,8 +920,6 @@ impl WriteFileWaitFromLockedValueTask {
             }
             body::Value::Locked(locked) => {
                 // Re-registering for a future callback — `this` stays alive.
-                // Restore the moved-out blob so the next `then()` has its store.
-                this.file_blob = file_blob;
                 locked.on_receive_value = Some(Self::then_wrap);
                 locked.task = Some(bun_core::heap::into_raw_nn(this).cast::<c_void>());
             }

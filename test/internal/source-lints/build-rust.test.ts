@@ -29,13 +29,7 @@ import {
   type Toolchain,
 } from "../../../scripts/build/config.ts";
 import { computeDepFlags, computeFlags } from "../../../scripts/build/flags.ts";
-import {
-  allRustTargets,
-  cargoBuildInvocation,
-  cargoBuildStdArg,
-  rustTargetIsTier3,
-  rustTriple,
-} from "../../../scripts/build/rust.ts";
+import { allRustTargets, cargoBuildInvocation, cargoBuildStdArg, rustTriple } from "../../../scripts/build/rust.ts";
 
 const repoRoot = join(import.meta.dir, "..", "..", "..");
 
@@ -116,7 +110,7 @@ describe("allRustTargets", () => {
     expect(listed).toEqual([...new Set(built)].sort());
   });
 
-  test("rust-toolchain.toml preinstalls std for exactly the triples that have a prebuilt one", () => {
+  test("rust-toolchain.toml preinstalls std for exactly those triples", () => {
     const { toolchain } = Bun.TOML.parse(readFileSync(join(repoRoot, "rust-toolchain.toml"), "utf8")) as {
       toolchain: { targets: string[] };
     };
@@ -131,7 +125,7 @@ describe("allRustTargets", () => {
     expect(allRustTargets.filter(rustTargetIsTier3)).toEqual(["aarch64-unknown-freebsd"]);
   });
 
-  test("every target builds std from source with the flag rust:check-all uses for Tier 3", () => {
+  test("FreeBSD builds std from source on both architectures", () => {
     const freebsdArm64 = cargoBuildInvocation(
       resolve({ os: "freebsd", arch: "aarch64", freebsdSysroot: "/fake", buildType: "Debug" }),
     );
@@ -167,7 +161,6 @@ describe("build-std feature set", () => {
     expect(buildStdArgs(resolve({ os: "darwin", arch: "aarch64" }))).toEqual(release);
     expect(buildStdArgs(resolve({ os: "windows", arch: "x64", winsysroot: "/fake" }))).toEqual(release);
     expect(buildStdArgs(resolve({ os: "freebsd", arch: "x64", freebsdSysroot: "/fake" }))).toEqual(release);
-    // Tier 3: builds std from source either way; release still trims it.
     expect(buildStdArgs(resolve({ os: "freebsd", arch: "aarch64", freebsdSysroot: "/fake" }))).toEqual(release);
   });
 
@@ -176,7 +169,6 @@ describe("build-std feature set", () => {
     // release-asan and debug-asan: std gets the instrumentation.
     expect(buildStdArgs(resolve({ ...linuxX64, asan: true }))).toEqual([cargoBuildStdArg]);
     expect(buildStdArgs(resolve({ ...linuxX64, buildType: "Debug", asan: true }))).toEqual([cargoBuildStdArg]);
-    // A Tier 3 debug build: there is no prebuilt std.
     const freebsdArm64: PartialConfig = { os: "freebsd", arch: "aarch64", freebsdSysroot: "/fake", buildType: "Debug" };
     expect(buildStdArgs(resolve(freebsdArm64))).toEqual([cargoBuildStdArg]);
     // A plain debug build: the link takes std's rlibs from the graph like every other crate's, so std is in it.
