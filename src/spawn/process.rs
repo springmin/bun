@@ -1500,16 +1500,6 @@ mod spawn_process_body {
         }
     }
 
-    /// # Safety
-    /// `argv` must point to a null-terminated array of NUL-terminated C
-    /// strings with at least one non-null element; `envp` must point to a
-    /// null-terminated array of NUL-terminated C strings, or be null on
-    /// Windows (libuv then inherits the parent environment). Both must remain
-    /// valid for the duration of the call.
-    pub unsafe fn spawn_process(
-        options: &SpawnOptions,
-        argv: Argv, // [*:null]?[*:0]const u8
-        envp: Envp,
     /// Without `envp`, the child inherits ours. Panics if neither `argv0` nor `argv[0]` is there.
     pub fn spawn_process(
         options: &SpawnOptions<'_>,

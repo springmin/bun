@@ -5843,6 +5843,20 @@ impl DynLib {
     ///
     /// SAFETY: the code that the library runs when it is loaded, searched and unloaded is sound in this process.
     pub unsafe fn open_with_flags(filename: &ZStr, flags: i32) -> Option<Self> {
+        // OHOS: the kernel refuses to dlopen an ELF without a .codesign
+        // section. Sign native libraries here so `bun:ffi`'s dlopen works on
+        // a library a build script just produced. Extensions only, like the
+        // `Bun__dlopen` this replaced: host executables are already signed or
+        // on a read-only filesystem, where signing fails with ETXTBSY/EROFS.
+        #[cfg(target_env = "ohos")]
+        {
+            let bytes = filename.as_bytes();
+            if bytes.ends_with(b".node") || bytes.ends_with(b".so") {
+                use std::os::unix::ffi::OsStrExt as _;
+                let p = std::path::Path::new(std::ffi::OsStr::from_bytes(bytes));
+                let _ = ohos_sign_io::ensure_signed_inplace(p);
+            }
+        }
         // SAFETY: filename is NUL-terminated. The caller answers for the library.
         #[cfg(unix)]
         let handle = unsafe { libc::dlopen(filename.as_ptr(), flags) };

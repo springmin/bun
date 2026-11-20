@@ -1736,7 +1736,7 @@ impl PackageFiles<'_> {
                 // The folder compare reads each file's size and mtime: a copy whose
                 // mtime is its own creation time would read as changed.
                 let _ = sys::futimens(
-                    outfile,
+                    outfile.fd(),
                     sys::TimeLike {
                         sec: stat.st_atime as i64,
                         nsec: stat.st_atime_nsec as i64,

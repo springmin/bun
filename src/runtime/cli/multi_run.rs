@@ -104,12 +104,19 @@ impl ScriptOutput<'_> {
         self.line_buffer.extend_from_slice(chunk);
         let writer = self.writer();
 
-        // Process complete lines
-        while let Some(newline_pos) = strings::index_of_char_usize(&self.line_buffer, b'\n') {
+        // Process complete lines. Consume with an offset and drain the
+        // consumed prefix once: `drain_front` per line memmoves the whole
+        // remainder, which is O(n²) for a chunk with many short lines.
+        let mut consumed = 0;
+        while let Some(rel) = strings::index_of_char_usize(&self.line_buffer[consumed..], b'\n') {
+            let end = consumed + rel + 1;
+            let line = &self.line_buffer[consumed..end];
             self.shared.write_prefix(self.config, writer)?;
-            writer.write_all(&self.line_buffer[0..newline_pos + 1])?;
-            // Remove processed line from buffer
-            self.line_buffer.drain_front(newline_pos + 1);
+            writer.write_all(line)?;
+            consumed = end;
+        }
+        if consumed > 0 {
+            self.line_buffer.drain_front(consumed);
         }
         Ok(())
     }
@@ -153,6 +160,23 @@ impl<'a> PipeReader<'a> {
             let _ = self.output.read_chunk(&chunk);
             true
         });
+    }
+
+    /// OHOS: `read` for a reader that no poll watches (see `ProcessHandle::start`).
+    /// `true` if any bytes arrived, so the caller can back off when idle.
+    #[cfg(target_env = "ohos")]
+    fn drain_available(&mut self) -> bool {
+        if self.reader.is_done() {
+            return false;
+        }
+        let event_loop = self.output.shared.event_loop.as_event_loop_ctx();
+        let mut read_any = false;
+        let _ = self.reader.read_chunks(event_loop, None, |chunk, _| {
+            read_any |= !chunk.is_empty();
+            let _ = self.output.read_chunk(&chunk);
+            true
+        });
+        read_any
     }
 
     /// After the exit: a leftover child may hold the pipe open, so its EOF may never come.
@@ -246,7 +270,14 @@ impl<'a> ProcessHandle<'a> {
             if let Some(fd) = file.map(bun_sys::File::into_raw) {
                 let _ = bun_sys::set_nonblocking(fd);
                 let event_loop = self.shared.event_loop.as_event_loop_ctx();
-                let _ = pipe.reader.start(event_loop, fd, true)?;
+                // OHOS: the kernel never reports these pipes readable to
+                // epoll while they are empty (T50) and then stops reporting
+                // them after a child writes, so a poll-driven reader never
+                // runs and a child that outruns the socket buffer blocks
+                // forever. Start unpolled; the run loop drains every tick.
+                let _ = pipe
+                    .reader
+                    .start(event_loop, fd, !cfg!(target_env = "ohos"))?;
             }
         }
         #[cfg(not(unix))]
@@ -353,6 +384,23 @@ impl<'a> State<'a> {
                 self.abort();
             }
         }
+    }
+
+    /// OHOS: read whatever the running children wrote since the last tick.
+    /// Returns true if any bytes were read.
+    #[cfg(target_env = "ohos")]
+    fn drain_ohos_pipes(&mut self) -> bool {
+        let mut read_any = false;
+        for handle in self.handles.iter_mut() {
+            // Not started yet (waiting on a dependency) or already finished
+            // and closed: neither has an fd this may touch.
+            if handle.finished || handle.process.is_none() {
+                continue;
+            }
+            read_any |= handle.stdout_reader.drain_available();
+            read_any |= handle.stderr_reader.drain_available();
+        }
+        read_any
     }
 
     fn must_abort(&self) -> bool {
@@ -1009,6 +1057,8 @@ pub(crate) fn run(ctx: &mut Command::ContextData) -> Result<core::convert::Infal
 
     AbortHandler::install();
 
+    #[cfg(target_env = "ohos")]
+    let mut idle_polls: u32 = 0;
     loop {
         state.finish_exited();
         if state.is_done() {
@@ -1018,6 +1068,23 @@ pub(crate) fn run(ctx: &mut Command::ContextData) -> Result<core::convert::Infal
             AbortHandler::uninstall();
             state.abort();
         }
+        #[cfg(target_env = "ohos")]
+        {
+            // A blocking tick would stall forever: the readers are unpolled
+            // (see `ProcessHandle::start`), so only the pidfd wakes the loop,
+            // and that is the child's exit. Poll non-blocking, drain, yield.
+            // 2 ms while output flows, 10 ms after a few empty passes.
+            event_loop.tick_without_idle(core::ptr::null_mut());
+            let read_any = state.drain_ohos_pipes();
+            idle_polls = if read_any {
+                0
+            } else {
+                (idle_polls + 1).min(16)
+            };
+            let sleep_ms = if idle_polls < 8 { 2 } else { 10 };
+            std::thread::sleep(std::time::Duration::from_millis(sleep_ms));
+        }
+        #[cfg(not(target_env = "ohos"))]
         event_loop.tick_once(core::ptr::null_mut());
     }
 

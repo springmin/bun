@@ -51,6 +51,11 @@ impl<'a> Event<'a> {
     pub fn name(&self) -> Option<&'a [u8]> {
         (!self.padded_name.is_empty()).then(|| bun_core::slice_to_nul(self.padded_name))
     }
+
+    /// Bytes this record occupies, header and padded name included.
+    pub fn size(&self) -> usize {
+        Self::HEADER_SIZE + self.padded_name.len()
+    }
 }
 
 /// The events in the bytes read from an inotify descriptor.

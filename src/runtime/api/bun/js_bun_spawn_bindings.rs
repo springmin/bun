@@ -6,7 +6,7 @@ use std::io::Write as _;
 use crate::ipc as IPC;
 #[cfg(not(windows))]
 use bun_core::StackCheck;
-use bun_core::{CStrList, CStrRef, String as BunString, ZBox, ZStr, strings};
+use bun_core::{CStrList, CStrRef, String as BunString, ZStr, strings};
 use bun_core::{Output, Timespec, TimespecMockMode, ZBox, fmt as bun_fmt};
 use bun_io::max_buf;
 use bun_jsc::bindgen::{JsLocal, JsScope};

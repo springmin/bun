@@ -16,8 +16,6 @@ use bun_core::CStrRef;
 #[cfg(target_os = "macos")]
 use bun_core::Output;
 use bun_core::strings;
-#[cfg(unix)]
-use bun_sys::FdExt as _;
 use bun_sys::{self, Fd, File};
 
 #[cfg(not(windows))]
@@ -916,11 +914,7 @@ pub fn spawn_process_posix(
     // the already-signed interpreter; the script path becomes an argv entry
     // and is only opened/read (not exec'd) by the interpreter.
     #[cfg(target_env = "ohos")]
-    let _ohos_shebang_keepalive: Option<(
-        std::ffi::CString,
-        Vec<std::ffi::CString>,
-        Vec<*const c_char>,
-    )> = 'shim: {
+    let _ohos_shebang_keepalive: Option<(std::ffi::CString, Vec<std::ffi::CString>)> = 'shim: {
         use std::io::Read as _;
         use std::os::unix::ffi::OsStrExt as _;
         let path = std::ffi::OsStr::from_bytes(argv0_cstr.to_bytes());

@@ -16,11 +16,10 @@
       "windows-aarch64": "windows-aarch64-11-test-bun"
     }
   },
-<<<<<<< HEAD
   "aot/a-trimmed-executable-without-builtin-source.test.ts": {
     "default": 20000,
     "asan": 80000
-=======
+  },
   "aot/an-import-in-a-text-calls-the-replaced-eval.test.ts": {
     "default": 6200,
     "asan": 24800
@@ -52,7 +51,6 @@
   "aot/test-runs-without-function-source.test.ts": {
     "default": 60000,
     "asan": 240000
->>>>>>> oven/main
   },
   "aot/memory-of-builds-that-follow-a-path.test.ts": {
     "default": 60000,

@@ -2318,15 +2318,16 @@ impl Resolver {
         // depending on resolver timeout behavior under load, where a
         // malformed host could otherwise surface as ETIMEOUT.
         if strings::contains_any(name, b"/?#") {
-            let mut promise = JSPromiseStrong::init(global_this);
+            let promise = JSPromiseStrong::init(global_this);
             let promise_value = promise.value();
-            error_to_deferred(
+            cares_jsc::reject_later(
+                promise,
                 c_ares::Error::ENOTFOUND,
                 b"getaddrinfo",
                 Some(name),
-                &mut promise,
-            )
-            .reject_later(global_this, context);
+                global_this,
+                context,
+            );
             return Ok(promise_value);
         }
 

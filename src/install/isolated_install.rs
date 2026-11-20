@@ -45,7 +45,7 @@ use bun_wyhash::{Wyhash, Wyhash11};
 use crate::analytics;
 #[cfg(target_env = "ohos")]
 use crate::bun_fs::FileSystem;
-use crate::bun_progress::{Node as ProgressNode, Progress};
+use crate::bun_progress::Progress;
 use crate::lockfile::tree::is_filtered_dependency_or_workspace;
 use crate::lockfile::{self, Lockfile};
 use crate::network_task::ForTarballError;

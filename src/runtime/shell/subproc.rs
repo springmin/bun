@@ -2,7 +2,6 @@
 use core::cell::Cell;
 use core::ffi::{c_char, c_void};
 #[cfg(target_env = "ohos")]
-use core::ffi::CStr;
 use std::rc::Rc;
 
 #[cfg(unix)]

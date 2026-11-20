@@ -109,6 +109,15 @@ export const cpuTargetFlags: Flag[] = [
     desc: "ARM64 Windows: ARMv8-A base + CRC, generic tuning (clang-cl prefix required)",
   },
   {
+    // Same baseline as Android: every ARMv8-A core OHOS runs on has the CRC
+    // extension, and upstream's highway_checksums.cpp calls __crc32d
+    // unconditionally on aarch64. No -mtune, so codegen beyond the extension
+    // stays generic.
+    flag: "-march=armv8-a+crc",
+    when: c => c.ohos,
+    desc: "OHOS ARM64: ARMv8-A base + CRC, generic tuning",
+  },
+  {
     flag: "-march=nehalem",
     when: c => c.x64,
     desc: "x64: Nehalem (2008) — no AVX, broadest compatibility",

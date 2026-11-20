@@ -994,3 +994,46 @@ const _: () = assert!(core::mem::size_of::<TaskCallbackContext>() == 32);
 // The easy way would be:
 // 1. Download all packages, parsing their dependencies and enqueuing all dependencies for resolution
 // 2.
+
+/// Copy `src_dir/src_name` → `dest_dir/dest_path`. On EACCES/EPERM (e.g.
+/// OHOS SELinux blocking linkat), unlink the destination and retry create.
+pub(crate) fn copy_file_fallback(
+    src_dir: bun_sys::Fd,
+    src_name: &bun_core::ZStr,
+    dest_dir: bun_sys::Fd,
+    dest_path_z: &bun_core::ZStr,
+) -> bun_sys::Result<()> {
+    use bun_sys as sys;
+    let inf = sys::File::openat(src_dir, src_name, sys::O::RDONLY, 0)?;
+    let dest_path: &[u8] = dest_path_z;
+    let outf = match sys::File::create(dest_dir, dest_path, true) {
+        Ok(f) => f,
+        Err(ref e) if e.get_errno() == sys::E::EACCES || e.get_errno() == sys::E::EPERM => {
+            let _ = sys::unlinkat(dest_dir, dest_path_z);
+            sys::File::create(dest_dir, dest_path, true)?
+        }
+        Err(e) => return Err(e),
+    };
+    sys::copy_file::copy_file(inf.handle(), outf.handle())?;
+    if let Ok(stat) = sys::fstat(inf.handle()) {
+        let _ = sys::fchmod(outf.handle(), stat.st_mode);
+        // A copy that stands in for a hard link keeps the source's times: the
+        // folder compare reads the mtime (see `is_hardlinked_copy`).
+        #[cfg(unix)]
+        {
+            let _ = sys::futimens(
+                outf.handle(),
+                sys::TimeLike {
+                    sec: stat.st_atime as i64,
+                    nsec: stat.st_atime_nsec as i64,
+                },
+                sys::TimeLike {
+                    sec: stat.st_mtime as i64,
+                    nsec: stat.st_mtime_nsec as i64,
+                },
+            );
+        }
+    }
+    Ok(())
+}
+

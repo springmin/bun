@@ -1896,9 +1896,7 @@
     "aot/texts-matched-across-awaits.test.ts",
     "aot/typescript-that-tsc-rejects.test.ts",
     "aot/values-held-across-many-calls.test.ts",
-<<<<<<< HEAD
-    "aot/a-trimmed-executable-without-builtin-source.test.ts"
-=======
+    "aot/a-trimmed-executable-without-builtin-source.test.ts",
     "aot/cli/frames-of-built-in-modules.test.ts",
     "aot/test-runs-without-function-source.test.ts",
     "aot/options-of-the-run-that-need-nothing.test.ts",
@@ -1907,6 +1905,5 @@
     "aot/type-errors-that-several-projects-are-asked-about.test.ts",
     "aot/a-file-that-only-asks-about-evaluators-is-built-where-code-from-disk-is-allowed.test.ts",
     "aot/an-import-in-a-text-calls-the-replaced-eval.test.ts"
->>>>>>> oven/main
   ]
 }

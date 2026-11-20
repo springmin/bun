@@ -781,7 +781,21 @@ impl Linux {
             // Track which PathWatchers got at least one event so we flush() each once.
             let mut touched: ArrayHashMap<WatcherId, ()> = ArrayHashMap::default();
 
-            for ev in InotifyEventIterator(&buf[..n]) {
+            // OHOS below writes into `buf`'s tail while `ev` borrows its
+            // front; taken here, before any borrow of `buf` exists.
+            #[cfg(target_env = "ohos")]
+            let buf_ptr = buf.as_mut_ptr();
+            #[cfg(target_env = "ohos")]
+            let buf_len = buf.len();
+
+            let mut offset = 0usize;
+            while offset < n {
+                let Some(ev) = InotifyEventIterator(&buf[offset..n]).next() else {
+                    break;
+                };
+                // Points past this event, at the first lookahead candidate, and
+                // re-read below grows `n` so the next pass sees the new events.
+                offset += ev.size();
                 let wd = ev.watch_descriptor;
 
                 // Queue hit fs.inotify.max_queued_events and the kernel dropped
@@ -833,13 +847,19 @@ impl Linux {
                 #[cfg(target_env = "ohos")]
                 {
                     // Suppress the OpenHarmony creation-labeling ATTRIB (see
-                    // `attrib_shadowed_by_create`). `i` already points past this
-                    // event, i.e. at the first lookahead candidate.
+                    // `attrib_shadowed_by_create`). `offset` already points past
+                    // this event, i.e. at the first lookahead candidate.
                     if ev.mask & IN::ATTRIB != 0 && !name.is_empty() {
                         let attrib_wd = ev.watch_descriptor;
-                        let buf_bytes = bun_core::bytes_of_mut(&mut *buf);
+                        // SAFETY: the lookahead below only writes the tail
+                        // `buf[n..]`; `ev`/`name` point into `buf[..n]`, which
+                        // nothing writes. A raw slice sidesteps the borrow
+                        // `ev` holds on `buf` for that tail write.
+                        let buf_bytes: &mut [u8] = unsafe {
+                            core::slice::from_raw_parts_mut(buf_ptr, buf_len)
+                        };
                         let mut shadowed =
-                            attrib_shadowed_by_create(&buf_bytes[..n], i, attrib_wd, name);
+                            attrib_shadowed_by_create(&buf_bytes[..n], offset, attrib_wd, name);
                         if !shadowed && n < buf_bytes.len() {
                             // The labeling CRE is queued by the same syscall as the
                             // ATTRIB, but on a quiet queue the reader wakes on the
@@ -868,7 +888,7 @@ impl Linux {
                                 if got > 0 {
                                     n += got;
                                     shadowed =
-                                        attrib_shadowed_by_create(&buf_bytes[..n], i, attrib_wd, name);
+                                        attrib_shadowed_by_create(&buf_bytes[..n], offset, attrib_wd, name);
                                 }
                             }
                         }
@@ -1007,11 +1027,6 @@ impl Linux {
     }
 }
 
-/// The kernel `struct inotify_event` header. Shared with the bundler watcher;
-/// field naming there is `watch_descriptor` / `name_len`.
-#[cfg(any(target_os = "linux", target_os = "android"))]
-use bun_watcher::inotify_watcher::Event as InotifyEvent;
-
 /// OpenHarmony kernels queue a spurious IN_ATTRIB immediately before IN_CREATE
 /// when an inode is created via open(O_CREAT)/mkdir (security labeling at
 /// creation; established by a raw inotify probe against the device kernel,
@@ -1027,21 +1042,21 @@ use bun_watcher::inotify_watcher::Event as InotifyEvent;
 /// batches (a mass chmod never matches anyway).
 #[cfg(target_env = "ohos")]
 fn attrib_shadowed_by_create(buf: &[u8], mut off: usize, wd: i32, name: &[u8]) -> bool {
-    const HEADER: usize = core::mem::size_of::<InotifyEvent>();
+    const HEADER: usize = core::mem::size_of::<libc::inotify_event>();
     for _ in 0..16 {
         if off + HEADER > buf.len() {
             return false;
         }
         // SAFETY: same guarantees as the reader loop — inotify returns whole
         // events, `buf` came from the 4-byte-aligned AlignedBuf, and every
-        // offset derived from kernel-reported name_len stays in bounds
-        // (checked immediately below).
-        let ev: &InotifyEvent = unsafe { &*buf.as_ptr().add(off).cast::<InotifyEvent>() };
-        let next = off + HEADER + ev.name_len as usize;
+        // offset derived from kernel-reported `len` stays in bounds (checked
+        // immediately below).
+        let ev = unsafe { &*buf.as_ptr().add(off).cast::<libc::inotify_event>() };
+        let next = off + HEADER + ev.len as usize;
         if next > buf.len() {
             return false;
         }
-        if ev.watch_descriptor == wd && ev.mask & bun_sys::linux::IN::CREATE != 0 {
+        if ev.wd == wd && ev.mask & bun_sys::linux::IN::CREATE != 0 {
             let raw = &buf[off + HEADER..next];
             let ev_name = match strings::index_of_char_usize(raw, 0) {
                 Some(z) => &raw[..z],

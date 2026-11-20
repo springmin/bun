@@ -454,12 +454,16 @@ impl FilePoll {
         // OHOS kernel (HongMeng) never disarms EPOLLONESHOT interests after
         // they fire, and one-shot state tracking on fds sharing a file
         // description (Terminal dups the pty master into separate read/write
-        // fds) loses the co-registered read interest's events entirely.
-        // Scope the fix to pty fds only: pipes/sockets must keep one-shot
-        // (level-triggered registration there re-fires forever and hangs
-        // parallel multi-run output capture). isatty() distinguishes the two.
+        // fds) loses the co-registered read interest's events entirely: the
+        // poll believes it is still armed (`is_watching()`), so it never
+        // re-arms, and the kernel never reports again. Both one-shot modes
+        // (`Dispatch`, from `PipeHandle::register`, and `OneShot`) must become
+        // level-triggered for a tty. Scope the fix to pty fds only:
+        // pipes/sockets must keep one-shot (level-triggered registration there
+        // re-fires forever and hangs parallel multi-run output capture).
+        // isatty() distinguishes the two.
         #[cfg(target_env = "ohos")]
-        let one_shot = if one_shot == OneShotFlag::OneShot
+        let one_shot = if one_shot != OneShotFlag::None
             && unsafe { libc::isatty(self.fd.native()) } == 1
         {
             OneShotFlag::None
@@ -573,7 +577,7 @@ impl FilePoll {
                 self.deactivate(loop_);
                 return errno;
             }
-            if flag == Flags::Readable && self.flags.contains(Flags::EpollRearmWatch) {
+            if flag == Flags::Readable && self.flags.get().contains(Flags::EpollRearmWatch) {
                 epoll_rearm_watchdog::track(loop_, watcher_fd, fd.native(), flags, event.u64);
             }
         }
@@ -1340,7 +1344,7 @@ mod epoll_rearm_watchdog {
                 // likely ENOENT: unregistered/closed between our snapshot and
                 // this call) is inert -- nothing to recover, the fd is gone.
                 // SAFETY: the fd was tracked by a successful registration; MOD only repoints the entry.
-                let _ = unsafe { linux::epoll_ctl(watcher_fd, EPOLL::CTL_MOD, fd, Some(&event)) };
+                let _ = unsafe { linux::epoll_ctl(watcher_fd, EPOLL::CTL_MOD, fd, &event) };
             }
 
             // ── force-drain pass ─────────────────────────────────────────

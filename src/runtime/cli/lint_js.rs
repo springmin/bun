@@ -455,6 +455,7 @@ fn end_vm(frees: bool) {
 }
 
 /// Startup state that all VMs share.
+#[derive(Default)]
 struct Start {
     initialize: std::sync::Once,
     /// Set if the run won't have more than a few VMs. Stays unset if a VM starts before the files are known.
@@ -462,19 +463,6 @@ struct Start {
     /// The same if no VM has much to do
     is_short: AtomicBool,
     memory: std::sync::OnceLock<usize>,
-}
-
-// The pinned OHOS toolchain (nightly-2026-07-20) predates `impl Default for Once`
-// (std added it by nightly-2026-09-15, which is what rust-toolchain.toml resolves);
-// write the default out so both toolchains compile the same code.
-impl Default for Start {
-    fn default() -> Self {
-        Self {
-            initialize: std::sync::Once::new(),
-            is_for_few: AtomicBool::new(false),
-            memory: std::sync::OnceLock::new(),
-        }
-    }
 }
 
 impl Start {

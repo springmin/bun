@@ -136,6 +136,8 @@ impl PosixPipeWriter {
             // send(MSG_DONTWAIT | MSG_NBIO) is nonblocking per call on every Unix, whatever the fd's flags.
             FileType::Socket => self.try_write_with_write_fn(buf, write_to_socket),
             FileType::Pipe if !force_sync => {
+                #[cfg(target_env = "ohos")]
+                self.ensure_pipe_expanded();
                 self.try_write_with_write_fn(buf, write_to_blocking_pipe)
             }
             _ => self.try_write_with_write_fn(buf, sys::write),
@@ -567,6 +569,19 @@ impl PosixStreamingWriter {
     fn report_error_and_close(&self, handler: &impl WriteHandler, err: sys::Error) {
         handler.on_error(err);
         self.close(handler);
+    }
+
+    /// OHOS Terminal leaves an initially-empty PTY writer unwatched until it
+    /// has buffered data; the first backpressure re-registers through
+    /// `register_poll`. An empty writer registered for level-triggered
+    /// EPOLLOUT loses the co-registered reader's readiness edge on OHOS.
+    #[cfg(target_env = "ohos")]
+    pub fn unregister_poll(&self) {
+        self.base.handle.with_poll(|poll| {
+            if poll.is_registered() {
+                let _ = poll.unregister(true);
+            }
+        });
     }
 
     fn register_poll(&self, handler: &impl WriteHandler) {

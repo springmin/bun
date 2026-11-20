@@ -371,6 +371,14 @@ impl Terminal {
             }
         }
 
+        // OHOS: an initially-empty writer registered level-triggered for
+        // EPOLLOUT on a dup of the pty master loses the reader's readiness
+        // edge. Keep the poll object for later backpressure, but watch
+        // nothing until `Terminal.write` buffers data (see
+        // `StreamingWriter::unregister_poll`).
+        #[cfg(target_env = "ohos")]
+        terminal.writer.unregister_poll();
+
         // Start reader with the read fd - adds a ref.
         let Ok(result) = terminal
             .reader
@@ -1405,10 +1413,7 @@ impl Terminal {
         // so `self` stays live for the trailing field accesses. (Same pattern
         // as `drain_and_close_slave_fd`.)
         let guard = self.ref_guard();
-        // SAFETY: single JS thread; the reader cell is live for the terminal's
-        // lifetime, and re-entrant user JS (the data callback may call
-        // `terminal.close()`) is handled by `read`'s raw dispatch.
-        unsafe { IOReader::read(self.reader.as_ptr()) };
+        self.read(None);
         drop(guard);
     }
 

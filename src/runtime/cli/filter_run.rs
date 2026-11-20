@@ -206,7 +206,12 @@ impl<'a> ProcessHandle<'a> {
             if let Some(fd) = pipe.map(bun_sys::File::into_raw) {
                 let _ = bun_sys::set_nonblocking(fd);
                 let event_loop = handle.output.shared.event_loop.as_event_loop_ctx();
-                let _ = reader.start(event_loop, fd, true)?;
+                // OHOS: the kernel never reports these pipes readable to
+                // epoll while they are empty (T50) and then stops reporting
+                // them after a child writes, so a poll-driven reader never
+                // runs and a child that outruns the socket buffer blocks
+                // forever. Start unpolled; the run loop drains every tick.
+                let _ = reader.start(event_loop, fd, !cfg!(target_env = "ohos"))?;
             }
         }
         #[cfg(not(unix))]
@@ -261,6 +266,29 @@ impl<'a> ProcessHandle<'a> {
             let _ = self.output.read_chunk(&chunk);
             true
         });
+    }
+
+    /// OHOS: `read` for a reader that no poll watches (see `ProcessHandle::start`).
+    /// `true` if any bytes arrived, so the caller can back off when idle.
+    #[cfg(target_env = "ohos")]
+    fn drain_available(&mut self, kind: Kind) -> bool {
+        // Fields, not `self.reader(kind)`: the closure below needs `&mut
+        // self.output`, and a method call would borrow all of `self`.
+        let reader = match kind {
+            Kind::Stdout => &self.stdout,
+            Kind::Stderr => &self.stderr,
+        };
+        if reader.is_done() {
+            return false;
+        }
+        let event_loop = self.output.shared.event_loop.as_event_loop_ctx();
+        let mut read_any = false;
+        let _ = reader.read_chunks(event_loop, None, |chunk, _| {
+            read_any |= !chunk.is_empty();
+            let _ = self.output.read_chunk(&chunk);
+            true
+        });
+        read_any
     }
 
     /// After the exit: a leftover child may hold the pipes open, so their EOF may never come.
@@ -322,6 +350,22 @@ struct ElideResult<'b> {
 impl<'a> State<'a> {
     fn is_done(&self) -> bool {
         self.remaining_scripts == 0
+    }
+
+    /// OHOS: read whatever the running scripts wrote since the last tick.
+    /// Returns true if any bytes were read.
+    #[cfg(target_env = "ohos")]
+    fn drain_ohos_pipes(&mut self) -> bool {
+        let mut read_any = false;
+        for handle in self.handles.iter_mut() {
+            // Never started (skipped, or still waiting on a dependency): no fd.
+            if handle.finished || handle.skipped || handle.process.is_none() {
+                continue;
+            }
+            read_any |= handle.drain_available(Kind::Stdout);
+            read_any |= handle.drain_available(Kind::Stderr);
+        }
+        read_any
     }
 
     fn start(&mut self, index: usize) {
@@ -1006,6 +1050,8 @@ pub(crate) fn run_scripts_with_filter(
 
     AbortHandler::install();
 
+    #[cfg(target_env = "ohos")]
+    let mut idle_polls: u32 = 0;
     loop {
         if shared.needs_redraw.get() {
             let _ = state.redraw(false);
@@ -1021,6 +1067,23 @@ pub(crate) fn run_scripts_with_filter(
             AbortHandler::uninstall();
             state.abort();
         }
+        #[cfg(target_env = "ohos")]
+        {
+            // A blocking tick would stall forever: the readers are unpolled
+            // (see `ProcessHandle::start`), so only the pidfd wakes the loop,
+            // and that is the child's exit. Poll non-blocking, drain, yield.
+            // 2 ms while output flows, 10 ms after a few empty passes.
+            event_loop.tick_without_idle(core::ptr::null_mut());
+            let read_any = state.drain_ohos_pipes();
+            idle_polls = if read_any {
+                0
+            } else {
+                (idle_polls + 1).min(16)
+            };
+            let sleep_ms = if idle_polls < 8 { 2 } else { 10 };
+            std::thread::sleep(std::time::Duration::from_millis(sleep_ms));
+        }
+        #[cfg(not(target_env = "ohos"))]
         event_loop.tick_once(core::ptr::null_mut());
     }
 

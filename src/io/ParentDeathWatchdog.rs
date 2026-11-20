@@ -42,7 +42,7 @@ use core::sync::atomic::{AtomicBool, Ordering};
 use bun_core::ZStr;
 use bun_core::env_var;
 use bun_spawn_sys::ffi::kill;
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "linux", target_os = "android", target_os = "macos"))]
 use bun_sys::Fd;
 #[cfg(any(target_os = "linux", target_os = "android"))]
 use bun_sys::O;

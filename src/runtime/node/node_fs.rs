@@ -7566,7 +7566,6 @@ impl NodeFS {
             return Err(abort_err());
         }
 
-<<<<<<< HEAD
         // A descriptor that reads fine but refuses to describe itself is not a
         // fatal case. The HarmonyOS sandbox denies fstat/statx (and
         // stat("/proc/self/fd/N")) on memfd descriptors whose read() returns
@@ -7579,39 +7578,28 @@ impl NodeFS {
         // (issue #1220), so an unknown size degrades to exactly that path.
         // Only metadata-permission errors fall back; EBADF and friends still
         // propagate, since a read would not be meaningful either.
-        let stat_ = match Syscall::fstat(fd) {
+        let stat_ = match Syscall::fstat(file.fd()) {
             Ok(stat_) => Some(stat_),
             Err(err) if err.errno == E::EACCES as _ || err.errno == E::EPERM as _ => None,
             Err(err) => return Err(err),
         };
-=======
-        let stat_ = Syscall::fstat(file.fd())?;
->>>>>>> oven/main
 
         // For certain files, the size might be 0 but the file might still have contents.
         // https://github.com/oven-sh/bun/issues/1220
         let max_size: u64 = args.max_size.map(|v| v as u64).unwrap_or(BLOB_SIZE_MAX);
         let has_max_size = args.max_size.is_some();
 
-<<<<<<< HEAD
         let size: u64 = match stat_ {
             Some(stat_) => {
                 (stat_.st_size as i64)
                     .min(max_size as i64) // Only used in DOMFormData
-                    .max(total as i64)
+                    .max(temporary_read_buffer_before_stat_call.len() as i64)
                     .max(0) as u64
-                    + (string_type == ReadFileStringType::NullTerminated) as u64
             }
             // Unknown: claim only what has already been read, so the loop
             // starts in its unbounded phase and grows as the reads land.
-            None => total as u64,
+            None => temporary_read_buffer_before_stat_call.len() as u64,
         };
-=======
-        let size: u64 = (stat_.st_size as i64)
-            .min(max_size as i64) // Only used in DOMFormData
-            .max(temporary_read_buffer_before_stat_call.len() as i64)
-            .max(0) as u64;
->>>>>>> oven/main
 
         if args.limit_size_for_javascript &&
             // assume that anything more than 40 bits is not trustworthy.
@@ -7643,28 +7631,19 @@ impl NodeFS {
         }
 
         #[cfg(unix)]
-<<<<<<< HEAD
-        if path_is_path {
+        // OHOS: skipped when fstat was refused (see above); the loop below
+        // then reads the whole file unbounded instead.
+        if matches!(args.path, PathOrFileDescriptor::Path(_)) {
             if let Some(stat) = stat_ {
                 if sys::S::ISREG(stat.st_mode as u32) {
-                    let end = (stat.st_size as u64).min(max_size).min(buf.len() as u64) as usize;
-                    if end.saturating_sub(total) >= LARGE_FILE_BYTES {
-                        let position = args.offset as u64 + total as u64;
-                        let count = read_large_file(fd, &mut buf[total..end], position)?;
-                        total += count;
-                        sys::set_file_offset(fd, position + count as u64)?;
+                    let end = (stat.st_size as u64).min(max_size) as usize;
+                    let len = end.min(buf.capacity()).saturating_sub(buf.len());
+                    if len >= LARGE_FILE_BYTES {
+                        let position = args.offset as u64 + buf.len() as u64;
+                        let count = read_large_file(file.fd(), &mut buf, len, position)?;
+                        file.seek_to(position + count as u64)?;
                     }
                 }
-=======
-        if matches!(args.path, PathOrFileDescriptor::Path(_)) && sys::S::ISREG(stat_.st_mode as u32)
-        {
-            let end = (stat_.st_size as u64).min(max_size) as usize;
-            let len = end.min(buf.capacity()).saturating_sub(buf.len());
-            if len >= LARGE_FILE_BYTES {
-                let position = args.offset as u64 + buf.len() as u64;
-                let count = read_large_file(file.fd(), &mut buf, len, position)?;
-                file.seek_to(position + count as u64)?;
->>>>>>> oven/main
             }
         }
 
