@@ -22,7 +22,7 @@ import { ar, cc, cxx, link, nasm, pch, type PrecompiledHeader } from "./compile.
 import type { Config } from "./config.ts";
 import { assert } from "./error.ts";
 import { computeSourceIdentity, fetchCliPath } from "./fetch-cli.ts";
-import { computeDepFlags, computeTargetLinkFlags, safeStackFlags } from "./flags.ts";
+import { computeDepFlags, computeTargetLinkFlags } from "./flags.ts";
 import { writeIfChanged } from "./fs.ts";
 import type { Ninja } from "./ninja.ts";
 import { quote, quoteArgs } from "./shell.ts";
@@ -449,8 +449,7 @@ export type DepName =
   | "nodejs"
   | "rust-argon2"
   | "sqlite"
-  | "tinycc"
-  | "zstd";
+  | "tinycc";
 
 /**
  * A vendored dependency definition. Lives in scripts/build/deps/<name>.ts.
@@ -466,7 +465,8 @@ export interface Dependency {
    * Patches are included in the source identity hash — changing a patch
    * invalidates the fetched source and triggers re-fetch. Applied with `git apply`.
    *
-   * Function form allows conditional patches: OHOS adds zstd's qsort_r fix.
+   * Function form allows conditional patches (and per-platform ones: the
+   * OHOS port uses it for deps whose stock build does not fit).
    */
   patches?: string[] | ((cfg: Config) => string[]);
 
@@ -1266,14 +1266,7 @@ function emitDirect(
 
   const incFlags = (spec.includes ?? []).map(i => `-I${q(resolve(srcDir, i))}`);
   const defFlags = Object.entries(spec.defines ?? {}).map(([k, v]) => defineFlag(k, v));
-  const libFlags = [
-    ...baseFlags,
-    ...picFlags(cfg, spec.pic),
-    ...incFlags,
-    ...defFlags,
-    ...(spec.cflags ?? []),
-    ...safeStackFlags(cfg, name),
-  ];
+  const libFlags = [...baseFlags, ...picFlags(cfg, spec.pic), ...incFlags, ...defFlags, ...(spec.cflags ?? [])];
 
   // Sources must exist before compile attempts. sourceStamp (or the fetch
   // .ref) is order-only: we don't want every .o recompiling when the stamp
