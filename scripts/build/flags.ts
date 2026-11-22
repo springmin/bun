@@ -15,13 +15,10 @@ import { dirname, join } from "node:path";
 import { bunExeName, linksWithLld, type Config } from "./config.ts";
 import { overridesDarwinAllocator, replacedOperatorNewSymbols } from "./deps/mimalloc.ts";
 import { quote, slash } from "./shell.ts";
-import type { DepName } from "./source.ts";
 import { loadFeatures } from "./trim/features.ts";
 import { ucrtServicingLibDir } from "./winsysroot.ts";
 
-export const safeStackDependencies: readonly DepName[] = ["zstd"];
-
-export function usesSafeStack(c: Pick<Config, "hardened" | "x64" | "abi" | "asan">): boolean {
+function usesSafeStack(c: Pick<Config, "hardened" | "x64" | "abi" | "asan">): boolean {
   return c.hardened && c.x64 && c.abi === "gnu" && !c.asan;
 }
 
@@ -33,10 +30,6 @@ export function fuzzilliCoverageFlags(cfg: Pick<Config, "cwd" | "fuzzilli" | "fu
     "-fsanitize-coverage=trace-pc-guard",
     ...(cfg.fuzzilliCompilerOnly ? [`-fsanitize-coverage-allowlist=${list}`] : []),
   ];
-}
-
-export function safeStackFlags(c: Pick<Config, "hardened" | "x64" | "abi" | "asan">, dependency: DepName): string[] {
-  return usesSafeStack(c) && safeStackDependencies.includes(dependency) ? ["-fsanitize=safe-stack"] : [];
 }
 
 export type FlagValue = string | string[] | ((cfg: Config) => string | string[]);
@@ -307,7 +300,7 @@ export const globalFlags: Flag[] = [
   {
     // cmake's Release/RelWithDebInfo build types append this to
     // CMAKE_<LANG>_FLAGS_<TYPE> automatically. Deps only see globalFlags, so
-    // it must be here — otherwise every assert() in zstd/boringssl/mimalloc/etc.
+    // it must be here — otherwise every assert() in boringssl/mimalloc/etc.
     // stays live in release. (bun's own NDEBUG in `defines` below is
     // redundant after this, but harmless.)
     flag: "-DNDEBUG",
@@ -670,8 +663,8 @@ export const globalFlags: Flag[] = [
     // Every summaried bitcode module in the link must agree on the
     // EnableSplitLTOUnit flag or lld dies with "inconsistent LTO Unit
     // splitting". -fwhole-program-vtables (above) defaults the split ON for
-    // C++ on ELF targets but it's a cxx-only flag, so the C modules (zstd,
-    // c-ares, mimalloc, boringssl's .c files, ...) would disagree. Force it
+    // C++ on ELF targets but it's a cxx-only flag, so the C modules
+    // (c-ares, mimalloc, boringssl's .c files, ...) would disagree. Force it
     // OFF everywhere instead of on: split LTO units shunt every module's
     // vtables + type metadata into a merged regular-LTO half — a serial
     // merged module, which is exactly what ThinLTO is supposed to avoid.
@@ -743,7 +736,7 @@ export const bunOnlyFlags: Flag[] = [
   {
     flag: "-DBUN_SAFE_STACK=1",
     when: c => usesSafeStack(c),
-    desc: "Hardened: every thread gets the second stack that the libraries compiled with SafeStack keep their arrays on",
+    desc: "Hardened: every thread gets the second stack that what is compiled with SafeStack keeps its arrays on",
   },
 
   // ─── Build profiling ───
@@ -1015,6 +1008,14 @@ export const defines: Flag[] = [
     flag: "U_DISABLE_RENAMING=1",
     when: c => c.darwin,
     desc: "Disable ICU symbol renaming (using system ICU)",
+  },
+  {
+    flag: "BUN_SYSTEM_ICU=1",
+    // OHOS ships no ICU at all and the port links a packaged static ICU4C,
+    // older than the 79.1 that src/icu implements: use its code and data, and
+    // leave src/icu empty like the Linux system-ICU build does.
+    when: c => usesIcuOfLinuxSystem(c) || c.ohos,
+    desc: "src/icu is empty, so ICU's version is not checked against it",
   },
 
   // ─── Feature toggles ───
@@ -1828,6 +1829,19 @@ export function rustLtoInLink(c: Config): boolean {
   return c.release && !c.asan && c.rustLto;
 }
 
+/** The static ICU of a local WebKit (deps/webkit.ts). */
+export function linuxIcuRoot(c: Config): string | undefined {
+  // OHOS ships no ICU at all; the port cross-builds a static one
+  // (build/ohos-icu) and names it on the config.
+  if (c.ohos) return process.env.BUN_ICU_ROOT || c.ohosIcuDir;
+  return c.linux && c.abi !== "android" ? process.env.BUN_ICU_ROOT || undefined : undefined;
+}
+
+/** The system's ICU can have any version, so bun links its code too, in place of src/icu. */
+export function usesIcuOfLinuxSystem(c: Config): boolean {
+  return c.linux && c.abi !== "android" && c.webkit === "local" && linuxIcuRoot(c) === undefined;
+}
+
 /** The link optimises bitcode: the C/C++'s (`lto`), the Rust crates', or both. */
 function linkRunsLto(c: Config): boolean {
   return c.lto || rustLtoInLink(c);
@@ -2181,6 +2195,24 @@ export const fileOverrides: FileOverride[] = [
     desc: "Same as highway_json.cpp below: the XML structural-index kernel must be optimized even in debug builds.",
   },
   {
+    file: "src/jsc/bindings/highway_zstd.cpp",
+    extraFlags: ["-O2"],
+    when: c => c.debug,
+    desc: "Same as highway_json.cpp below: the kernels run over every literal that zstd compresses.",
+  },
+  {
+    file: "src/jsc/bindings/highway_zstd.cpp",
+    extraFlags: ["-fsanitize=safe-stack"],
+    when: usesSafeStack,
+    desc: "It sorts input into arrays on the stack, and never calls back into JavaScript.",
+  },
+  {
+    file: "src/jsc/bindings/highway_zstd.cpp",
+    extraFlags: ["-fstack-clash-protection"],
+    when: c => c.x64 && (c.linux || c.freebsd),
+    desc: "A frame of several pages gets probed, like those of the Rust code that calls it.",
+  },
+  {
     file: "src/jsc/bindings/highway_json.cpp",
     extraFlags: ["-O2"],
     when: c => c.debug,
@@ -2316,10 +2348,7 @@ export function computeCpuTargetFlags(cfg: Config): string[] {
  */
 export function extraFlagsFor(cfg: Config, srcRelPath: string): string[] {
   const key = srcRelPath.replaceAll("\\", "/");
-  for (const o of fileOverrides) {
-    if (o.file !== key) continue;
-    if (o.when && !o.when(cfg)) continue;
-    return resolveFlagValue(o.extraFlags, cfg);
-  }
-  return [];
+  return fileOverrides
+    .filter(o => o.file === key && (!o.when || o.when(cfg)))
+    .flatMap(o => resolveFlagValue(o.extraFlags, cfg));
 }
