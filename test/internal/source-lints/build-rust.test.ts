@@ -114,15 +114,10 @@ describe("allRustTargets", () => {
     const { toolchain } = Bun.TOML.parse(readFileSync(join(repoRoot, "rust-toolchain.toml"), "utf8")) as {
       toolchain: { targets: string[] };
     };
-    const prebuilt = allRustTargets.filter(triple => !rustTargetIsTier3(triple));
     // OHOS: the port pins its own nightly via RUST_HOME in
     // scripts/ohos/build-bun-ohos-native.sh and lists
     // aarch64-unknown-linux-ohos, which is not part of the upstream matrix.
-    expect([...toolchain.targets].sort()).toEqual([...prebuilt, "aarch64-unknown-linux-ohos"].sort());
-
-    // rust:check-all reaches the remaining triples with -Zbuild-std; that path
-    // is only exercised if the matrix really contains a Tier 3 triple.
-    expect(allRustTargets.filter(rustTargetIsTier3)).toEqual(["aarch64-unknown-freebsd"]);
+    expect([...toolchain.targets].sort()).toEqual([...allRustTargets, "aarch64-unknown-linux-ohos"].sort());
   });
 
   test("FreeBSD builds std from source on both architectures", () => {
