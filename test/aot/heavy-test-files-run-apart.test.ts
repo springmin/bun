@@ -1,5 +1,5 @@
 import { expect } from "bun:test";
-import { bunEnv, bunExe, isLinux, tempDir, untilEveryThreadIs } from "harness";
+import { bunEnv, bunExe, isLinux, isOhos, tempDir, untilEveryThreadIs } from "harness";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { raiseDefaultTimeout } from "./harness/default-timeout";
@@ -118,7 +118,7 @@ test("as long as a heavy file is left, the others get what fits beside it", asyn
 });
 
 // `untilEveryThreadIs` reads /proc.
-test.skipIf(!isLinux)("the process that replaces a worker that waited for room gets one file at a time", async () => {
+test.skipIf(!isLinux || isOhos)("the process that replaces a worker that waited for room gets one file at a time", async () => {
   // The first to start keeps its worker until all three have started, so the other two are the new process's.
   const half = (name: string) => `
     import { test } from "bun:test";
@@ -184,7 +184,7 @@ test.skipIf(!isLinux)("the process that replaces a worker that waited for room g
   expect(await proc.exited).toBe(0);
 });
 
-test.skipIf(!isLinux)("a compiled run writes by how much each file's worker grew", async () => {
+test.skipIf(!isLinux || isOhos)("a compiled run writes by how much each file's worker grew", async () => {
   using dir = tempDir("heavy-test-files-are-measured", {
     "grows.test.js": fileThatTakes("grows", 1, "globalThis.kept = Buffer.alloc(300 << 20, 1);"),
     "small.test.js": fileThatTakes("small", 1),
@@ -238,7 +238,7 @@ test.skipIf(!isLinux)("a compiled run writes by how much each file's worker grew
   expect(JSON.parse(readFileSync(join(String(dir), "timings.json"), "utf8")).memory).toEqual(written.memory);
 });
 
-test.skipIf(!isLinux)("what the file before left behind is not taken off a file's growth", async () => {
+test.skipIf(!isLinux || isOhos)("what the file before left behind is not taken off a file's growth", async () => {
   // One worker is held by the first file until the last has ended, so the other two run in one worker, one behind the other.
   // The second leaves 300 MB that nothing holds once it has ended. The third has them collected and then takes as much itself: its worker is never
   // larger than it was when the file began.

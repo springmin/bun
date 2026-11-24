@@ -1,0 +1,27 @@
+#!/bin/sh
+# OHOS's toybox taskset takes a hex mask, not `-c` lists. This shim translates
+# the Linux form the tests use: taskset -c 0,2,8-11 cmd ...
+if [ "$1" = "-c" ]; then
+  list="$2"
+  shift 2
+  mask=0
+  IFS=,
+  for part in $list; do
+    case "$part" in
+      *-*)
+        lo=${part%-*}
+        hi=${part#*-}
+        i=$lo
+        while [ "$i" -le "$hi" ]; do
+          mask=$((mask | (1 << i)))
+          i=$((i + 1))
+        done
+        ;;
+      *)
+        mask=$((mask | (1 << part)))
+        ;;
+    esac
+  done
+  exec /system/bin/taskset "$(printf '%x' "$mask")" "$@"
+fi
+exec /system/bin/taskset "$@"

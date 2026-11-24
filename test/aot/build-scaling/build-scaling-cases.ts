@@ -41,7 +41,7 @@
 // Each shape prints one line that begins with SCALING.
 import { expect } from "bun:test";
 import { readFileSync, rmSync } from "fs";
-import { bunEnv, bunExe, isASAN, isDebug, isLinux, isMacOS, isMusl, isWindows, tempDir } from "harness";
+import { bunEnv, bunExe, isASAN, isDebug, isLinux, isMacOS, isMusl, isOhos, isWindows, tempDir } from "harness";
 import { join } from "path";
 import { countsInstructions, measureCommandWithMemory, type Cost } from "../analysis-scaling/measure-check";
 import { countsIn } from "../compiler/measure";
@@ -168,6 +168,7 @@ export const buildScaling = (part: number, parts: number) =>
       if (!shape.name.includes(wanted) || index % parts !== part - 1) continue;
       const growsSoFar =
         shape.growsSoFar ??
+        (isOhos ? shape.growsSoFarOnOhos : undefined) ??
         (countsInstructionsHere ? shape.growsSoFarInInstructions : undefined) ??
         (countsInstructionsHere && isMusl ? shape.growsSoFarInInstructionsUnderMusl : undefined);
       (growsSoFar ? test.concurrent.failing : test.concurrent)(

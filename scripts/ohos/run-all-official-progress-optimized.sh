@@ -21,14 +21,6 @@ TMOUT=${TMOUT:-300}
 TMOUT_BUNDLER=${TMOUT_BUNDLER:-1200}
 BUN_TIMEOUT=${BUN_TIMEOUT:-600000}
 
-# A release build resolves `bun:internal-for-testing` only when both of these
-# are set (VirtualMachine::configure_from_env gates the module behind
-# BUN_FEATURE_FLAG_INTERNAL_FOR_TESTING, inside the BUN_GARBAGE_COLLECTOR_LEVEL
-# block). Bun's CI sets them for the runner; many test files import the module
-# at file scope, so the runner process needs them, not only its children.
-export BUN_FEATURE_FLAG_INTERNAL_FOR_TESTING=1
-export BUN_GARBAGE_COLLECTOR_LEVEL="${BUN_GARBAGE_COLLECTOR_LEVEL:-0}"
-
 # OHOS /tmp lives on hmfs with hmmac=inherit_parent: creates succeed but
 # rename() is denied by the MAC layer, which the install path needs
 # (extract → rename into the cache dir). Force the app's private tmp instead
@@ -36,18 +28,6 @@ export BUN_GARBAGE_COLLECTOR_LEVEL="${BUN_GARBAGE_COLLECTOR_LEVEL:-0}"
 # BUN_TEST_TMPDIR when a different location is required.
 export TMPDIR="${BUN_TEST_TMPDIR:-/data/storage/el2/base/tmp}"
 export TMP="$TMPDIR" TEMP="$TMPDIR"
-
-# OHOS keeps its core utilities in /system/bin, which is not on the path of an
-# app shell: `mkfifo` is a test fixture many suites spawn by name.
-case ":$PATH:" in
-  *":/system/bin:"*) ;;
-  *) export PATH="/system/bin:$PATH" ;;
-esac
-
-# A harness shell sets these (they name loopback, where every test server
-# binds); Bun's CI does not. `fetch(..., { proxy })` honors them, so an
-# explicit proxy to a local server would be skipped.
-unset NO_PROXY no_proxy
 
 # The OHOS SDK's lld links against the SDK's bundled libxml2, but its
 # $ORIGIN/../lib RUNPATH is not honored in this environment: every run-time
@@ -401,15 +381,6 @@ _ohos_watchdog_for() {
       WT=300
       BT="--expose-internals --smol --timeout 600000"
       ;;
-    # ── AOT ──
-    # Every case builds and starts a program; a file holds dozens, and on a
-    # phone one case takes seconds. The file's own default (120 s per case, see
-    # test/aot/supported.ts) keeps a stuck case bounded, so the wall only has
-    # to cover the cases behind it.
-    */test/aot/*)
-      WT=$((TMOUT * 12))      # 3600s
-      BT="--expose-internals --smol --timeout ${BUN_TIMEOUT}"
-      ;;
     # ── bundler ──
     */bundler/*)
       WT=${TMOUT_BUNDLER}
@@ -426,7 +397,7 @@ _ohos_watchdog_for() {
     # worker 下超过默认 300s 看门狗（2026-10-17 全量：config-files 623s、
     # bunfig 749s 被误杀）──
     */cli/lint/*.test.ts|*/cli/format/*.test.ts|*/cli/check/*.test.ts|*/cli/test/parallel.test.ts)
-      WT=$((TMOUT * 12))      # 3600s: each `bun fmt` case starts a VM on OHOS
+      WT=$((TMOUT * 6))       # 1800s
       BT="--expose-internals --smol --timeout ${BUN_TIMEOUT}"
       ;;
     # ── 默认 ──

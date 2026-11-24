@@ -34,6 +34,8 @@ export type Shape = {
   growsSoFarInInstructions?: string;
   /** The same for a growth in instructions that shows under musl alone. */
   growsSoFarInInstructionsUnderMusl?: string;
+  /** The same on OHOS, where instructions are not counted: a growth in the build's own counters. */
+  growsSoFarOnOhos?: string;
   /**
    * The shape keeps a value in the frame for each of what is counted, and its two sizes straddle a step in the bytes of arm64's code: a load or store reaches the first 32 KB of a frame by the
    * offset in the instruction (4 bytes), the next 32 KB with one move in front of it (8) and the rest with two (12). There FunctionBytesEmitted is not judged; all else is.
@@ -1203,6 +1205,9 @@ export const shapes: Shape[] = [
     counted: "classes, and names",
     size: 500,
     entry: "main.js",
+    // OHOS's image carries the engine's built-ins, whose objects join the
+    // family's ancestry: the walk grows 4.0 times there instead of 2.1.
+    growsSoFarOnOhos: "4.0 times in AncestorClassesVisited",
     write: size => ({
       "main.js":
         `let count = 0;\nclass Base { common() { return 1; } }\nconst all = [];\nfunction pick(i) { return all[i % all.length]; }\n` +
@@ -1248,7 +1253,16 @@ export const shapes: Shape[] = [
   ...(
     [
       ["sixty-four names", "classes", 2000, {}],
-      ["as many names", "classes, and names", 500, { growsSoFarInInstructions: "2.19 times in instructions" }],
+      [
+        "as many names",
+        "classes, and names",
+        500,
+        {
+          growsSoFarInInstructions: "2.19 times in instructions",
+          // OHOS counts no instructions; the tables grow by 3.9 times there.
+          growsSoFarOnOhos: "3.9 times in the build's counters",
+        },
+      ],
     ] as const
   ).map(
     ([names, counted, size, mark]): Shape => ({
