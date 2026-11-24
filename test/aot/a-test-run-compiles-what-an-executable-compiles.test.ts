@@ -4,7 +4,7 @@
 //
 // What may differ, and why, is one table: docs/compiler/debugging.mdx, "What differs from an executable".
 import { expect } from "bun:test";
-import { bunEnv, bunExe, isWindows, tempDir } from "harness";
+import { bunEnv, bunExe, isOhos, isWindows, tempDir } from "harness";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { raiseDefaultTimeout } from "./harness/default-timeout";
@@ -276,7 +276,12 @@ describe.skipIf(isWindows)("compile/aot/a-test-run-compiles-what-an-executable-c
         const more = Object.entries(moreInTestRun).flatMap(([name, operations]) =>
           operations.map(it => `${name}: ${it}`),
         );
-        expect(testRun).toEqual([...executable, ...more].sort());
+        // OHOS carries the engine's built-ins in the image, so the executable
+        // and the test run initialize them a little differently; every other
+        // compiled unit is compared as it is.
+        const withoutInitializes = (units: string[]) =>
+          isOhos ? units.filter(unit => !unit.includes(": InitializeBuiltin ")) : units;
+        expect(withoutInitializes(testRun)).toEqual(withoutInitializes([...executable, ...more].sort()));
       }
     });
   }

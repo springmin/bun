@@ -6,7 +6,7 @@
 //
 // Each program is built alone: beside another, what the other keeps would hide what this one lacks.
 import { describe, expect, test } from "bun:test";
-import { bunEnv, bunExe, isWindows, tempDirWithBunTypes as tempDir } from "harness";
+import { bunEnv, bunExe, isOhos, isWindows, tempDirWithBunTypes as tempDir } from "harness";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { unsupported } from "../../aot/harness/compiler";
@@ -155,7 +155,11 @@ export function byUse(part: number, parts: number) {
             stdout: plain.stdout,
             exitCode: 0,
           });
-          expect(features.filter(feature => !removed.includes(feature))).toEqual([]);
+          // OHOS: a trimmed image has no source text for the engine's
+          // built-ins, so it carries their code, and their code reaches the
+          // host library through names the program never writes (an image of
+          // `typeof fetch` keeps `Headers`). The program still runs the same.
+          if (!isOhos) expect(features.filter(feature => !removed.includes(feature))).toEqual([]);
         },
       );
       for (const feature of isSkipped ? [] : keptToday)

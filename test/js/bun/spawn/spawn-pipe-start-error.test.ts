@@ -744,7 +744,9 @@ describe.skipIf(!isLinux || !cc)("what bun run prints when a registration with t
     });
   });
 
-  test.concurrent("--filter draws no frame before it has started what it can", async () => {
+  // OHOS waits on its waiter thread, so a pidfd failure cannot be injected:
+  // the child starts and the frame is drawn, which this case says never happens.
+  test.skipIf(isOHOS).concurrent("--filter draws no frame before it has started what it can", async () => {
     const { stdout, exitCode } = await run("--filter=* wait", { FAIL_EPOLL_CTL: "pidfd-add", FORCE_COLOR: "1" });
     expect(stdout).toContain("Error");
     expect(stdout).not.toContain("Waiting for");

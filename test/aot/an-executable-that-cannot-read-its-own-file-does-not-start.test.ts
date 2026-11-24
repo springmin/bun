@@ -121,7 +121,9 @@ describe.skipIf(!isLinux)("an executable", () => {
       );
   }, 60_000);
 
-  test("that can read its own file makes callbacks for native code without a call of mremap()", async () => {
+  // OHOS's seccomp policy ends the program with SIGSYS on the callback path
+  // (the code calls a syscall that this platform blocks).
+  test.skipIf(isOhos)("that can read its own file makes callbacks for native code without a call of mremap()", async () => {
     const withCallbacks = join(String(directory), "callbacks");
     await using proc = Bun.spawn({
       cmd: [

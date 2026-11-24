@@ -9,6 +9,7 @@ import {
   isASAN,
   isIPv6,
   isLinux,
+  isOhos,
   isWindows,
   tempDir,
   tls as tlsCert,
@@ -1631,7 +1632,8 @@ test("a bad record delivered with a 101 through a proxy tunnel does not free the
 });
 
 // The fixture reads /proc/net/tcp.
-test.skipIf(!isLinux)("a reset delivered with a 101 through an https proxy rejects with ECONNRESET", async () => {
+// The fixture reads /proc/net/tcp, which OHOS does not provide to an app.
+test.skipIf(!isLinux || isOhos)("a reset delivered with a 101 through an https proxy rejects with ECONNRESET", async () => {
   using dir = tempDir("proxy-upgrade-reset", {});
   const fifo = join(String(dir), "ca.pem");
   mkfifo(fifo);

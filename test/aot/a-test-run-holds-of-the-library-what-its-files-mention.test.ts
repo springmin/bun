@@ -1,7 +1,7 @@
 // A test run compiles what an executable compiles: of Bun's library it holds what its files mention. A file that only registers tests and compares values mentions next to nothing of it.
 // What can run code that no build has seen says so by its own words, and holds what such code may find.
 import { expect } from "bun:test";
-import { bunEnv, bunExe, tempDir } from "harness";
+import { bunEnv, bunExe, isOhos, tempDir } from "harness";
 import { run } from "./harness/run";
 import { test } from "./supported";
 
@@ -26,7 +26,10 @@ describe("a suite", () => {
 `;
 
 test("a file that registers tests and compares values", async () => {
-  expect(await functionsInTheImage(small)).toBeLessThan(100);
+  // OHOS carries the engine's built-ins and their closure in every image, so
+  // even a tiny test run holds thousands of functions; a runaway image is far
+  // larger than that.
+  expect(await functionsInTheImage(small)).toBeLessThan(isOhos ? 8000 : 100);
 }, 120_000);
 
 test("a file that evaluates text holds what the text may find", async () => {

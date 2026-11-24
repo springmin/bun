@@ -2,7 +2,7 @@
 // is enough to tell the build, the function and the line, and every compiled caller is there. The faults are planted: a copy of
 // the executable gets a load from a low address written over its code.
 import { expect } from "bun:test";
-import { bunEnv, bunExe, isASAN, isLinux, isMacOS, isWindows, tempDir } from "harness";
+import { bunEnv, bunExe, isASAN, isLinux, isMacOS, isOhos, isWindows, tempDir } from "harness";
 import { chmodSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { locksEnvironment } from "./hardened";
@@ -293,12 +293,33 @@ else console.log("went on", lowest(how));
     let dir: ReturnType<typeof tempDir>;
     let cwd: string;
 
+    // OHOS has no `stty`: this helper prints the names of the flags that a
+    // crash must leave as they were (raw mode off).
+    const flagsSource = `#include <termios.h>
+#include <stdio.h>
+int main(void) {
+  struct termios t;
+  if (tcgetattr(0, &t)) return 1;
+  if (t.c_lflag & ECHO) puts("echo");
+  if (t.c_lflag & ICANON) puts("icanon");
+  if (t.c_lflag & ISIG) puts("isig");
+  if (t.c_iflag & ICRNL) puts("icrnl");
+  return 0;
+}
+`;
     beforeAll(async () => {
       dir = tempDir("aot-crash-below-compiled-code", { "app.ts": program });
       cwd = String(dir);
       const built = await run([bunExe(), "build", "--compile", "--aot", "app.ts", "--outfile", "app"], cwd, forTesting);
       expect(built.stderr).not.toMatch(/^error\b/m);
       expect(built.exitCode).toBe(0);
+      if (isOhos) {
+        const cc = Bun.which("cc") ?? Bun.which("clang");
+        expect(cc).not.toBeNull();
+        await Bun.write(join(cwd, "flags.c"), flagsSource);
+        const compiled = Bun.spawnSync([cc!, "-o", join(cwd, "flags"), join(cwd, "flags.c")]);
+        expect(compiled.exitCode).toBe(0);
+      }
     });
     afterAll(() => dir?.[Symbol.dispose]());
 
@@ -335,7 +356,15 @@ else console.log("went on", lowest(how));
       let shown = "";
       const child = Bun.spawn({
         // A stack without a limit never runs out: it grows until the kernel ends the process, and no handler sees that. CI's machines set no limit.
-        cmd: ["sh", "-c", 'ulimit -c 0; ulimit -s 8192; "$0" "$@"; stty -a', join(cwd, "app"), how, "", "raw"],
+        cmd: [
+          "sh",
+          "-c",
+          `ulimit -c 0; ulimit -s 8192; "$0" "$@"; ${isOhos ? `"${join(cwd, "flags")}"` : "stty -a"}`,
+          join(cwd, "app"),
+          how,
+          "",
+          "raw",
+        ],
         cwd,
         env: { ...bunEnv, ...quiet, ...forTesting },
         terminal: {
@@ -367,8 +396,12 @@ else console.log("went on", lowest(how));
       });
       const [stdout, stderr] = await Promise.all([child.stdout.text(), child.stderr.text(), child.exited]);
       expect({ stdout, signal: child.signalCode }).toEqual({ stdout: "", signal });
-      expect(stderr.split("Bun has crashed.").length).toBe(2);
-      expect(framesOf(stderr)[0]).toMatch(inLowest);
+      // OHOS's crash service takes the signal before Bun's handler does when a
+      // JS listener holds SIGABRT, so there is no report to count.
+      if (!(isOhos && how.startsWith("abort") && listens)) {
+        expect(stderr.split("Bun has crashed.").length).toBe(2);
+        expect(framesOf(stderr)[0]).toMatch(inLowest);
+      }
     });
 
     test("a closed stderr is no reason to go on", async () => {
@@ -455,7 +488,9 @@ console.log(flip([1, 2, 3]));
     expect(stderr).toContain(
       "Array.prototype.reverse is declared to return a fresh object, but the result is the receiver\n",
     );
-    expect(stderr.split("Bun has crashed.").length).toBe(2);
+    // OHOS's crash service takes the signal before Bun's handler does when a
+    // JS listener holds it, so there is no report to count.
+    if (!(isOhos && listens)) expect(stderr.split("Bun has crashed.").length).toBe(2);
   });
 });
 

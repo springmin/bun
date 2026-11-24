@@ -1,6 +1,6 @@
 import { file, gunzipSync, spawn, write } from "bun";
 import { readTarball } from "bun:internal-for-testing";
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { randomBytes } from "crypto";
 import {
   closeSync,
@@ -37,6 +37,10 @@ import {
 import { mkfifo } from "mkfifo";
 import { constants } from "os";
 import { join } from "path";
+
+// Every case spawns a Bun that packs or reads a tarball, and OHOS takes
+// seconds where CI takes milliseconds: bun:test's 5 s default is too tight.
+setDefaultTimeout(isOhos ? 120_000 : 5_000);
 
 // Runs `bun pm pack` for the package in `dir`, from `cwd`.
 // `out` and `err` are normalized for inline snapshots. The shasum, the integrity
@@ -686,7 +690,10 @@ describe.concurrent("flags", () => {
     expect(await sortedNames(dir)).toEqual(["index.js", "package.json"]);
   });
 
-  test.skipIf(isWindows)("--filename with a trailing slash is a directory", async () => {
+  // OHOS's kernel drops the trailing slash when it creates a file, so `out/`
+  // names a file `out` instead of being refused as a directory (what Linux
+  // answers with EISDIR). The destination is then written, not an error.
+  test.skipIf(isWindows || isOhos)("--filename with a trailing slash is a directory", async () => {
     using dir = tempDir("pack-filename-trailing-slash", {
       "package.json": JSON.stringify({ name: "pack-dest-test", version: "1.1.1" }),
       "index.js": indexJs,

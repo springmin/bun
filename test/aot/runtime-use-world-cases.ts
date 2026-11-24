@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { bunEnv, bunExe, tempDir } from "harness";
+import { bunEnv, bunExe, isASAN, isDebug, isOhos, tempDir } from "harness";
+// Each case builds with `bun check --aot`; OHOS release builds need the same
+// allowance as a build with assertions (see test/aot/supported.ts).
+import { raiseDefaultTimeout } from "./harness/default-timeout";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { canTrim, featureOf, withoutFeatures } from "../bundler/compile-trim-features";
@@ -17,6 +20,8 @@ import {
   type Use,
 } from "./runtime-use-expectations";
 import { declared, of, runtimeUse, tsconfig, withDeclarations } from "./runtime-use-harness";
+
+raiseDefaultTimeout(120_000, isASAN || isDebug || isOhos);
 
 const groups: [name: string, body: () => void][] = [];
 const group = (name: string, body: () => void) => void groups.push([name, body]);
@@ -563,6 +568,12 @@ group("what is done with the exports of the entry point does not depend on how t
 
 group("what --trim removes", () => {
   const main = declared + `console.log("hello");`;
+  // OHOS carries the engine's built-ins in every trimmed image, and their code
+  // reaches parts of the host library that no program names: forcing one of
+  // those out changes the image even where the program never used it. So the
+  // two builds here differ on OHOS, and what they say about the feature is the
+  // program's behavior alone (the `by-use` suite checks what is removed).
+  const removesAnUnusedFeature = !isOhos;
 
   async function built(files: Record<string, string>, entryPoints = ["main.ts"]) {
     using dir = tempDir("aot-runtime-use-writer", { "tsconfig.json": tsconfig, ...files });
@@ -596,7 +607,11 @@ group("what --trim removes", () => {
   }
 
   test("a closed program: the features it does not use", async () => {
-    expect(await built({ "main.ts": main })).toEqual({ stdout: "hello\n", exitCode: 0, removesUnusedFeatures: true });
+    expect(await built({ "main.ts": main })).toEqual({
+      stdout: "hello\n",
+      exitCode: 0,
+      removesUnusedFeatures: removesAnUnusedFeature,
+    });
   });
 
   test("a program that loads an external package: no feature for being unused", async () => {
@@ -616,7 +631,7 @@ group("what --trim removes", () => {
       expect(await built({ "main.ts": main }, ["main.ts", "--compile-exec-argv=" + option])).toEqual({
         stdout: "hello\n",
         exitCode: 0,
-        removesUnusedFeatures: true,
+        removesUnusedFeatures: removesAnUnusedFeature,
       });
     },
   );
@@ -633,7 +648,11 @@ group("what --trim removes", () => {
       "index.html": `<html><body><script type="module" src="./client.ts"></script></body></html>`,
       "client.ts": `export {};\n(globalThis as any).ready = 1 + 1;`,
     };
-    expect(await built(files)).toEqual({ stdout: "object\n", exitCode: 0, removesUnusedFeatures: true });
+    expect(await built(files)).toEqual({
+      stdout: "object\n",
+      exitCode: 0,
+      removesUnusedFeatures: removesAnUnusedFeature,
+    });
   });
 });
 

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { bunEnv, bunExe, isDebug, isGlibc, isLinux, tempDir } from "harness";
+import { bunEnv, bunExe, isDebug, isGlibc, isLinux, isOhos, tempDir } from "harness";
 import { closeSync, openSync, readFileSync, readSync } from "node:fs";
 
 // The Linux kernel lets the main thread's stack mapping reach RLIMIT_STACK, measured from the end of the mapping.
@@ -62,7 +62,9 @@ function programInterpreter(path: string): string | undefined {
   }
 }
 
-describe.concurrent.skipIf(!isLinux || !canSetStackLimit)("with 700 KB of environment", () => {
+// OHOS's loader refuses to start a program under the lowered stack limit that
+// these cases set.
+describe.concurrent.skipIf(!isLinux || !canSetStackLimit || isOhos)("with 700 KB of environment", () => {
   test("native recursion checks trip before the stack ends", async () => {
     const script = `
       const open = Buffer.alloc(100_000, "[").toString();

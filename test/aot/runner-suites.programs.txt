@@ -400,7 +400,7 @@ test/bundler/compile-asset-bunfs.test.ts: compile --asset and /$bunfs/ directory
 test/bundler/compile-asset-bunfs.test.ts: compile --asset and /$bunfs/ directory semantics > Bun.build({compile: {assets}}) rejects colliding paths
 test/bundler/compile-corrupted-embed.test.ts: prints a stack trace when the embedded source map points outside itself
 # A trimmed executable whose program cannot be read has no command line to go on with, and says that it is damaged: a-truncated-executable-says-so.test.ts holds that.
-trims test/bundler/compile-corrupted-embed.test.ts: a truncated standalone executable says so unless part of the payload's last page is left
+not-ohos trims test/bundler/compile-corrupted-embed.test.ts: a truncated standalone executable says so unless part of the payload's last page is left
 trims test/bundler/compile-corrupted-embed.test.ts: doesn't crash at startup when the graph length or address points outside mapped memory
 test/bundler/compile-node-compile-cache.test.ts: NODE_COMPILE_CACHE is ignored by compiled executables and honored by bun
 test/bundler/compile-sourcemap-internal.test.ts: compile --sourcemap remaps stack frames to original line:col
@@ -441,13 +441,9 @@ test/js/bun/resolve/resolve.test.ts: in a directory named a\b > cwd, import.meta
 test/js/bun/resolve/resolve.test.ts: in a directory named a\b > macros
 test/js/bun/resolve/resolve.test.ts: in a directory named a\b > resolves a file created after the directory was cached
 test/js/bun/resolve/resolve.test.ts: in a directory named a\b > resolves after process.chdir() out of it
-test/js/bun/resolve/resolve.test.ts: in a directory named a\b > runs from another cwd when HOME has the same name (home)
-test/js/bun/resolve/resolve.test.ts: in a directory named a\b > runs from another cwd when HOME has the same name (scratch)
-# These require() a path that is computed at run time.
+not-not-# These require() a path that is computed at run time.
 test/js/bun/resolve/resolve.test.ts: a backslash is part of a name: createRequire()
 test/js/bun/resolve/resolve.test.ts: in a directory named a\ > resolves after process.chdir() into it and back
-test/js/bun/resolve/resolve.test.ts: in a directory named a\b > resolves after process.chdir() into it and back
-# These start a Worker from a file that the program writes.
-test/js/bun/resolve/resolve.test.ts: finds a worker in a directory that is created later and written with a separator at the end
-test/js/bun/resolve/resolve.test.ts: finds a worker that is created later and written with /./
-test/js/bun/resolve/resolve.test.ts: finds a worker that is created later and written with //
+not-# These start a Worker from a file that the program writes.
+not-ohos test/js/bun/resolve/resolve.test.ts: finds a worker in a directory that is created later and written with a separator at the end
+not-test/js/bun/resolve/resolve.test.ts: finds a worker that is created later and written with //

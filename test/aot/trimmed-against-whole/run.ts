@@ -155,7 +155,7 @@ const cores = values.cores?.split(",").flatMap(range => {
   const [first, last = first] = range.split("-").map(Number);
   return Array.from({ length: last - first + 1 }, (_, index) => first + index);
 });
-const scratch = withoutInstallingPackages(join(resolve(values.scratch ?? (existsSync("/dev/shm") ? "/dev/shm" : tmpdir())), `trimmed-against-whole-${process.pid}`));
+const scratch = withoutInstallingPackages(join(resolve(values.scratch ?? ((existsSync("/dev/shm") && writable("/dev/shm")) ? "/dev/shm" : tmpdir())), `trimmed-against-whole-${process.pid}`));
 const settings: Settings = {
   bun: resolve(values.bun),
   scratch,
@@ -195,3 +195,15 @@ try {
 console.log(String(tally));
 console.log("TRIMMED-AGAINST-WHOLE-DONE");
 process.exit(differing > 0 ? 1 : 0);
+
+/** OHOS's /dev/shm exists but an app cannot make a folder in it, even where access() says it may. */
+function writable(folder: string): boolean {
+  try {
+    const probe = `${folder}/.bun-probe-${process.pid}`;
+    mkdirSync(probe);
+    rmSync(probe, { recursive: true, force: true });
+    return true;
+  } catch {
+    return false;
+  }
+}

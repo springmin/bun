@@ -3902,7 +3902,10 @@ describe.concurrent("builtin errors", () => {
     expect(await run(script)).toEqual({ seen: expected, stderr: "", exitCode: 0 });
   });
 
-  test.if(isLinux)("exit code when the output cannot be written", async () => {
+  // OHOS's /dev/full is not open for writing (`Permission denied`), so a
+  // redirection fails before the write and the pinned exit codes below are
+  // Linux's answers, not this platform's.
+  test.if(isLinux && !isOhos)("exit code when the output cannot be written", async () => {
     const ENOSPC = 28;
     // These two are pinned, not endorsed.
     const negatedENOSPC = 2 ** 16 - ENOSPC;

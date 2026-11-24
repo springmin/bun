@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { realpathSync } from "fs";
-import { bunEnv, bunRun, compileFixture, isGlibc, isOhos, isWindows, tempDir } from "harness";
+import { bunEnv, bunExe, bunRun, compileFixture, isGlibc, isOhos, isWindows, tempDir } from "harness";
 import { isIPv4, isIPv6 } from "node:net";
 import * as os from "node:os";
 import { join } from "node:path";

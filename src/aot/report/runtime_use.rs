@@ -8,7 +8,7 @@ use bun_trim::{
 use super::format::write_parts;
 use super::positions::{PathStyle, Positions, write_shown_position};
 use super::wording::{trim_blocker_code, unseen_code_sentence};
-use super::{ModuleOrigin, ReportEntry, ReportInput, SourceTexts};
+use super::{ModuleOrigin, ReportEntry, ReportInput};
 use crate::builtins::BuiltinId;
 use crate::builtins::table::{self, BuiltinKind};
 use crate::engine::{
@@ -40,7 +40,10 @@ pub(super) fn collect(input: &ReportInput<'_>, out: &mut Vec<ReportEntry>) {
         ]);
         out.push(entry_at(line, None));
     }
-    let items = item_lines(input.engine.builtins_used(), input.texts);
+    // A program that runs code the compiler never saw may reach every use
+    // the host's library makes, so the report names them all.
+    let whole_library = runs_unseen_code(input);
+    let items = item_lines(input, input.engine.builtins_used(), whole_library);
     out.extend(items.into_iter().map(|line| entry_at(line, None)));
     out.push(locale_line(input, &mut positions));
     match input.decision {
@@ -109,8 +112,9 @@ fn find_removed_but_reachable<'a>(
     };
     let mut seen = FeatureSet::EMPTY;
     let mut found = Vec::new();
+    let whole_library = runs_unseen_code(input);
     for record in input.engine.features_used() {
-        if skips_feature_record(input, record) {
+        if !whole_library && skips_feature_record(input, record) {
             continue;
         }
         let Some(feature) = feature_of(record.feature) else {
@@ -198,8 +202,22 @@ fn cause_lines(
     run_time_name_lines(reachable, positions, out);
 }
 
+/// OHOS keeps the engine's built-ins in every image (see `runtime_roots`), so
+/// the uses that they reach through the host's own library are not the
+/// program's. A record the host's library witnesses says nothing about the
+/// program, and neither does one the runtime's own modules make.
+/// Whether the program may run code that the compiler did not see: then every
+/// member of the host's library is reachable, as upstream reports it.
+fn runs_unseen_code(input: &ReportInput<'_>) -> bool {
+    !input.used_features.causes.is_empty() || input.used_features.can_start_worker_from_unseen_code()
+}
+
 #[cfg(target_env = "ohos")]
-fn skips_builtin_record(texts: &SourceTexts, record: &BuiltinUseRecord) -> bool {
+fn skips_builtin_record(input: &ReportInput<'_>, record: &BuiltinUseRecord) -> bool {
+    if input.options.trim.checks_only {
+        return false;
+    }
+    let texts = input.texts;
     // The host linked this one while the realm started; the program does not
     // use it.
     if record.uses.contains(BuiltinUse::USED_AT_START)
@@ -217,12 +235,14 @@ fn skips_builtin_record(texts: &SourceTexts, record: &BuiltinUseRecord) -> bool 
 }
 
 #[cfg(not(target_env = "ohos"))]
-fn skips_builtin_record(_: &SourceTexts, _: &BuiltinUseRecord) -> bool {
+fn skips_builtin_record(_: &ReportInput<'_>, _: &BuiltinUseRecord) -> bool {
     false
 }
 
 #[cfg(target_env = "ohos")]
 fn skips_feature_record(input: &ReportInput<'_>, record: &FeatureUseRecord) -> bool {
+    // `check --aot` reports on a program that nothing compiles yet: every use
+    // is the program's, and the image's records are the only place they are.
     if input.options.trim.checks_only {
         return false;
     }
@@ -245,14 +265,22 @@ fn is_internal_builtin(builtin: u32) -> bool {
     let Some(module) = table::entry(id).module else {
         return false;
     };
-    let specifier = table::module_data(module).specifier;
-    specifier.starts_with("internal:") || specifier.starts_with("$bun")
+    table::is_internal_module(module)
 }
 
-fn item_lines(records: &[BuiltinUseRecord], texts: &SourceTexts) -> Vec<Vec<u8>> {
+#[cfg(not(target_env = "ohos"))]
+fn is_internal_builtin(_: u32) -> bool {
+    false
+}
+
+fn item_lines(
+    input: &ReportInput<'_>,
+    records: &[BuiltinUseRecord],
+    whole_library: bool,
+) -> Vec<Vec<u8>> {
     let mut items = Vec::new();
     for record in records {
-        if skips_builtin_record(texts, record) {
+        if !whole_library && skips_builtin_record(input, record) {
             continue;
         }
         let Some(id) = builtin_of(record.builtin) else {
@@ -353,20 +381,6 @@ fn feature_lines(
     out: &mut Vec<ReportEntry>,
 ) {
     for &Retained { feature, reason } in &decision.retained {
-        // A check keeps the source text so it can link the built-ins that a
-        // realm starts with; the report is about the program, which does not
-        // use it. An executable gets their code from its image instead. A
-        // program that does use it keeps the line.
-        if feature == Feature::BuiltinSourceText
-            && input.options.trim.checks_only
-            && matches!(reason, RetainReason::NotRequested)
-        {
-            let mut line = line_from(&[b"removed "]);
-            write_feature(&mut line, Feature::BuiltinSourceText);
-            line.extend_from_slice(b": unused");
-            out.push(entry_at(line, None));
-            continue;
-        }
         let mut line = line_from(&[b"kept "]);
         write_feature(&mut line, feature);
         line.extend_from_slice(b": ");

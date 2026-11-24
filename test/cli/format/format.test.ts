@@ -1,5 +1,5 @@
 import { dlopen } from "bun:ffi";
-import { afterAll, describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, setDefaultTimeout, test } from "bun:test";
 import {
   autoInstallTempDir,
   bunEnv,
@@ -39,6 +39,12 @@ import { endChildren, spawn } from "../children";
 import { inputs as lineEndingInputs } from "./line-endings.cases.ts";
 
 afterAll(endChildren);
+
+// Each case runs `bun fmt` once or more, and a JavaScript config
+// (prettier.config.mjs) starts a VM and runs the leak check at exit: several
+// seconds on OHOS, over bun:test's 5 s default. The plugin cases below already
+// give themselves the same allowance.
+setDefaultTimeout(isOhos ? 60_000 : 5_000);
 
 const command = [bunExe(), "fmt"];
 /** Matches the start of an error. */
@@ -7085,7 +7091,8 @@ try {
     const result = await format({ "a.js": code }, [], { reads: ["a.js"] });
     expect(result.files["a.js"]).toBe(code);
     // Wall-clock time is meaningless on a busy machine. It took over a second in a release build when it was quadratic.
-    expect(result.cpu).toBeLessThan(isDebug || isASAN ? 30 : 0.6);
+    // OHOS's CPU is slower: 12,000 labels take ~1.6 s linearly, while a quadratic run costs far more than 6 s.
+    expect(result.cpu).toBeLessThan(isDebug || isASAN ? 30 : isOhos ? 6 : 0.6);
     expect(result.exitCode).toBe(0);
   });
 

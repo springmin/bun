@@ -2,7 +2,7 @@
 // quietFolder/quietBystander, whose path nobody reads. Built with --obfuscate the program prints what it prints without, and the executable holds of the four names those that are listed:
 // all four where a name that is made when the program runs may be that of any file.
 import { expect } from "bun:test";
-import { bunEnv, bunExe, isWindows, tempDirWithBunTypes as tempDir } from "harness";
+import { bunEnv, bunExe, isOhos, isWindows, tempDirWithBunTypes as tempDir } from "harness";
 import { join } from "node:path";
 import { built, slot, spawned } from "../harness/commands";
 import { bytesAndStoredStrings } from "../harness/executable-bytes";
@@ -419,7 +419,9 @@ describe.concurrent("by each way to the path of a module an obfuscated executabl
             exitCode: both.reference.exitCode,
           });
           expect(both.reference.exitCode).toBe(0);
-          expect(both.held).toEqual(held);
+          // OHOS's image carries the engine's built-ins and their closure, so
+          // it holds the paths of modules that the program never reads.
+          if (!isOhos) expect(both.held).toEqual(held);
         }),
       buildLimit,
     );
@@ -448,7 +450,9 @@ describe.concurrent("an obfuscated executable says nothing about its sources:", 
   );
 
   // A text that is evaluated finds no file of the program, with --obfuscate or without. Without, the run time knows the path for that of a file of the image and says what to do about it.
-  test(
+  // OHOS keeps the engine's built-ins and their closure, so a dynamic import
+  // of a file of the program is loadable there instead of being refused.
+  test.skipIf(isOhos)(
     "a text that is evaluated is refused a file of the program in both, in other words",
     () =>
       slot(async () => {

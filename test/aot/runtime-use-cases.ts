@@ -1,4 +1,5 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, setDefaultTimeout, test } from "bun:test";
+import { isOhos } from "harness";
 import { unsupported } from "./harness/compiler";
 import {
   closed,
@@ -12,6 +13,10 @@ import {
   type Use,
 } from "./runtime-use-expectations";
 import { declared, of, runtimeUse } from "./runtime-use-harness";
+
+// Every case runs `bun check --aot --explain=trim`, which starts a compiler;
+// on a phone that takes seconds, over bun:test's default.
+setDefaultTimeout(isOhos ? 120_000 : 5_000);
 
 const groups: [name: string, body: () => void][] = [];
 const group = (name: string, body: () => void) => void groups.push([name, body]);

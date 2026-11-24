@@ -2,7 +2,7 @@
 // flag (harness/compiler.ts asks it, and says so on stderr) every test is skipped, whatever is chained to it, and `beforeAll` does
 // nothing.
 import { describe as describeAnywhere } from "bun:test";
-import { isASAN } from "harness";
+import { isASAN, isDebug, isOhos } from "harness";
 import { unsupported } from "./harness/compiler";
 import {
   beforeAll as beforeAllAnywhere,
@@ -14,7 +14,10 @@ import {
 export { unsupported };
 
 // One build takes about as long as the whole default limit of bun:test.
-raiseDefaultTimeout(120_000);
+// A release build on OHOS runs on a phone: a case that a CI lane gives a few
+// hundred milliseconds takes seconds there, so it gets the same allowance as a
+// build with assertions.
+raiseDefaultTimeout(120_000, isASAN || isDebug || isOhos);
 
 // In a Bun with assertions what is read from `test` is a proxy of harness/default-timeout.ts, which calls it on the object that it was read from, whatever `this` is. Its own
 // `bind` would be read through that proxy and bind what lies behind it to the wrong object.

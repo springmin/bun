@@ -130,7 +130,7 @@ function programOf(runsUnseenCode: string | undefined) {
     test("a program that runs unseen code may use every member", async () => {
       expect(await mayUseEveryMember("Bun.build")).toBe(true);
     }, 600_000);
-    test.failing(
+    test(
       "a program that runs none uses only the members that it names: its report says that it may use every member",
       async () => {
         expect(await mayUseEveryMember(undefined)).toBe(false);

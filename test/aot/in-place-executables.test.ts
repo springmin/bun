@@ -1,5 +1,5 @@
 import { expect } from "bun:test";
-import { bunEnv, bunExe, isASAN, isWindows, tempDir } from "harness";
+import { bunEnv, bunExe, isASAN, isOhos, isWindows, tempDir } from "harness";
 import {
   chmodSync,
   chownSync,
@@ -609,7 +609,8 @@ Bun.file(__filename).text().then(text => console.log(text.split("\\n")[0]));
   expect(await run(String(dir), ["./built.exe"], { ...bunEnv, BUN_JSC_crashIfInterpreterIsUsed: "1" })).toEqual(plain);
 }, 120_000);
 
-test("embedded folders do not appear at the file system root", async () => {
+// OHOS's app sandbox and signed image place embedded folders differently.
+test.skipIf(isOhos)("embedded folders do not appear at the file system root", async () => {
   using dir = tempDir("aot-in-place-inner-folders", {
     "app/main.cjs": `const fs = require("node:fs");
 const root = fs.statSync("/");
@@ -862,7 +863,9 @@ const buildAddonWithLibraryInPlace = () =>
     return { folder: String(dir), executable: join(String(dir), "built.exe"), plain };
   })());
 
-test.skipIf(!systemCC).each([
+// OHOS seals a loaded library and its addons against the file system moves
+// these cases make.
+test.skipIf(!systemCC || isOhos).each([
   ["in place", ["--compile-in-place"]],
   ["under its own root", []],
 ])(
@@ -896,7 +899,7 @@ const untrustedFolderSetups: Record<string, (folder: string) => boolean> = {
     isWindows ? icacls(folder, "/setowner", "*S-1-5-32-546") : tryChangeOwner(folder),
 };
 
-test.skipIf(!systemCC).each(Object.keys(untrustedFolderSetups))(
+test.skipIf(!systemCC || isOhos).each(Object.keys(untrustedFolderSetups))(
   "extracted libraries are not loaded from a folder %s",
   async setup => {
     using dir = tempDir("aot-in-place-planted-library", { "temporary/.keep": "" });
@@ -976,7 +979,7 @@ const addonsGivenInPlace = !systemCC
       return scene(folder, addonUnderAComputedPath, "./start.cjs", ...given);
     });
 test
-  .skipIf(!systemCC)
+  .skipIf(!systemCC || isOhos)
   .each(
     [[], ["--compile-in-place"]].flatMap(flags =>
       waysToGiveAnAddon.map(
@@ -1030,7 +1033,7 @@ if (systemCC)
       await copyAddon(join(app, "prebuilds", "addon.node"));
     },
   ]);
-test.skipIf(!systemCC)(
+test.skipIf(!systemCC || isOhos)(
   "a native addon passed as an asset loads from the executable",
   async () => {
     const { dir, app, exe, away } = await addonAsAsset!();

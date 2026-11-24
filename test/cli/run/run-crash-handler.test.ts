@@ -8,6 +8,7 @@ import {
   isDebug,
   isGlibc,
   isLinux,
+  isOhos,
   isPosix,
   isWindows,
   mergeWindowEnvs,
@@ -67,7 +68,13 @@ test.if(hasPointerAuthentication)("a stack trace takes the signature off a retur
 });
 
 // The program finds the return addresses that `descend` has left on the stack and changes the bits where a signature goes.
-describe.if(hasPointerAuthentication && !isASAN && !unsupported)("signed return addresses of compiled code", () => {
+// OHOS's crash service takes the fault, so the frames of compiled code that
+// this suite reads back from a panic are not in Bun's report (the signal
+// handler does not run its own unwinder). The prefix that unwinds a signed
+// return address is still checked above.
+describe.if(hasPointerAuthentication && !isASAN && !unsupported && !isOhos)(
+  "signed return addresses of compiled code",
+  () => {
   const program = `import { read, toArrayBuffer } from "bun:ffi";
 import { readFileSync } from "node:fs";
 
@@ -116,7 +123,10 @@ console.log(descend(process.argv.length + 9));
   async function crashed(how: string) {
     const cmd = withoutCoreDump([path.join(String(dir), "app"), how]);
     const { stdout, stderr, exitCode } = await run(cmd, String(dir), noReportEnv, 20_000);
-    expect({ stdout, exitCode }).toEqual({ stdout: "", exitCode: 128 + osConstants.signals.SIGSEGV });
+    // OHOS's crash service handles the signal and the process exits 1; Linux's
+    // shell reports 128 + SIGSEGV. The frames below are what this case reads.
+    const faulted = isOhos ? 1 : 128 + osConstants.signals.SIGSEGV;
+    expect({ stdout, exitCode }).toEqual({ stdout: "", exitCode: faulted });
     return { stderr, frames: stderr.match(/(?<=^ +)at .*/gm) };
   }
 
@@ -139,7 +149,8 @@ console.log(descend(process.argv.length + 9));
       expect(stderr).toMatch(/ x30=code\+0x\w+ sp=stack\+0x0 pc=code\+0x\w+$/m);
     },
   );
-});
+  },
+);
 
 // `crash()` resets fatal-signal dispositions to SIG_DFL before re-raising so
 // that JS-registered listeners (`process.on("SIGABRT")` etc., installed by

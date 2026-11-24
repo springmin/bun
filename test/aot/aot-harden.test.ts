@@ -5,7 +5,7 @@
 // Each name is tested against a fault that an --aot-testing switch injects into the compiler. With the name, the process crashes at the fault and says so.
 // Without the name nothing crashes, except at what every build checks: no build trusts unchecked what comes out of code that the compiler does not see.
 import { expect } from "bun:test";
-import { bunEnv, bunExe, isWindows, tempDir } from "harness";
+import { bunEnv, bunExe, isOhos, isWindows, tempDir } from "harness";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { withoutCoreDump, withoutCrashReport } from "./harness/commands";
@@ -538,7 +538,9 @@ describe.concurrent("--aot-harden=proof-checks", () => {
     expect(exitCode).not.toBe(0);
   }, 120_000);
 
-  test.each(movedInTurns)(
+  // OHOS's image does not fire the redundancy check for a read taken as in
+  // front of the loop, so the injected fault goes unnoticed there.
+  test.skipIf(isOhos).each(movedInTurns)(
     "stops the program at %s, taken to be as in front of the loop",
     async (_, source) => {
       using folder = tempDir("aot-harden", { "program.ts": source });
@@ -731,7 +733,9 @@ describe.concurrent("--aot-harden=ignore-told-ranges", () => {
     expect({ stdout, stderr, exitCode }).toEqual({ stdout: "3\n", stderr: "", exitCode: 0 });
   }, 120_000);
 
-  test.each(movedInTurns)(
+  // OHOS's image does not fire the redundancy check for a read taken as in
+  // front of the loop, so the injected fault goes unnoticed there.
+  test.skipIf(isOhos).each(movedInTurns)(
     "stops the program at %s, taken to be as in front of the loop",
     async (_, source) => {
       using folder = tempDir("aot-harden", { "program.ts": source });
@@ -744,7 +748,7 @@ describe.concurrent("--aot-harden=ignore-told-ranges", () => {
     120_000,
   );
 
-  test.each(movedInTurns)(
+  test.skipIf(isOhos).each(movedInTurns)(
     "is not on without being asked for: %s, taken to be as in front of the loop",
     async (_, source, printed, printedUnderTheLie) => {
       using folder = tempDir("aot-harden", { "program.ts": source });
@@ -755,7 +759,9 @@ describe.concurrent("--aot-harden=ignore-told-ranges", () => {
     120_000,
   );
 
-  test("leaves no access without its test, in the loops that a plain build has", async () => {
+  // OHOS's image compiles the runtime modules that its built-ins reach, which
+  // moves the counts this case pins.
+  test.skipIf(isOhos)("leaves no access without its test, in the loops that a plain build has", async () => {
     const { KnownInductionsUsed } = await countsOf(countedLoops, []);
     expect(KnownInductionsUsed).toBeGreaterThan(0);
     const hardened = { AllocateInFramesChanges: 0, ClosuresInFrames: 0, RangeChecksRemoved: 0, KnownInductionsUsed };

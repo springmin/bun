@@ -170,7 +170,8 @@ export async function inspectAndRun(folder: string, linkResult: ProcessResult, r
   signOnOhos(join(folder, "program"));
   const programResult = await run([join(folder, "program")], folder);
   const summary = trimExecutable(join(folder, "program"), join(folder, "trimmed"), removed);
-  signOnOhos(join(folder, "trimmed"));
+  // `trimExecutable` signs what it writes on OHOS itself; the linker's tool
+  // cannot sign a file whose `.codesign` no longer sits last.
   const trimmedResult = await run([join(folder, "trimmed")], folder);
   return { ...inspection, linkOutput: linkResult.stdout, summary, programResult, trimmedResult };
 }

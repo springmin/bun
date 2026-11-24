@@ -25,44 +25,31 @@ pub fn used_features(result: &EngineResult) -> UsedFeatures {
     )
 }
 
-fn is_internal_builtin(builtin: u32) -> bool {
-    let Some(id) = builtin_of(builtin) else {
-        return false;
-    };
-    let Some(module) = table::entry(id).module else {
-        return false;
-    };
-    table::is_internal_module(module)
-}
-
 /// The uses of the program alone: a feature or a cause whose place is in the
 /// library is the host's, not the program's.
 pub fn used_features_of_program(result: &EngineResult, texts: &SourceTexts) -> UsedFeatures {
     let mut used = used_features(result);
-    let is_in_program = |witness: &super::SourceLocation| {
+    // A use that the host's own library witnesses is the host's, not the
+    // program's; one with no witness at all belongs to the program (an entry
+    // point that may serve, for instance).
+    let in_program = |witness: &super::SourceLocation| {
         witness
             .module_id()
-            .is_some_and(|module| !matches!(texts.origin(module), ModuleOrigin::Runtime))
+            .is_none_or(|module| !matches!(texts.origin(module), ModuleOrigin::Runtime))
     };
-    used.features.retain(|used| {
-        used.witness.is_some_and(|index| {
-            result
-                .features_used()
-                .get(index.0 as usize)
-                .is_some_and(|record| {
-                    !is_internal_builtin(record.builtin) && is_in_program(&record.witness.location)
-                })
-        })
+    used.features.retain(|used| match used.witness {
+        None => true,
+        Some(index) => result
+            .features_used()
+            .get(index.0 as usize)
+            .is_none_or(|record| in_program(&record.witness.location)),
     });
-    used.causes.retain(|cause| {
-        cause.witness.is_some_and(|index| {
-            result
-                .unseen_code()
-                .get(index.0 as usize)
-                .is_some_and(|record| {
-                    !is_internal_builtin(record.builtin) && is_in_program(&record.witness.location)
-                })
-        })
+    used.causes.retain(|cause| match cause.witness {
+        None => true,
+        Some(index) => result
+            .unseen_code()
+            .get(index.0 as usize)
+            .is_none_or(|record| in_program(&record.witness.location)),
     });
     used
 }

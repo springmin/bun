@@ -1,7 +1,7 @@
 // A Bun built with assertions can ask of every call that may throw whether somebody looked for the exception behind it
 // (BUN_JSC_validateExceptionChecks=1), and aborts where nobody did. Any other Bun ignores the variable.
 import { describe, expect } from "bun:test";
-import { bunEnv, bunExe, tempDir } from "harness";
+import { bunEnv, bunExe, isOhos, tempDir } from "harness";
 import { join } from "node:path";
 import { built, slot, spawned, unsupported, withoutCoreDump } from "./harness/commands";
 import { test } from "./harness/default-timeout";
@@ -149,7 +149,9 @@ try {
 }
 `,
     },
-    stdout: "console.Console was not compiled into this executable\n",
+    // OHOS keeps the engine's built-ins and their closure in the image, so
+    // the member is there and answers.
+    stdout: isOhos ? "function\n" : "console.Console was not compiled into this executable\n",
   },
 };
 

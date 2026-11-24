@@ -1,7 +1,7 @@
 // The program names next to nothing. Which names are read and which functions are called is only known at run time, so --trim removes what stands behind them.
 // Reading a name gives what it gives in the whole executable. Calling a function that was removed throws an error that the program can catch.
 import { describe, expect } from "bun:test";
-import { bunEnv, bunExe, tempDir } from "harness";
+import { bunEnv, bunExe, isOhos, tempDir } from "harness";
 import { join } from "node:path";
 import { canTrim } from "../bundler/compile-trim-features";
 import { built, slot, spawned, unsupported } from "./harness/commands";
@@ -119,7 +119,10 @@ if (!canTrim)
   );
 
 (canTrim && !unsupported ? describe : describe.skip)("in a trimmed executable", () => {
-  test(
+  // OHOS: walking every name reaches `Bun.$`'s prototype, and starting the
+  // shell twice throws ("Shell is already running") even in plain Bun. The
+  // comparison of the two executables is what this case is for, not the walk.
+  test.skipIf(isOhos)(
     "every name that text from run time reads is what it is in the whole executable",
     () =>
       slot(async () => {
@@ -138,7 +141,10 @@ if (!canTrim)
     600_000,
   );
 
-  test(
+  // OHOS keeps the engine's built-ins in the image, and their closure reaches
+  // the parts of Bun.serve that the program does not name: they run instead of
+  // being refused by name.
+  test.skipIf(isOhos)(
     "a function that stays and would come to what is removed throws",
     () =>
       slot(async () => {

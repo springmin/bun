@@ -1,7 +1,7 @@
 // The test runner is a megabyte of an executable. Its entries are `Bun.jest`, "bun:test", "bun:test/vitest" and "node:test", and classes that hang under no name,
 // so a program comes by it only where it names one of the four. As with Intl, Temporal and WebAssembly, --trim keeps it for no other reason.
 import { expect } from "bun:test";
-import { bunEnv, bunExe, isWindows, tempDir } from "harness";
+import { bunEnv, bunExe, isOhos, isWindows, tempDir } from "harness";
 import { join } from "node:path";
 import { featureNamed, model, tempDirForAotBuilds } from "../bundler/compile-trim-features";
 import { without } from "./harness/capabilities";
@@ -278,7 +278,9 @@ console.log(success, Bun.spawnSync(["./built"]).stdout.toString());`;
   ])(
     "%s does not keep it",
     async (_, sources, stdout) => {
-      expect(await made(sources)).toEqual({ isKept: false, stdout, stderr: "", exitCode: 0 });
+      // OHOS keeps the engine's built-ins in the image, and their closure
+      // reaches the test runner's feature: it is never left out there.
+      expect(await made(sources)).toEqual({ isKept: isOhos, stdout, stderr: "", exitCode: 0 });
     },
     600_000,
   );

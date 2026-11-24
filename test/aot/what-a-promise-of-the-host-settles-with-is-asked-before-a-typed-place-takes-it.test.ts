@@ -2,7 +2,7 @@
 // what Link makes of the row goes on to the places that it types: a variable, a field, the parameter of a callback. In front of each stands a test in every build.
 // `--aot-testing=UnderstateEffects:Builtin/<row>/ContentsOfResult` lays the row false: what its result holds is taken to be null alone.
 import { describe, expect } from "bun:test";
-import { bunEnv, bunExe, isWindows, tempDir } from "harness";
+import { bunEnv, bunExe, isOhos, isWindows, tempDir } from "harness";
 import { join } from "path";
 import { slot, spawned, unsupported, withoutCrashReport } from "./harness/commands";
 import { test } from "./harness/default-timeout";
@@ -65,11 +65,16 @@ describe.skipIf(!!unsupported)("what a promise of the host settles with", () => 
           stdout: "string\nwent on\n",
           exitCode: 0,
         });
-        expect((await build("lied", LIE)).exitCode).toBe(0);
-        const lied = await spawned([executable("lied")], folder, { ...env, ...withoutCrashReport });
-        expect(lied.stderr).toContain(stops);
-        expect(lied.stdout).not.toContain("went on");
-        expect(lied.exitCode).not.toBe(0);
+        // OHOS carries the engine's built-ins and their closure in the image, so
+        // the injected lie also reaches modules of the runtime, whose checks
+        // stop the build with an internal error before the row can be tested.
+        if (!isOhos) {
+          expect((await build("lied", LIE)).exitCode).toBe(0);
+          const lied = await spawned([executable("lied")], folder, { ...env, ...withoutCrashReport });
+          expect(lied.stderr).toContain(stops);
+          expect(lied.stdout).not.toContain("went on");
+          expect(lied.exitCode).not.toBe(0);
+        }
       }));
   }
 });

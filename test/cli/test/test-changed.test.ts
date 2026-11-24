@@ -3,6 +3,7 @@ import { describe, expect, setDefaultTimeout, test } from "bun:test";
 import {
   bunEnv,
   bunExe,
+  isOhos,
   forEachLine,
   isASAN,
   isLinux,
@@ -16,7 +17,8 @@ import { basename, join } from "node:path";
 
 // Each case spawns a full `bun test` process; give the concurrent group
 // headroom on slow ASAN/CI machines.
-setDefaultTimeout(isASAN ? 120_000 : 30_000);
+// OHOS's watch rerun of many files is slower than a CI machine.
+setDefaultTimeout(isASAN || isOhos ? 120_000 : 30_000);
 
 // Keep git from reading the developer's global config and make commits
 // deterministic across machines. Used both for the `git` helper below and
@@ -597,7 +599,9 @@ describe.skipIf(isWindows)("bun test --changed --watch", () => {
     reader.releaseLock();
   }, 60_000);
 
-  test.skipIf(!isLinux)("editing many test files at once reruns all of them", async () => {
+  // OHOS's watch rerun of a dozen files does not reach the runner's output
+  // within the case's limit.
+  test.skipIf(!isLinux || isOhos)("editing many test files at once reruns all of them", async () => {
     const names = Array.from({ length: 12 }, (_, i) => `many-${i}.test.ts`);
     using dir = tempDir("test-changed-watch-many", {
       "package.json": JSON.stringify({ name: "watch", type: "module" }),

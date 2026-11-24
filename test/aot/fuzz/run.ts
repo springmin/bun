@@ -74,13 +74,25 @@
 //   driver-errors.txt     faults of the fuzzer itself. Each may have cost a finding: the exit code is 1 where there is one
 //   findings/<name>/      reduced.*, original.*, plain.txt, compiled.txt and finding.json (seed, source, runner, mode, flags, binary, cause).
 //                         A multi-file program is a folder reduced/ or original/ whose entry point is main.*
-import { existsSync, mkdirSync, readdirSync, rmSync } from "fs";
+import { existsSync, mkdirSync, rmSync, readdirSync } from "fs";
 import { availableParallelism } from "os";
 import { join } from "path";
 import { withoutInstallingPackages } from "../harness/without-installing-packages";
 import { changeEnvironment, EngineRunner, ProductRunner, type Runner } from "./runners";
 import { fuzz } from "./fuzzer";
 import { allSources } from "./sources";
+
+/** OHOS's /dev/shm exists but an app cannot make a folder in it, even where access() says it may. */
+function writable(folder: string): boolean {
+  try {
+    const probe = `${folder}/.bun-probe-${process.pid}`;
+    mkdirSync(probe);
+    rmSync(probe, { recursive: true, force: true });
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 function option(name: string): string | undefined {
   const at = process.argv.indexOf("--" + name);
@@ -94,7 +106,7 @@ const pairs = (text: string | undefined) =>
   Object.fromEntries(words(text).map(word => [word.slice(0, word.indexOf("=")), word.slice(word.indexOf("=") + 1)]));
 
 const work = join(
-  option("work") ?? (existsSync("/dev/shm") ? "/dev/shm" : (process.env.TMPDIR ?? "/tmp")),
+  option("work") ?? ((existsSync("/dev/shm") && writable("/dev/shm")) ? "/dev/shm" : (process.env.TMPDIR ?? "/tmp")),
   `aot-fuzz-${process.pid}`,
 );
 const programsRoot = option("programs-root") ?? join(import.meta.dir, "..", "parallel");

@@ -73,11 +73,13 @@ pub(crate) fn builtins_used_at_start(options: &AotOptions, start: StartOfRun) ->
     // with the source text trimmed, their code has to be in its image. A
     // check, and a build that leaves the library out, links them from the
     // text, which its image keeps.
+    // OHOS: a trimmed image has no source text to link the engine's built-ins
+    // from, so JSC finds their code in the image. Every built-in of the
+    // language stands here for that reason; a host built-in that the program
+    // names comes in through its own use. `--no-builtin-modules` keeps the
+    // text of Bun's own modules, not the engine's, so it still needs them.
     #[cfg(target_env = "ohos")]
-    if !options.trim.checks_only && !options.omits_builtin_modules {
-        // The engine's built-ins are the language that a realm starts with.
-        // A host built-in that the program names comes in through its own
-        // use, so it does not have to stand here.
+    if !options.trim.checks_only && (!options.omits_builtin_modules || options.trim.removes_unused) {
         used.extend(
             BuiltinId::ALL
                 .into_iter()

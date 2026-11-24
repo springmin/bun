@@ -4419,7 +4419,7 @@ it("tls.DEFAULT_CIPHERS reaches a client whatever its other TLS options are", as
     "connections of fetch.preconnect() and fetch()": "1",
   });
   expect(exitCode).toBe(0);
-});
+}, 60_000);
 
 // Node.js v26.3.0 throws the same from the first context built after the assignment.
 it("tls.DEFAULT_CIPHERS refuses a list that selects no cipher", () => {

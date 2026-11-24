@@ -12,6 +12,7 @@ import {
   isIntelMacOS,
   isLinux,
   isMacOS,
+  isOhos,
   isPosix,
   isWindows,
   MAX_PATH_BYTES,
@@ -838,8 +839,9 @@ describe("appendFile honors an explicit 'w' flag", () => {
 // the bytes that did land. `ulimit -f 1` gives the child a 512 byte RLIMIT_FSIZE,
 // and Linux's generic_write_checks() then clamps the write to the limit and fails
 // the next one with EFBIG. Linux-only: BSD kernels reject the whole write instead,
-// so the byte split is not portable.
-describe.skipIf(!isLinux)("writeFileSync when the write fails partway", () => {
+// so the byte split is not portable. OHOS does not enforce RLIMIT_FSIZE here
+// (the write reports no error at all), so there is no part-way write to test.
+describe.skipIf(!isLinux || isOhos)("writeFileSync when the write fails partway", () => {
   const fixture = join(import.meta.dir, "fs-writeFile-write-error-fixture.js");
 
   async function runUnderFileSizeLimit(path: string, flag: string) {
@@ -2816,7 +2818,8 @@ describe("readFileSync", () => {
     gc();
     expect(text).toBe("");
 
-    if (process.platform === "linux") {
+    // OHOS does not let an app read /proc/filesystems.
+    if (process.platform === "linux" && !isOhos) {
       const text = readFileSync("/proc/filesystems");
       gc();
       expect(text.length > 0).toBe(true);

@@ -2,7 +2,7 @@
 // So does the test runner where nothing in the executable can come by it: trim-keeps-the-test-runner-only-when-named.test.ts.
 // What the program itself can use stays. Each way into what was left out answers with a sentence.
 import { describe, expect } from "bun:test";
-import { bunEnv, bunExe, isWindows } from "harness";
+import { bunEnv, bunExe, isOhos, isWindows } from "harness";
 import { join } from "node:path";
 import { canTrim, model } from "../bundler/compile-trim-features";
 import { unsupported } from "./harness/compiler";
@@ -144,7 +144,11 @@ function removedFeaturesOf(executable: Build): string[] {
 
   test("leaves out the command line and the JIT, and nothing a program can use", async () => {
     const hello = await built("hello");
-    expect(removedFeaturesOf(hello)).toEqual(commandLineJitAndTestRunner);
+    // OHOS keeps the engine's built-ins in the image, and their closure
+    // reaches the test runner's `Test` feature: everything else the command
+    // line stands on still leaves.
+    const expected = isOhos ? commandLineJitAndTestRunner.filter(name => name !== "Test") : commandLineJitAndTestRunner;
+    expect(removedFeaturesOf(hello)).toEqual(expected);
     expect(await run([hello.executable], folder)).toEqual({ stdout: "hello world\n", stderr: "", exitCode: 0 });
     expect(sizeOf(await shared.build("hello.ts")) - sizeOf(hello)).toBeGreaterThan(30_000_000);
   }, 600_000);

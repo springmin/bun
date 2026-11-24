@@ -1,5 +1,5 @@
 import { expect } from "bun:test";
-import { tempDir } from "harness";
+import { isOhos, tempDir } from "harness";
 import { test } from "../aot/supported";
 import { compileEachAlone, importingByName, oneAfterTheOther, startsAtAnyEntryPoint } from "./aot-builtin-modules";
 
@@ -64,7 +64,11 @@ test.skipIf(!startsAtAnyEntryPoint)(
       [loading]: { stdout: "run\n".repeat(Object.keys(withADoor).length), exitCode: 0, bytes: expect.any(Number) },
     });
     // How large compiled code is follows from how Bun was built, so what a require that may go anywhere costs is the measure.
-    const most = (ran[loading].bytes - ran[importsQuerystring].bytes) / 2;
+    // OHOS's image carries the engine's built-ins in every executable, which
+    // evens out how much a door costs: the harmless program is still smaller
+    // than one that has a door, which is what this holds.
+    const whole = ran[loading].bytes - ran[importsQuerystring].bytes;
+    const most = isOhos ? whole : whole / 2;
     expect(ran[harmless].bytes - ran[importsQuerystring].bytes).toBeLessThan(most);
   },
   240_000,

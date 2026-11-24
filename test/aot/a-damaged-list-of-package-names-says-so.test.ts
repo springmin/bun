@@ -1,12 +1,13 @@
 import { expect } from "bun:test";
-import { bunEnv, bunExe, isMacOS, tempDir } from "harness";
+import { bunEnv, bunExe, isMacOS, isOhos, tempDir } from "harness";
 import { chmodSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { run } from "./harness/run";
 import { test } from "./supported";
 
-// macOS kills what was changed behind its signature.
-test.skipIf(isMacOS)(
+// macOS and OHOS kill what was changed behind their signature: the test
+// rewrites bytes of the compiled executable, which no longer verifies.
+test.skipIf(isMacOS || isOhos)(
   "an executable whose list of package names is damaged says so where the program asks for one",
   async () => {
     const names = ["aaa-store", "bbb-store"];

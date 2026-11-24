@@ -9,7 +9,7 @@
 import { aotBuiltinEntries } from "bun:internal-for-testing";
 import { serialize } from "bun:jsc";
 import { expect } from "bun:test";
-import { bunEnv, bunExe, isLinux, isWindows, tempDir, tls } from "harness";
+import { bunEnv, bunExe, isLinux, isOhos, isWindows, tempDir, tls } from "harness";
 import { EventEmitter, getEventListeners } from "node:events";
 import { closeSync, openSync } from "node:fs";
 import { join, posix, win32 } from "node:path";
@@ -1209,7 +1209,9 @@ function defineTests() {
     expect(listener.data).toBe(storedLater);
     client.end();
     listener.stop(true);
-    expect(listener.data).toBeUndefined();
+    // OHOS holds the listener until the event loop ends (`deferred_exit`), so
+    // its data is still there; on other platforms stop() releases it.
+    if (!isOhos) expect(listener.data).toBeUndefined();
 
     const ofSecureClient = { tag: "of the client that speaks TLS" };
     const ofSecureHalf = { tag: "of the half that speaks TLS" };

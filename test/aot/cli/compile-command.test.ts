@@ -518,10 +518,14 @@ if (process.argv[2] === "first") {
         takesValue.set(flag, value !== undefined);
     }
     const text = readFileSync(join(import.meta.dir, "../../../docs/snippets/cli", page + ".mdx"), "utf8");
+    const isCanary = Bun.spawnSync([bunExe(), "--revision"]).stdout.toString().includes("-canary");
+    // A release build hides the two bake debugging flags behind
+    // `BAKE_DEBUGGING_FEATURES`, which canary builds turn on.
+    const hidden = isCanary ? [] : ["--debug-dump-server-files", "--debug-no-minify"];
     const listed = [...text.matchAll(/<ParamField path="([^"]+)" type="(\w+)"/g)].flatMap(([, path, type]) =>
       path
         .split(/[,/ ]+/)
-        .filter(flag => flag.startsWith("--"))
+        .filter(flag => flag.startsWith("--") && !hidden.includes(flag))
         .map(flag => ({ flag, takesValue: type !== "boolean" })),
     );
     expect(listed.length).toBeGreaterThan(10);

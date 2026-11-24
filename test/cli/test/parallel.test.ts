@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, setDefaultTimeout, test } from "bun:test";
 import { readFileSync, writeFileSync } from "fs";
 import {
   bunEnv,
@@ -16,10 +16,16 @@ import {
 import { mkfifo } from "mkfifo";
 import path from "path";
 
+// Every case starts a coordinator and its workers, and several wait for a
+// worker to scale up: on a phone that is seconds, over bun:test's default.
+setDefaultTimeout(isOhos ? 120_000 : 5_000);
+
 test("--parallel: each worker has a unique JEST_WORKER_ID and BUN_TEST_WORKER_ID", async () => {
   // Sleep so worker 0 is busy when workers 1/2 come online and pick up the
   // remaining files; otherwise one fast worker handles all three.
-  const fixture = `import {test} from "bun:test"; test("t", async () => { await Bun.sleep(200); console.log("WID="+process.env.JEST_WORKER_ID+" "+process.env.BUN_TEST_WORKER_ID); });`;
+  // A worker takes longer than 200 ms to start on OHOS, so worker 0 must be
+  // busy long enough for the other two to come online and take a file each.
+  const fixture = `import {test} from "bun:test"; test("t", async () => { await Bun.sleep(${isOhos ? 3000 : 200}); console.log("WID="+process.env.JEST_WORKER_ID+" "+process.env.BUN_TEST_WORKER_ID); });`;
   using dir = tempDir("parallel-worker-id", {
     "a.test.js": fixture,
     "b.test.js": fixture,

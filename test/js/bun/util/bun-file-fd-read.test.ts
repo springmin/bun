@@ -1,7 +1,7 @@
 import { dlopen, ptr } from "bun:ffi";
 import { describe, expect, test } from "bun:test";
 import { closeSync, openSync, readSync, renameSync, writeSync } from "fs";
-import { bunEnv, bunExe, isLinux, isWindows, libcPathForDlopen, tempDir } from "harness";
+import { bunEnv, bunExe, isLinux, isOhos, isWindows, libcPathForDlopen, tempDir } from "harness";
 import { constants } from "os";
 import { join } from "path";
 import { openFifo, untilWatched } from "../io/fifo-helpers";
@@ -63,7 +63,8 @@ test.skipIf(!isLinux)("an empty read of a FIFO by path stays open until its writ
   expect(await text).toBe("");
 });
 
-test.skipIf(isWindows)("a file that was empty and is a silent FIFO now reads as empty", async () => {
+// OHOS refuses the rename of a FIFO over an existing file (the MAC layer).
+test.skipIf(isWindows || isOhos)("a file that was empty and is a silent FIFO now reads as empty", async () => {
   using dir = tempDir("bun-file-fd-read", { file: "" });
   using fifo = openFifo(String(dir));
   const file = Bun.file(join(String(dir), "file"));
@@ -136,7 +137,9 @@ describe.skipIf(isWindows).concurrent("300 reads wait", () => {
   });
 });
 
-describe.skipIf(!isLinux)("EPOLLERR while Bun.file(fd).text() waits for a socket", () => {
+// OHOS's epoll does not report the error queue through EPOLLERR the way Linux
+// does, so the read never settles.
+describe.skipIf(!isLinux || isOhos)("EPOLLERR while Bun.file(fd).text() waits for a socket", () => {
   const [AF_INET, SOCK_STREAM, SOCK_DGRAM, SOL_SOCKET, SO_TIMESTAMPING] = [2, 1, 2, 1, 37];
   const libc = () =>
     dlopen(libcPathForDlopen(), {
@@ -221,7 +224,8 @@ test.skipIf(!isLinux)(
 const cc = Bun.which("cc") || Bun.which("gcc") || Bun.which("clang");
 
 // FUSE, /proc/kmsg and trace_pipe do this, and need root.
-test.skipIf(!isLinux || !cc)("read() is called again after EAGAIN from a regular file", async () => {
+// OHOS denies ptrace, which the supervisor needs.
+test.skipIf(!isLinux || !cc || isOhos)("read() is called again after EAGAIN from a regular file", async () => {
   using dir = tempDir("bun-file-fd-read", { "file.txt": "hello" });
   const file = join(String(dir), "file.txt");
   const supervisor = join(String(dir), "fail-nth-read");

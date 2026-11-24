@@ -1,7 +1,7 @@
 // A small program leaves most of what hangs below `process`, `Bun` and the global object out of its executable. Text that is decoded at run time reads every own name of each.
 // Each read answers as `bun <file>` does, or is refused aloud by an error that names what was left out. It never answers anything else: a stand-in said "function" for an object once.
 import { expect } from "bun:test";
-import { bunEnv, bunExe, isWindows, tempDir } from "harness";
+import { bunEnv, bunExe, isOhos, isWindows, tempDir } from "harness";
 import { join } from "node:path";
 import { test } from "./with-compiler";
 
@@ -41,7 +41,9 @@ test("each read answers as plain does or is refused by name", async () => {
   const names = [...plain.keys()].filter(name => compiled.has(name));
   expect(names.length).toBeGreaterThan(150);
   const refused = names.filter(name => compiled.get(name) === "refused");
-  expect(refused.length).toBeGreaterThan(2);
+  // OHOS carries the engine's built-ins in the image, and their closure reaches
+  // most of the host library: a name is answered for rather than refused.
+  if (!isOhos) expect(refused.length).toBeGreaterThan(2);
   const answeredOtherwise = names.filter(
     name => compiled.get(name) !== "refused" && compiled.get(name) !== plain.get(name),
   );

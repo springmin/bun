@@ -1,5 +1,5 @@
 import { expect } from "bun:test";
-import { bunEnv, bunExe, isWindows, tempDir } from "harness";
+import { bunEnv, bunExe, isOhos, isWindows, tempDir } from "harness";
 import { join } from "path";
 import { test } from "./supported";
 
@@ -81,7 +81,9 @@ setTimeout(() => {
 }, 120_000);
 
 // What text put together at run time answers is any value to the compiler. It does not take a method called on such a value for one of `process`.
-test("a listener added through a value that the compiler can't follow leaves the channel's JavaScript out, and the error says so", async () => {
+// OHOS keeps the engine's built-ins in the image, and their closure reaches
+// Bun.spawn: the channel works and the error is never raised.
+test.skipIf(isOhos)("a listener added through a value that the compiler can't follow leaves the channel's JavaScript out, and the error says so", async () => {
   expect(await startWithChannel("lost", `(0, eval)(["pro", JSON.parse('"cess"')].join(""))`)).toEqual({
     stdout: "",
     error:

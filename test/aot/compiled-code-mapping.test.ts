@@ -1,5 +1,5 @@
 import { expect } from "bun:test";
-import { bunEnv, bunExe, isASAN, isGlibc, isLinux, libcPathForDlopen, readElf64ProgramHeaders, tempDir } from "harness";
+import { bunEnv, bunExe, isASAN, isGlibc, isLinux, isOhos, libcPathForDlopen, readElf64ProgramHeaders, tempDir } from "harness";
 import { chmodSync, copyFileSync, readFileSync } from "node:fs";
 import { release } from "node:os";
 import { join } from "node:path";
@@ -125,7 +125,7 @@ function mappingsOf(output: string) {
     }));
 }
 
-test.skipIf(!isLinux)(
+test.skipIf(!isLinux || isOhos)(
   "executable pages are file-backed and never writable",
   async () => {
     const { executable, codeOffset } = await buildServer();
@@ -144,7 +144,7 @@ test.skipIf(!isLinux)(
   120_000,
 );
 
-test.skipIf(!isLinux)(
+test.skipIf(!isLinux || isOhos)(
   "the address of compiled code is independent of the executable and of libc",
   async () => {
     const { executable, codeOffset } = await buildServer();
@@ -169,7 +169,7 @@ test.skipIf(!isLinux)(
   120_000,
 );
 
-test.skipIf(!isLinux)(
+test.skipIf(!isLinux || isOhos)(
   "compiled code has its own read-execute segment and the rest of the payload is read-only",
   async () => {
     const { executable, file, image, codeOffset: code } = await buildServer();
@@ -286,7 +286,7 @@ test.skipIf(!isLinux || process.arch !== "arm64")(
   120_000,
 );
 
-test.skipIf(!isLinux)(
+test.skipIf(!isLinux || isOhos)(
   "a throw that names nothing has no data behind its call",
   async () => {
     using dir = tempDir("aot-code-mapping-throw", {
@@ -318,7 +318,7 @@ for (const lists of [[[1, 2], [3]], null, [[4]]]) {
   120_000,
 );
 
-test.skipIf(!isLinux)(
+test.skipIf(!isLinux || isOhos)(
   "a throw names a text that is one of the last of very many",
   async () => {
     using dir = tempDir("aot-code-mapping-late-names", {
@@ -351,7 +351,7 @@ console.log(names.length, names.at(-1));
   120_000,
 );
 
-test.skipIf(!isLinux)(
+test.skipIf(!isLinux || isOhos)(
   "the constants and jump tables of compiled code lie behind it, in pages that cannot be executed",
   async () => {
     const { executable, map } = await buildTables();
@@ -442,7 +442,7 @@ console.log(libc.symbols.abs(-5), calls > 0);
   120_000,
 );
 
-test.skipIf(!isLinux)("Bun has room for the program headers of an executable", async () => {
+test.skipIf(!isLinux || isOhos)("Bun has room for the program headers of an executable", async () => {
   const [note, descriptorSizeOffset, noteHeaderBytes] = [4, 4, 16];
   const rooms = readElf64ProgramHeaders(bunExe()).filter(header => header.type === note && header.align === 8n);
   expect(rooms.map(room => room.filesz)).toEqual([4104n]);
@@ -456,7 +456,7 @@ test.skipIf(!isLinux)("Bun has room for the program headers of an executable", a
   expect(offset + noteHeaderBytes).toBeLessThan(1024);
 });
 
-test.skipIf(!isLinux)(
+test.skipIf(!isLinux || isOhos)(
   "zero-initialized data of the runtime takes no bytes of the file",
   async () => {
     const sizesOf = (path: string) =>
@@ -582,7 +582,7 @@ ${makes600Callbacks}console.log(make600Callbacks());
   120_000,
 );
 
-test.skipIf(!isLinux)(
+test.skipIf(!isLinux || isOhos)(
   "an executable that has no descriptor left makes more callbacks for native code than are loaded with its code",
   async () => {
     using dir = tempDir("aot-callbacks-without-descriptors", {
@@ -630,7 +630,7 @@ console.log("made", held.length, "refused", refused, "grown by 64 MB", mapped() 
   120_000,
 );
 
-test.skipIf(!isLinux)(
+test.skipIf(!isLinux || isOhos)(
   "an executable that the dynamic loader is started with runs its own code, not bytes of the loader's file",
   async () => {
     const { executable, file, codeOffset } = await buildServer();
@@ -656,7 +656,7 @@ test.skipIf(!isLinux)(
 );
 
 // A hardened build runs no compiled code out of another file: a-hardened-build-runs-no-compiled-code-out-of-another-file.test.ts.
-test.skipIf(!isLinux || isHardened)(
+test.skipIf(!isLinux || isHardened || isOhos)(
   "a program that is compiled and run in one go lies at another address in every run",
   async () => {
     using dir = tempDir("aot-address-of-a-program", {
@@ -707,7 +707,7 @@ test.skipIf(!isLinux || !Bun.which("setarch"))(
   120_000,
 );
 
-test.skipIf(!isLinux)(
+test.skipIf(!isLinux || isOhos)(
   "the process writes to no page of the image",
   async () => {
     const { executable, file, image } = await buildServer();

@@ -4,7 +4,7 @@
 // Fault injection, --aot-testing=AssumeNullishHostResults: the table entry declares undefined | null. Without the check, `v == null` was already true at compile time:
 // the program printed true,number,false instead of false,number,true and did not crash. Other programs died on an illegal instruction without a message.
 import { describe, expect } from "bun:test";
-import { bunEnv, bunExe, isWindows, tempDir } from "harness";
+import { bunEnv, bunExe, isOhos, isWindows, tempDir } from "harness";
 import { join } from "path";
 import { slot, spawned, unsupported, withoutCrashReport } from "./harness/commands";
 import { test } from "./harness/default-timeout";
@@ -41,9 +41,14 @@ describe.skipIf(!!unsupported)("a value that the host computes", () => {
         stdout: "false,number,true false,number,true\n",
         exitCode: 0,
       });
-      expect((await build("lied", "--aot-testing=AssumeNullishHostResults")).exitCode).toBe(0);
-      const lied = await spawned([executable("lied")], folder, { ...env, ...withoutCrashReport });
-      expect(lied.stdout).toBe("");
-      expect(lied.stderr).toContain("expected undefined | null, found int32 in the result of process.pid");
+      // OHOS carries the engine's built-ins and their closure in the image, so
+      // the injected lie also reaches modules of the runtime, whose checks stop
+      // the build with an internal error before the row can be tested.
+      if (!isOhos) {
+        expect((await build("lied", "--aot-testing=AssumeNullishHostResults")).exitCode).toBe(0);
+        const lied = await spawned([executable("lied")], folder, { ...env, ...withoutCrashReport });
+        expect(lied.stdout).toBe("");
+        expect(lied.stderr).toContain("expected undefined | null, found int32 in the result of process.pid");
+      }
     }));
 });

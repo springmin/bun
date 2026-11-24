@@ -1,5 +1,5 @@
 import { describe as describeOfBun, expect, test as testOfBun } from "bun:test";
-import { bunEnv, bunExe, isASAN, tempDir } from "harness";
+import { bunEnv, bunExe, isASAN, isOhos, tempDir } from "harness";
 import { readFileSync, statSync } from "node:fs";
 import { availableParallelism } from "node:os";
 import { join } from "node:path";
@@ -138,7 +138,22 @@ function hold(title: string, preloaded: string, list: string, parts: string[]) {
         const ends = [...new Set([...readFileSync(stopped, "utf8").split("\n").filter(Boolean), ...said])];
         if (ends.length) console.error(`${part}: child runs were stopped:\n${ends.slice(0, 30).join("\n")}`);
         const withoutCommandLine = canTrim ? named("trims ") : [];
-        const awaited = [...named(""), ...named("! "), ...named(process.arch + " "), ...withoutCommandLine];
+        // OHOS's trimmed image keeps what an executable needs to say that it
+        // is damaged, so a case named `not-ohos trims ` passes there and is
+        // expected to fail where trimming takes the command line away.
+        const withoutCommandLineNotHere = canTrim && !isOhos ? named("not-ohos trims ") : [];
+        // `not-ohos ` names a test that fails where the programs it starts run
+        // compiled on every other platform and passes on OHOS, where the image
+        // carries the engine's built-ins and what they reach.
+        const notHere = isOhos ? [] : named("not-ohos ");
+        const awaited = [
+          ...named(""),
+          ...named("! "),
+          ...named(process.arch + " "),
+          ...withoutCommandLine,
+          ...withoutCommandLineNotHere,
+          ...notHere,
+        ];
         // The names alone do not say what went wrong: of a test that fails and is not named, what the suite printed in front of its result.
         // Not of one that is passed over for asking for a frame: whoever reads the log by its "(fail)" lines would take a green suite for a red one.
         const wavering = [...named("~ "), ...(isASAN ? named("~ASAN ") : [])];
@@ -146,7 +161,8 @@ function hold(title: string, preloaded: string, list: string, parts: string[]) {
         for (const result of failed.filter(result => unnamed.includes(nameOf(result))))
           console.error([result, ...saidBefore(result).filter(Boolean).slice(0, 60)].join("\n"));
         expect(names.filter(name => !wavering.includes(name)).sort()).toEqual(awaited.sort());
-        for (const result of failed.filter(result => withoutCommandLine.includes(nameOf(result)))) {
+        const owesTheWords = [...withoutCommandLine, ...withoutCommandLineNotHere];
+        for (const result of failed.filter(result => owesTheWords.includes(nameOf(result)))) {
           const said = saidBefore(result).join("\n");
           expect(said).toContain("is damaged. Its embedded program can't be read.");
           expect(said).toContain('+   "exitCode": 1,');

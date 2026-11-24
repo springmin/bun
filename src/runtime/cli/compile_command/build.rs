@@ -1,6 +1,6 @@
 use bun_aot::engine::{
     EngineModuleId, ExecutableIdentity, TargetImageForm, describe_difference_of_runtime,
-    has_compiler, image_alignment, used_features, used_features_of_program,
+    has_compiler, image_alignment, used_features,
 };
 use bun_aot::statistics::{log_part_outside_stages, log_time_outside_stages};
 use bun_ast::Loader;
@@ -98,25 +98,12 @@ pub(crate) fn compile_to_executable(
     used.starts_workers_from_unseen_code = build.starts_workers_from_unseen_code
         && options.code_generation_from_strings != CodeGenerationFromStrings::Strict;
     used.can_reach_test_runner |= options.runs_tests || options.loads_code_from_disk;
-    let reported = (cfg!(target_env = "ohos")
-        && !options.trim.checks_only
-        && !options.omits_builtin_modules)
-        .then(|| {
-            let mut reported = used_features_of_program(&build.engine, &build.texts);
-            reported.starts_workers_from_unseen_code = used.starts_workers_from_unseen_code;
-            reported.can_reach_test_runner = used.can_reach_test_runner;
-            reported
-        });
+    // OHOS: the image keeps the engine's built-ins (see `runtime_roots`), and
+    // what they reach is what the executable holds. The report describes the
+    // same executable, so it is the plan's own decision.
     let trimming = trimming::decide_trimming(request, &used)?;
-    let report_used = reported.as_ref().unwrap_or(&used);
-    let report_trimming = if reported.is_some()
-        && options.explain.contains(bun_options_types::aot_options::ExplainSet::RUNTIME_USE)
-    {
-        Some(trimming::decide_trimming(request, report_used)?)
-    } else {
-        None
-    };
-    let report_trimming = report_trimming.as_ref().unwrap_or(&trimming);
+    let report_used = &used;
+    let report_trimming = &trimming;
     let untrimmed_outfile = bun_core::env_var::BUN_DEBUG_TEST_UNTRIMMED_OUTFILE
         .get_not_empty()
         .filter(|_| options.trim.removes_unused);

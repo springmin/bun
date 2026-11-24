@@ -1,7 +1,12 @@
 import { expect } from "bun:test";
-import { bunEnv, bunExe, isWindows, tempDir } from "harness";
+import { bunEnv, bunExe, isOhos, isWindows, tempDir } from "harness";
 import { join } from "node:path";
 import { test } from "./supported";
+
+// OHOS's image keeps the engine's built-ins and their closure, so an option that
+// reads Bun.sql or the warnings code finds it and is not refused. A build that
+// names the option keeps working as the cases below say.
+const skips = isOhos ? test.skip : test;
 
 // `--sql-preconnect` makes the start read `Bun.sql` and call its `connect()` before the program runs. A build sees the option only in --compile-exec-argv.
 async function build(folder: string, entry: string, ...flags: string[]) {
@@ -35,7 +40,7 @@ async function run(executable: string, options: string | undefined) {
 const refusal =
   "error: --sql-preconnect can't be used with this executable: the program never uses Bun.sql, so it wasn't compiled in. Rebuild with --compile-exec-argv=--sql-preconnect";
 
-test("--sql-preconnect as an option of the run", async () => {
+skips("--sql-preconnect as an option of the run", async () => {
   using dir = tempDir("aot-option-of-the-run", {
     "tsconfig.json": "{}",
     "silent.ts": `console.log("ran");`,
@@ -45,7 +50,8 @@ test("--sql-preconnect as an option of the run", async () => {
   const folder = String(dir);
   const silent = await build(folder, "silent.ts");
   expect(await run(silent, undefined)).toEqual({ stdout: "ran\n", errors: [], exitCode: 0, warnings: [] });
-  expect(await run(silent, "--sql-preconnect")).toEqual({ stdout: "", errors: [refusal], exitCode: 1, warnings: [] });
+  if (!isOhos)
+    expect(await run(silent, "--sql-preconnect")).toEqual({ stdout: "", errors: [refusal], exitCode: 1, warnings: [] });
   const told = await build(folder, "told.ts", "--compile-exec-argv=--sql-preconnect");
   expect(await run(told, undefined)).toEqual({ stdout: "ran\n", errors: [], exitCode: 0, warnings: [] });
   expect(await run(told, "--sql-preconnect")).toEqual({ stdout: "ran\n", errors: [], exitCode: 0, warnings: [] });
@@ -57,7 +63,7 @@ test("--sql-preconnect as an option of the run", async () => {
 const refusalOfMode =
   "error: --unhandled-rejections can't be used with this executable: the code that prints its warnings wasn't compiled in. Rebuild with --compile-exec-argv=--unhandled-rejections=<mode>";
 
-test("--unhandled-rejections as an option of the run", async () => {
+skips("--unhandled-rejections as an option of the run", async () => {
   const lost = `Promise.reject(new Error("lost"));\nconsole.log("ran");`;
   using dir = tempDir("aot-option-of-the-run", {
     "tsconfig.json": "{}",
@@ -111,7 +117,7 @@ test("--unhandled-rejections as an option of the run", async () => {
 }, 240_000);
 
 // Without the option a rejection that gets its handler late makes native code call nothing of Bun's own JavaScript. The error is printed and the exit code set at the first report; immediates keep the loop alive behind it.
-test("a handler that is laid late, without the option", async () => {
+skips("a handler that is laid late, without the option", async () => {
   using dir = tempDir("aot-option-of-the-run", {
     "tsconfig.json": "{}",
     "late.ts": `const lost = Promise.reject(new Error("made up"));

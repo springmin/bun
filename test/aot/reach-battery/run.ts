@@ -266,7 +266,7 @@ export async function battery(options: Options = {}): Promise<Verdict[]> {
     const { bavail, bsize } = statfsSync(folder);
     return bavail * bsize > jobs * 1_200_000_000;
   };
-  const place = ["/dev/shm", tmpdir()].find(hasRoom);
+  const place = ["/dev/shm", tmpdir()].find(folder => writable(folder) && hasRoom(folder));
   if (!place)
     return [
       { family: "", program: "", kind: "closed", word: "no room", said: `no room for ${jobs} jobs in ${tmpdir()}` },
@@ -544,4 +544,16 @@ if (import.meta.main) {
     `reach-battery: ${verdicts.length} programs | as plain ${count(verdicts, "as plain", "refused")} | dies ${count(verdicts, "dies")} | stops ${count(verdicts, "stops")} | wrong ${count(verdicts, "wrong")} | in ${seconds} s`,
   );
   process.exit(bad.length ? 1 : 0);
+}
+
+/** OHOS's /dev/shm exists but an app cannot make a folder in it, even where access() says it may. */
+function writable(folder: string): boolean {
+  try {
+    const probe = `${folder}/.bun-probe-${process.pid}`;
+    mkdirSync(probe);
+    rmSync(probe, { recursive: true, force: true });
+    return true;
+  } catch {
+    return false;
+  }
 }

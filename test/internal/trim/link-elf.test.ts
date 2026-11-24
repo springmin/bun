@@ -1,6 +1,6 @@
 import { trimExecutable } from "bun:internal-for-testing";
 import { describe, expect, setDefaultTimeout, test } from "bun:test";
-import { tempDir } from "harness";
+import { isOhos, tempDir } from "harness";
 import { closeSync, existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { constants } from "node:os";
 import { join } from "node:path";
@@ -140,9 +140,21 @@ describeLink("a trimmable link", () => {
       expectRetained(result, ["main", "retained", "Bun__abortForRemovedFeature"]);
       expectCleanRuns(result);
       expect(summary.removedBytes).toBeGreaterThan(100_000);
-      expect(summary.fileBytesSaved).toBeGreaterThanOrEqual(128 * 1024);
-      const sizeOf = (name: string) => statSync(join(folder, name)).size;
-      expect(sizeOf("program") - sizeOf("trimmed")).toBe(summary.fileBytesSaved);
+      if (isOhos) {
+        // OHOS links with 4 KiB-aligned segments (the trimmer cuts on the
+        // platform page size, 64 KiB for aarch64), so the model leaves the file
+        // whole: the features are still removed in place, nothing is shortened.
+        expect(summary.fileBytesSaved).toBe(0);
+      } else {
+        expect(summary.fileBytesSaved).toBeGreaterThanOrEqual(128 * 1024);
+      }
+      // OHOS signs what `trimExecutable` writes (a `.codesign` section, its
+      // name table and the section headers add a few kilobytes), so the file is
+      // no longer exactly `fileBytesSaved` shorter.
+      if (!isOhos) {
+        const sizeOf = (name: string) => statSync(join(folder, name)).size;
+        expect(sizeOf("program") - sizeOf("trimmed")).toBe(summary.fileBytesSaved);
+      }
       expect(await exitCodeOf(folder, "trimmed", guardedArguments)).toBe(70);
       expect(await exitCodeOf(folder, "program", guardedArguments)).toBeLessThan(64);
     },

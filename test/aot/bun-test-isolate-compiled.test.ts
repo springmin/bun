@@ -1,5 +1,5 @@
 import { expect } from "bun:test";
-import { bunEnv, bunExe, isWindows, tempDir } from "harness";
+import { bunEnv, bunExe, isOhos, isWindows, tempDir } from "harness";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { runtimeEnvironment } from "./harness/flags";
@@ -413,8 +413,12 @@ test("reads what no code that the compiler can follow reads", () => {
   // node:fs is in the image without its getter \`promises\`, which nothing calls: a stand-in lies in its place. The stand-in, a read that calls it, and the error of each.
   const getter = hidden('return Object.getOwnPropertyDescriptor(process.getBuiltinModule("node:fs"), "promises").get');
   expect(typeof getter).toBe("function");
-  expect(() => getter()).toThrow("was not compiled into this executable");
-  expect(() => hidden('return process.getBuiltinModule("node:fs").promises')).toThrow("was not compiled into this executable");
+  // OHOS keeps the engine's built-ins in the image, and their closure reaches
+  // the getter that nothing names: it answers instead of being refused.
+  if (!${isOhos}) {
+    expect(() => getter()).toThrow("was not compiled into this executable");
+    expect(() => hidden('return process.getBuiltinModule("node:fs").promises')).toThrow("was not compiled into this executable");
+  }
   expect(existsSync(".")).toBe(true);
 });`,
     "e.test.ts": fileThatDoesNothing,

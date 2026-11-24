@@ -1,6 +1,6 @@
 // Runs alone: each program is started with little memory, and it asks for a gigabyte.
 import { describe, expect } from "bun:test";
-import { bunEnv, bunExe, isASAN, isDebug, isLinux, tempDir } from "harness";
+import { bunEnv, bunExe, isASAN, isDebug, isLinux, isOhos, tempDir } from "harness";
 import { join } from "node:path";
 import { test } from "./supported";
 
@@ -41,7 +41,8 @@ console.log(which, r, effects, box.n, list.length, map.size, reader?.pos);
 
 const withLittleMemory = ["/bin/sh", "-c", `ulimit -d 900000; exec "$@"`, "--"];
 
-describe.skipIf(!isLinux || isASAN || isDebug)("out of memory comes at the read of a rope", () => {
+// OHOS's data limit does not end the program within the case's time.
+describe.skipIf(!isLinux || isASAN || isDebug || isOhos)("out of memory comes at the read of a rope", () => {
   test("a compiled program has done what plain Bun has done", async () => {
     using dir = tempDir("aot-out-of-memory-of-ropes", { "ropes.mjs": program });
     const executable = join(String(dir), "ropes");

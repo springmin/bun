@@ -1,8 +1,12 @@
-import { beforeAll, describe, expect, test } from "bun:test";
-import { bunEnv, bunExe, isLinux, isMacOS, isWindows, tempDir } from "harness";
+import { beforeAll, describe, expect, setDefaultTimeout, test } from "bun:test";
+import { bunEnv, bunExe, isLinux, isMacOS, isOhos, isWindows, tempDir } from "harness";
 import { mkdirSync, readdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { A, B, C, cases, tree, type Case, type Entry } from "./import-meta-glob-cases";
+
+// Each case builds and usually starts a program; the globs of the long-path
+// cases walk directories that a phone takes longer to read.
+setDefaultTimeout(isOhos ? 120_000 : 5_000);
 
 async function run(cwd: string, args: string[], env: Record<string, string> = {}) {
   await using proc = Bun.spawn({
@@ -504,7 +508,9 @@ describe.concurrent("import.meta.glob", () => {
     });
   });
 
-  test.skipIf(isWindows)("in a module whose directory is /", async () => {
+  // OHOS does not let an app list `/` (EACCES), so a glob under the root of
+  // the virtual file system cannot run; on Linux the directory is readable.
+  test.skipIf(isWindows || isOhos)("in a module whose directory is /", async () => {
     using dir = tempDir("import-meta-glob-root", {
       "modules/a.ts": `export default "a";`,
       "build.ts": `

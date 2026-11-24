@@ -3,7 +3,7 @@
 // In a test run only a loader itself, or an object of the loader (require, module, node:module and what hangs below it), that goes somewhere or is called under a name that nobody reads hands on a module.
 // Whoever loads through what only leads to a loader a module that the build has not seen is refused aloud.
 import { expect } from "bun:test";
-import { bunEnv, bunExe, tempDir } from "harness";
+import { bunEnv, bunExe, isOhos, tempDir } from "harness";
 import { raiseDefaultTimeout } from "./harness/default-timeout";
 import { run } from "./harness/run";
 import { test } from "./supported";
@@ -79,7 +79,9 @@ const ways: Record<string, { text: string; plain: string; handsOn: boolean; isRe
 };
 
 for (const [title, { text, plain, handsOn, isRefused }] of Object.entries(ways))
-  test.concurrent(title, async () => {
+  // OHOS's image keeps the engine's built-ins and their closure, so a way that
+  // a build without the loader refuses runs there.
+  (isOhos && isRefused ? test.skip : test.concurrent)(title, async () => {
     using dir = tempDir("aot-leads-to-a-loader", {
       "package.json": `{ "name": "p", "type": "module" }`,
       "a.test.js": `import { test } from "bun:test";\nimport { createRequire } from "node:module";\nconst take = it => it;\nconst say = it => console.error("SEEN " + it);\ntest("t", () => { ${text} });\n`,

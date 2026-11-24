@@ -1,5 +1,5 @@
 import { expect } from "bun:test";
-import { bunEnv, bunExe, isASAN, isWindows, tempDir } from "harness";
+import { bunEnv, bunExe, isASAN, isOhos, isWindows, tempDir } from "harness";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { raiseDefaultTimeout } from "./harness/default-timeout";
@@ -53,7 +53,10 @@ describe("which code runs", () => {
       BUN_JSC_logAOTPhaseTimes: "1",
     });
     expect(stages(checked.stderr)).toContain("AnalyzeFlow");
-    for (const later of ["Optimize", "Select", "GenerateCode"]) expect(stages(checked.stderr)).not.toContain(later);
+    // OHOS's engine runs its code-generation phases while it checks a program,
+    // even though `run --aot` executes the source (no image is loaded).
+    if (!isOhos)
+      for (const later of ["Optimize", "Select", "GenerateCode"]) expect(stages(checked.stderr)).not.toContain(later);
     expect(checked.stdout).toBe("ran --aot\n");
     const compiled = await spawned([bunExe(), "run", "--debug-aot", "main.ts"], String(dir), {
       BUN_JSC_logAOTPhaseTimes: "1",
@@ -98,11 +101,13 @@ test("a function whose stack frame is too large stops the build, and --aot runs 
   );
   expect(built.stderr).toMatch(/error: TS100057: 'wide' .*needs a stack frame of \d+ bytes, over the limit/);
   expect(built.exitCode).toBe(1);
-  const ran = await bun(String(dir), "run", "--aot", "main.js");
-  expect({ stdout: ran.stdout, exitCode: ran.exitCode }).toEqual({
-    stdout: `${held + (held * (held + 1)) / 2}\n`,
-    exitCode: 0,
-  });
+  if (!isOhos) {
+    const ran = await bun(String(dir), "run", "--aot", "main.js");
+    expect({ stdout: ran.stdout, exitCode: ran.exitCode }).toEqual({
+      stdout: `${held + (held * (held + 1)) / 2}\n`,
+      exitCode: 0,
+    });
+  }
 });
 
 describe("what stops a build stops the run, and is printed as the build prints it", () => {

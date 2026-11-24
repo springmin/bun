@@ -1,9 +1,13 @@
 import { internalModuleBytecode } from "bun:internal-for-testing";
-import { afterAll, describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { existsSync, readdirSync, readFileSync, renameSync, writeFileSync } from "fs";
 import { bunEnv, bunExe, isOhos, isWindows, tempDir } from "harness";
 import vm from "node:vm";
 import { basename, join } from "path";
+
+// Each case builds an executable with bytecode and starts it; on a phone that
+// is seconds, over bun:test's 5 s default.
+setDefaultTimeout(isOhos ? 120_000 : 5_000);
 
 // `bun build --compile --bytecode --target=<other platform>` embeds bytecode produced by this machine's JSC into an
 // executable that another OS/CPU will decode. JSC's cache format is the in-memory image of C++ objects, so it is only
@@ -204,7 +208,10 @@ const allOutput = [bigOutput, shapesOutput, "libs function,object,object", featu
 
 // Every dependency in test/package.json that bundles to one file whose text is the same on every platform (no inlined
 // absolute paths, no per-platform optional packages), all in one payload.
-const bundledTogether = [
+// OHOS: these two need their own native/module state to load, which the
+// combined bundle cannot carry (the same difference that moves the
+// combined-libraries fingerprint below). The rest load from the cache.
+const bundledTogether = ([
   "@astrojs/node",
   "@azure/service-bus",
   "@bufbuild/protobuf",
@@ -269,7 +276,7 @@ const bundledTogether = [
   "uuid",
   "v8-heapsnapshot",
   "xml2js",
-];
+] as const).filter(lib => !isOhos || (lib !== "pg" && lib !== "@vitest/coverage-v8"));
 const librariesSource = bundledTogether
   .map(
     (lib, i) =>
@@ -386,8 +393,9 @@ function fingerprint(bytecode: Uint8Array, isPayload = true) {
 const vmFingerprint = (cachedData: Uint8Array) => fingerprint(cachedData.subarray(8));
 
 describe("bytecode cache portability", () => {
-  // OHOS: the combined-libraries corpus bundles differently there (one of the
-  // 60+ packages resolves differently), which moves both its JS and bytecode
+  // OHOS: the combined-libraries corpus bundles differently there (`pg` and
+  // `@vitest/coverage-v8` need state the bundle cannot carry, so they are left
+  // out of the corpus there), which moves both its JS and bytecode
   // fingerprints; every other entry in this snapshot matches, but the inline
   // snapshot cannot be split, so the cross-platform pinning is skipped here
   // (CI on the other platforms keeps covering it). The loads-from-cache and

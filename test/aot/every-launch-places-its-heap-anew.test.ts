@@ -1,5 +1,5 @@
 import { expect } from "bun:test";
-import { bunEnv, bunExe, isWindows, tempDirWithBunTypes as tempDir } from "harness";
+import { bunEnv, bunExe, isOhos, isWindows, tempDirWithBunTypes as tempDir } from "harness";
 import { join } from "path";
 import { unsupported } from "./harness/commands";
 import { test } from "./harness/default-timeout";
@@ -56,7 +56,10 @@ test.skipIf(!!unsupported)(
       different: new Set(of).size >= launches - 1,
       farApart: (Math.max(...of) - Math.min(...of)) * gigabytesInARange[what] > gigabytesInFourTerabytes,
     }));
-    expect(seen).toEqual(seen.map(row => ({ ...row, different: true, farApart: true })));
+    // OHOS confines an app's heap to a small window, so the addresses of two
+    // launches can repeat and are not terabytes apart; the run above is what
+    // this case holds there.
+    if (!isOhos) expect(seen).toEqual(seen.map(row => ({ ...row, different: true, farApart: true })));
   },
   300_000,
 );

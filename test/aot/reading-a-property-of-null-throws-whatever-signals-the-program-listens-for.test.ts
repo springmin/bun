@@ -1,5 +1,5 @@
 import { expect } from "bun:test";
-import { bunEnv, bunExe, isASAN, isLinux, isWindows, tempDir } from "harness";
+import { bunEnv, bunExe, isASAN, isLinux, isOhos, isWindows, tempDir } from "harness";
 import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { locksEnvironment } from "./hardened";
@@ -144,7 +144,8 @@ describe.concurrent("reading a property of null throws a TypeError", () => {
   }, 120_000);
 
   // A build that tests for null in front of the load raises no signal, and the case above would hold whatever the program listened for.
-  test.skipIf(!isLinux || isASAN || !!without("a C compiler"))(
+  // OHOS denies ptrace to an app, so the sender cannot follow the read.
+  test.skipIf(!isLinux || isASAN || isOhos || !!without("a C compiler"))(
     "and in that program a read of null raises the signal",
     async () => {
       const [executable, built] = await Promise.all([

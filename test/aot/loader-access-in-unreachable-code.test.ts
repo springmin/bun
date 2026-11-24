@@ -89,7 +89,7 @@ test("a door in a function that nothing reaches brings no built-in module along"
 
 // A goal that is not met yet: beside a load by a name that nobody reads, reached or not, the tables of the executable list every public module of Bun's own that the standard streams load.
 // Once it is met this test fails: put the form back into the list above.
-test.failing(
+test(
   "a load by name in a function that only a function nobody calls calls brings no built-in module along: 46 KB of tables for at most 32 KB",
   () =>
     expectNoGrowth(

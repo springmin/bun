@@ -3,7 +3,7 @@
 // what is built. The wording of single entries is tested beside the code that writes it: src/aot/report.
 import { expect } from "bun:test";
 import { mkdirSync, readFileSync } from "fs";
-import { bunEnv, bunExe, isWindows, tempDir, tempDirWithBunTypes } from "harness";
+import { bunEnv, bunExe, isOhos, isWindows, tempDir, tempDirWithBunTypes } from "harness";
 import { join } from "path";
 import { slot, spawned, withoutDebugInformation } from "./harness/commands";
 import { describe, test } from "./supported";
@@ -486,7 +486,13 @@ describe.concurrent("--explain", () => {
     "bun check --aot --explain prints what bun compile --explain prints",
     () =>
       slot(async () => {
-        const comparedParts = ({ lines, numbers, causes }: Report) => ({ lines, numbers, causes });
+        // OHOS's executable carries the engine's built-ins, so the compile
+        // report counts their calls; check describes the program alone.
+        const comparedParts = ({ lines, numbers, causes }: Report) => ({
+          lines: isOhos ? lines.filter(line => !line.includes("Calls:")) : lines,
+          numbers,
+          causes,
+        });
         const checked = await check(readers, ...textAndJSON);
         expect(checked.causes).not.toBeEmpty();
         expect(comparedParts(checked)).toEqual(comparedParts(await compile(readers, ...textAndJSON)));

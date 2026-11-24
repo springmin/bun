@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { bunEnv, bunExe, isDebug, isLinux, isMacOS, isWindows, tempDir } from "harness";
+import { bunEnv, bunExe, isDebug, isLinux, isMacOS, isOhos, isWindows, tempDir } from "harness";
 import {
   closeSync,
   copyFileSync,
@@ -188,8 +188,9 @@ test.skipIf(isMacOS)(
 
 // The graph ends with `Offsets`, then the trailer. `Offsets` is byte_count u64, modules_ptr { offset u32, length u32 },
 // entry_point_id u32, compile_exec_argv_ptr { offset u32, length u32 }, flags u32.
-// macOS is skipped because a patched Mach-O needs a new signature. Every platform uses the same reader.
-test.skipIf(isMacOS)(
+// macOS is skipped because a patched Mach-O needs a new signature; OHOS refuses
+// to exec a patched ELF for the same reason. Every other platform uses the same reader.
+test.skipIf(isMacOS || isOhos)(
   "reports an out-of-range entry point ID at startup",
   async () => {
     using dir = tempDir("compile-corrupted-graph", {
@@ -215,8 +216,9 @@ test.skipIf(isMacOS)(
 
 // A module starts with three { offset u32, length u32 }: name, contents, source map. A source map starts with the
 // number of files u32 and the length of the mappings u32, then one { offset u32, length u32 } per file name.
-// macOS is skipped because a patched Mach-O needs a new signature. Every platform uses the same reader.
-test.skipIf(isMacOS)(
+// macOS is skipped because a patched Mach-O needs a new signature, and OHOS
+// refuses a patched ELF. Every other platform uses the same reader.
+test.skipIf(isMacOS || isOhos)(
   "prints a stack trace when the embedded source map points outside itself",
   async () => {
     using dir = tempDir("compile-corrupted-sourcemap", {
