@@ -1290,7 +1290,9 @@ test("--parallel: a test writing garbage to fd 3 gets its worker killed and the 
 });
 
 // The coordinator is stopped meanwhile, so it finds a worker's last frame and its end together.
-describe.skipIf(!isLinux)("--parallel: a worker that has exited gets no file", () => {
+// OHOS keeps the threads of a reaped child in `S` (the process is a zombie
+// until the waiter thread reaps it), so `untilEveryThreadIs` never sees them go.
+describe.skipIf(!isLinux || isOhos)("--parallel: a worker that has exited gets no file", () => {
   const exitAfterTheFile = `setTimeout(() => process.exit(0));`;
   const exitAfterReady = `writeSync(3, Buffer.alloc(5)); process.exit(0);`;
 

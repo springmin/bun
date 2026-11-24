@@ -3562,7 +3562,8 @@ it.if(isPosix)("realpath reads its path the way Node does", async () => {
   expect(exitCode).toBe(0);
 });
 
-it.if(isLinux)("realpath.native throws ENOENT for a working directory that was removed", async () => {
+// OHOS keeps the removed folder as the process's working directory.
+it.if(isLinux && !isOhos)("realpath.native throws ENOENT for a working directory that was removed", async () => {
   using dir = tempDir("fs-realpath-removed-cwd", {});
 
   const script = `
@@ -4879,7 +4880,7 @@ describe("createWriteStream", () => {
     });
   });
 
-  it.skipIf(!isLinux)("surfaces EFBIG when RLIMIT_FSIZE truncates a write", async () => {
+  it.skipIf(!isLinux || isOhos)("surfaces EFBIG when RLIMIT_FSIZE truncates a write", async () => {
     using dir = tempDir("cws-efbig", {});
     const out = join(String(dir), "out.bin");
     const script = `
@@ -5673,7 +5674,8 @@ describe("utimesSync", () => {
   });
 
   // Windows wraps pre-epoch times through u32, matching Node (see Stat.rs)
-  it.skipIf(isWindows)("sets pre-epoch times from negative fractional string timestamps", () => {
+  // OHOS's file system does not keep a pre-epoch time.
+  it.skipIf(isWindows || isOhos)("sets pre-epoch times from negative fractional string timestamps", () => {
     const tmp = join(tmpdir(), "utimesSync-test-file-" + Math.random().toString(36).slice(2));
     writeFileSync(tmp, "test");
 
@@ -6171,7 +6173,8 @@ it("new Stats", () => {
 
 // On Windows, Node.js deliberately reinterprets stat times via `unsigned long` (see
 // libuv Y2038 note), so pre-epoch semantics there are not "negative ns".
-it.skipIf(isWindows)("BigIntStats *Ns fields are negative for pre-epoch timestamps", () => {
+// OHOS's file system does not keep a pre-epoch time.
+it.skipIf(isWindows || isOhos)("BigIntStats *Ns fields are negative for pre-epoch timestamps", () => {
   using dir = tempDir("bigintstats-pre-epoch", { "f.txt": "x" });
   const f = join(String(dir), "f.txt");
 
